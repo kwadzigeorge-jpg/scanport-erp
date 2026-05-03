@@ -6,6 +6,7 @@ const {
   confirmEntry, startExamination, completeExamination, confirmExit,
   listTransactions, getTransaction, override, verifyQR,
   listHoldingAreas, baysView, statusSummary,
+  reinstateContainer,
 } = require('../controllers/containerController');
 
 // Public: QR scan verification (no auth required — scanned at gate)
@@ -37,5 +38,8 @@ router.get('/:id', requirePermission('container:view'), getTransaction);
 
 // ── Supervisor override ──────────────────────────────────────────────────────
 router.put('/:id/override', requirePermission('container:override'), override);
+
+// ── Admin: reinstate a mistakenly released/cancelled container ───────────────
+router.post('/:id/reinstate', requirePermission('container:override'), reinstateContainer);
 
 module.exports = router;

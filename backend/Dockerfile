@@ -16,9 +16,17 @@ RUN apk add --no-cache postgresql-client
 EXPOSE 5000
 
 # Wait for DB, run migrations, seed, then start
+# Supports both DATABASE_URL (Fly.io/cloud) and individual DB_* vars (Docker Compose)
 CMD sh -c '\
-  echo "Waiting for database..." && \
-  until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -q; do sleep 1; done && \
+  if [ -n "$DATABASE_URL" ]; then \
+    _host=$(echo "$DATABASE_URL" | sed -E "s|.*@([^:/]+).*|\1|"); \
+    _port=$(echo "$DATABASE_URL" | sed -E "s|.*:([0-9]+)/.*|\1|" | grep -E "^[0-9]+$" || echo "5432"); \
+    _user=$(echo "$DATABASE_URL" | sed -E "s|[^/]+//([^:@]+).*|\1|"); \
+  else \
+    _host="$DB_HOST"; _port="${DB_PORT:-5432}"; _user="${DB_USER:-postgres}"; \
+  fi && \
+  echo "Waiting for database at $_host:$_port..." && \
+  until pg_isready -h "$_host" -p "$_port" -U "$_user" -q; do sleep 2; done && \
   echo "DB ready. Running migrations..." && \
   node migrations/run.js && \
   node seeds/run.js && \

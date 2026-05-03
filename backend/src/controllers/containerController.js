@@ -601,6 +601,68 @@ async function override(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Reinstate Container (Admin only) ────────────────────────────────────────
+async function reinstateContainer(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { reinstateToStatus, reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'A reason is required to reinstate a container.' });
+    }
+
+    // Fetch the transaction
+    const { rows } = await db.query(
+      `SELECT ct.*, ha.name AS area_name, b.bay_code
+       FROM container_transactions ct
+       LEFT JOIN holding_areas ha ON ha.id = ct.holding_area_id
+       LEFT JOIN bays b ON b.id = ct.bay_id
+       WHERE ct.id::text=$1 OR ct.transaction_id=$1`,
+      [id]
+    );
+    const txn = rows[0];
+    if (!txn) return res.status(404).json({ error: 'Transaction not found.' });
+
+    if (!['EXITED', 'CANCELLED'].includes(txn.status)) {
+      return res.status(409).json({ error: `Only EXITED or CANCELLED containers can be reinstated. Current status: ${txn.status}.` });
+    }
+
+    // Determine which status to reinstate to
+    const validReinstateTo = ['EXAMINATION_COMPLETED', 'UNDER_EXAMINATION', 'ARRIVED_AT_BAY', 'ARRIVED_AT_BOOTH'];
+    const targetStatus = reinstateToStatus && validReinstateTo.includes(reinstateToStatus)
+      ? reinstateToStatus
+      : 'EXAMINATION_COMPLETED';
+
+    await db.query(
+      `UPDATE container_transactions
+       SET status=$1, time_out=NULL, dwell_minutes=NULL,
+           confirmed_exit_by=NULL, released_by=NULL,
+           notes=COALESCE(notes || E'\n', '') || $2
+       WHERE id=$3`,
+      [targetStatus, `[REINSTATED by ${req.user.username} on ${new Date().toISOString()}] Reason: ${reason}`, txn.id]
+    );
+
+    await logAudit(req, 'container:reinstated', 'container_transaction', txn.id, {
+      containerNumber: txn.container_number,
+      waybillNumber: txn.waybill_number,
+      previousStatus: txn.status,
+      reinstatedTo: targetStatus,
+      reason,
+    });
+
+    const io = req.app.get('io');
+    if (io) io.to('operations').emit('transaction:updated', { id: txn.id, status: targetStatus });
+
+    return res.json({
+      message: `Container reinstated to ${targetStatus}.`,
+      transactionId: txn.transaction_id,
+      containerNumber: txn.container_number,
+      previousStatus: txn.status,
+      currentStatus: targetStatus,
+    });
+  } catch (err) { next(err); }
+}
+
 // ─── QR Verify (public) ───────────────────────────────────────────────────────
 async function verifyQR(req, res, next) {
   try {
@@ -766,5 +828,6 @@ module.exports = {
   confirmEntry, startExamination, completeExamination, confirmExit,
   listTransactions, getTransaction, override, verifyQR,
   listHoldingAreas, baysView, statusSummary,
+  reinstateContainer,
   STATUSES, ACTIVE_STATUSES,
 };

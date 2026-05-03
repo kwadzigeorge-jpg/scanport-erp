@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { usersApi, reportsApi } from '../services/api';
+import { usersApi, reportsApi, containersApi } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
@@ -9,15 +9,17 @@ import {
   Settings, UserPlus, Users, Edit, Key, Shield,
   ToggleLeft, ToggleRight, Search, Filter, X,
   Lock, Unlock, LogOut, Eye, Activity, RefreshCw,
-  CheckCircle, AlertTriangle, Clock, Monitor, ChevronRight
+  CheckCircle, AlertTriangle, Clock, Monitor, ChevronRight,
+  RotateCcw
 } from 'lucide-react';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 const TABS = [
-  { key: 'users',    label: 'User Management', icon: Users },
-  { key: 'sessions', label: 'Active Sessions',  icon: Monitor },
-  { key: 'roles',    label: 'Roles & Permissions', icon: Shield },
-  { key: 'config',   label: 'System Config',   icon: Settings },
+  { key: 'users',     label: 'User Management',    icon: Users },
+  { key: 'sessions',  label: 'Active Sessions',     icon: Monitor },
+  { key: 'roles',     label: 'Roles & Permissions', icon: Shield },
+  { key: 'config',    label: 'System Config',       icon: Settings },
+  { key: 'reinstate', label: 'Reinstate Container', icon: RotateCcw },
 ];
 
 export default function AdminPage() {
@@ -25,7 +27,7 @@ export default function AdminPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Tab bar */}
-      <div className="bg-white border-b border-gray-200 px-4 md:px-6 flex items-center gap-0.5 shrink-0">
+      <div className="bg-white border-b border-gray-200 px-4 md:px-6 flex items-center gap-0.5 shrink-0 overflow-x-auto">
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={clsx(
@@ -38,10 +40,11 @@ export default function AdminPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
-        {tab === 'users'    && <UsersPanel />}
-        {tab === 'sessions' && <SessionsPanel />}
-        {tab === 'roles'    && <RolesPanel />}
-        {tab === 'config'   && <ConfigPanel />}
+        {tab === 'users'     && <UsersPanel />}
+        {tab === 'sessions'  && <SessionsPanel />}
+        {tab === 'roles'     && <RolesPanel />}
+        {tab === 'config'    && <ConfigPanel />}
+        {tab === 'reinstate' && <ReinstatePanel />}
       </div>
     </div>
   );
@@ -800,6 +803,154 @@ function ConfigPanel() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ─── Reinstate Container Panel ────────────────────────────────────────────────
+const REINSTATE_STATUSES = [
+  { value: 'EXAMINATION_COMPLETED', label: 'Examination Completed' },
+  { value: 'UNDER_EXAMINATION',     label: 'Under Examination' },
+  { value: 'ARRIVED_AT_BAY',        label: 'Arrived at Bay' },
+  { value: 'ARRIVED_AT_BOOTH',      label: 'Arrived at Booth' },
+];
+
+function ReinstatePanel() {
+  const queryClient = useQueryClient();
+  const [search, setSearch]   = useState('');
+  const [selected, setSelected] = useState(null);
+  const [reason, setReason]   = useState('');
+  const [targetStatus, setTargetStatus] = useState('EXAMINATION_COMPLETED');
+  const [confirmed, setConfirmed] = useState(false);
+
+  const { data, isLoading, refetch } = useQuery(
+    ['exited-containers', search],
+    () => containersApi.list({ status: 'EXITED,CANCELLED', containerNumber: search || undefined, page: 1, limit: 30 }),
+    { select: r => r.data }
+  );
+
+  const mutation = useMutation(
+    () => containersApi.reinstate(selected.id, { reinstateToStatus: targetStatus, reason }),
+    {
+      onSuccess: (res) => {
+        toast.success(`${res.data.containerNumber} reinstated to ${res.data.currentStatus}`);
+        setSelected(null); setReason(''); setConfirmed(false);
+        queryClient.invalidateQueries('exited-containers');
+        refetch();
+      },
+      onError: (err) => toast.error(err.response?.data?.error || 'Reinstate failed'),
+    }
+  );
+
+  const rows = data?.transactions || [];
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3">
+        <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+        <div className="text-sm text-amber-800">
+          <p className="font-semibold mb-1">Admin action — use with care</p>
+          <p>Reinstating a container reverses its exit and returns it to an active status. All reinstatements are logged in the audit trail.</p>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <h3 className="font-semibold text-gray-800">Find Exited / Cancelled Container</h3>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              className="input pl-8 w-full"
+              placeholder="Container number, waybill, or transaction ID"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <button onClick={() => refetch()} className="btn-secondary flex items-center gap-1.5 px-3">
+            <RefreshCw size={14} />
+          </button>
+        </div>
+
+        {isLoading && <p className="text-sm text-gray-500 py-2">Searching...</p>}
+
+        {rows.length > 0 && (
+          <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden">
+            {rows.map(row => (
+              <button key={row.id} onClick={() => { setSelected(row); setReason(''); setConfirmed(false); }}
+                className={clsx(
+                  'w-full text-left px-4 py-3 flex items-center justify-between hover:bg-blue-50 transition-colors',
+                  selected?.id === row.id && 'bg-blue-50 border-l-4 border-blue-500'
+                )}>
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">{row.container_number}</p>
+                  <p className="text-xs text-gray-500">{row.transaction_id} · {row.waybill_number} · {row.agent_name}</p>
+                </div>
+                <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full',
+                  row.status === 'EXITED' ? 'bg-gray-100 text-gray-600' : 'bg-red-100 text-red-600'
+                )}>{row.status}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!isLoading && rows.length === 0 && search && (
+          <p className="text-sm text-gray-500 py-2">No exited or cancelled containers found.</p>
+        )}
+      </div>
+
+      {/* Reinstate form */}
+      {selected && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+            <RotateCcw size={16} className="text-blue-600" />
+            Reinstate: {selected.container_number}
+          </h3>
+
+          <div className="grid grid-cols-2 gap-3 text-sm bg-gray-50 rounded-lg p-3">
+            <div><span className="text-gray-500">Transaction:</span> <span className="font-mono font-medium">{selected.transaction_id}</span></div>
+            <div><span className="text-gray-500">Waybill:</span> <span className="font-medium">{selected.waybill_number}</span></div>
+            <div><span className="text-gray-500">Agent:</span> <span className="font-medium">{selected.agent_name}</span></div>
+            <div><span className="text-gray-500">Current status:</span> <span className="font-medium text-red-600">{selected.status}</span></div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Reinstate to status</label>
+            <select className="input w-full" value={targetStatus} onChange={e => setTargetStatus(e.target.value)}>
+              {REINSTATE_STATUSES.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Reason <span className="text-red-500">*</span></label>
+            <textarea
+              className="input w-full h-20 resize-none"
+              placeholder="Explain why this container is being reinstated..."
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+            />
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)}
+              className="rounded border-gray-300 text-blue-600" />
+            <span className="text-sm text-gray-700">I confirm this reinstatement is authorised and will be audited</span>
+          </label>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => mutation.mutate()}
+              disabled={!reason.trim() || !confirmed || mutation.isLoading}
+              className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+              <RotateCcw size={15} />
+              {mutation.isLoading ? 'Reinstating...' : 'Reinstate Container'}
+            </button>
+            <button onClick={() => setSelected(null)} className="btn-secondary">Cancel</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -71,6 +71,7 @@ export const containersApi = {
   list:          (params) => api.get('/containers', { params }),
   get:           (id)     => api.get(`/containers/${id}`),
   override:      (id, d)  => api.put(`/containers/${id}/override`, d),
+  reinstate:     (id, d)  => api.post(`/containers/${id}/reinstate`, d),
 
   // Reference
   holdingAreas:  ()       => api.get('/containers/holding-areas'),
@@ -94,9 +95,17 @@ export const dashboardApi = {
 
 // ─── Reports ──────────────────────────────────────────────────────────────────
 export const reportsApi = {
+  // New analytics
+  operationsDashboard: (p) => api.get('/reports/operations-dashboard', { params: p }),
+  dwellAnalysis:       (p) => api.get('/reports/dwell-analysis', { params: p }),
+  areaPerformance:     (p) => api.get('/reports/area-performance', { params: p }),
+  agentPerf:           (p) => api.get('/reports/agent-performance', { params: p }),
+  slaExceptions:       (p) => api.get('/reports/sla-exceptions', { params: p }),
+  export:              (p) => api.get('/reports/export', { params: p, responseType: 'blob' }),
+
+  // Legacy
   daily:           (p) => api.get('/reports/daily', { params: p }),
   dwellTime:       (p) => api.get('/reports/dwell-time', { params: p }),
-  agentPerf:       (p) => api.get('/reports/agent-performance', { params: p }),
   audit:           (p) => api.get('/reports/audit', { params: p }),
   exceptions:      (p) => api.get('/reports/exceptions', { params: p }),
   config:          ()  => api.get('/reports/config'),
