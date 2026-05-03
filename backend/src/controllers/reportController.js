@@ -472,6 +472,65 @@ async function exceptionReport(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Email Config ─────────────────────────────────────────────────────────────
+async function getEmailConfig(req, res, next) {
+  try {
+    const EMAIL_KEYS = ['alert_enabled', 'alert_recipients', 'daily_report_enabled', 'daily_report_time', 'daily_report_recipients'];
+    const { rows } = await db.query(`SELECT key, value FROM system_config WHERE key = ANY($1)`, [EMAIL_KEYS]);
+    const cfg = Object.fromEntries(rows.map(r => [r.key, r.value]));
+    const { isConfigured } = require('../services/emailService');
+    return res.json({
+      smtp_configured: isConfigured(),
+      alert_enabled: cfg.alert_enabled === 'true',
+      alert_recipients: (() => { try { return JSON.parse(cfg.alert_recipients || '[]'); } catch { return []; } })(),
+      daily_report_enabled: cfg.daily_report_enabled === 'true',
+      daily_report_time: cfg.daily_report_time || '17:00',
+      daily_report_recipients: (() => { try { return JSON.parse(cfg.daily_report_recipients || '[]'); } catch { return []; } })(),
+    });
+  } catch (err) { next(err); }
+}
+
+async function updateEmailConfig(req, res, next) {
+  try {
+    const { alert_enabled, alert_recipients, daily_report_enabled, daily_report_time, daily_report_recipients } = req.body;
+    const updates = [
+      ['alert_enabled',            String(!!alert_enabled)],
+      ['alert_recipients',         JSON.stringify(Array.isArray(alert_recipients) ? alert_recipients : [])],
+      ['daily_report_enabled',     String(!!daily_report_enabled)],
+      ['daily_report_time',        daily_report_time || '17:00'],
+      ['daily_report_recipients',  JSON.stringify(Array.isArray(daily_report_recipients) ? daily_report_recipients : [])],
+    ];
+    for (const [key, value] of updates) {
+      await db.query(
+        `INSERT INTO system_config (key, value, updated_by, updated_at) VALUES ($1,$2,$3,NOW())
+         ON CONFLICT (key) DO UPDATE SET value=$2, updated_by=$3, updated_at=NOW()`,
+        [key, value, req.user.id]
+      );
+    }
+    return res.json({ message: 'Email config saved.' });
+  } catch (err) { next(err); }
+}
+
+async function testEmail(req, res, next) {
+  try {
+    const { sendEmail, verifyConnection } = require('../services/emailService');
+    const check = await verifyConnection();
+    if (!check.ok) return res.status(400).json({ error: `SMTP connection failed: ${check.reason}` });
+    const to = req.body.to || req.user.email;
+    if (!to) return res.status(400).json({ error: 'No recipient — provide "to" or ensure your user has an email address.' });
+    await sendEmail({
+      to,
+      subject: 'ScanPort ERP — Test Email',
+      html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;border:1px solid #e5e7eb;border-radius:10px">
+        <h2 style="color:#1e40af">&#10003; SMTP is working</h2>
+        <p>This test email confirms that ScanPort ERP can send emails from your configured SMTP server.</p>
+        <p style="color:#6b7280;font-size:13px">SLA breach alerts and daily reports will be delivered to the recipient addresses you configure in the Email &amp; Alerts settings.</p>
+      </div>`,
+    });
+    return res.json({ message: `Test email sent to ${to}.` });
+  } catch (err) { next(err); }
+}
+
 // ─── System Config ────────────────────────────────────────────────────────────
 async function getSystemConfig(req, res, next) {
   try {
@@ -499,4 +558,5 @@ module.exports = {
   dailyReport, dwellTimeReport, agentPerformanceReport, auditTrail,
   exceptionReport, getSystemConfig, updateSystemConfig,
   operationsDashboard, dwellAnalysis, areaPerformance, slaExceptions, exportReport,
+  getEmailConfig, updateEmailConfig, testEmail,
 };

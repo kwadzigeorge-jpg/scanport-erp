@@ -5,6 +5,7 @@ const {
   dailyReport, dwellTimeReport, agentPerformanceReport,
   auditTrail, exceptionReport, getSystemConfig, updateSystemConfig,
   operationsDashboard, dwellAnalysis, areaPerformance, slaExceptions, exportReport,
+  getEmailConfig, updateEmailConfig, testEmail,
 } = require('../controllers/reportController');
 
 router.use(authenticate);
@@ -22,6 +23,11 @@ router.get('/dwell-time',        requirePermission('reports:view'), dwellTimeRep
 router.get('/agent-performance', requirePermission('reports:view'), agentPerformanceReport);
 router.get('/exceptions',        requirePermission('reports:view'), exceptionReport);
 router.get('/audit',             requirePermission('audit:view'),   auditTrail);
+
+// ── Email & alerts config ─────────────────────────────────────────────────────
+router.get('/email-config',  requirePermission('config:view'), getEmailConfig);
+router.put('/email-config',  requirePermission('config:edit'), updateEmailConfig);
+router.post('/test-email',   requirePermission('config:edit'), testEmail);
 
 // ── System config ────────────────────────────────────────────────────────────
 router.get('/config',            requirePermission('config:view'),  getSystemConfig);

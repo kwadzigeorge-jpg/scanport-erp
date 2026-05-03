@@ -103,6 +103,11 @@ export const reportsApi = {
   slaExceptions:       (p) => api.get('/reports/sla-exceptions', { params: p }),
   export:              (p) => api.get('/reports/export', { params: p, responseType: 'blob' }),
 
+  // Email & alerts
+  emailConfig:       ()  => api.get('/reports/email-config'),
+  updateEmailConfig: (d) => api.put('/reports/email-config', d),
+  testEmail:         (d) => api.post('/reports/test-email', d),
+
   // Legacy
   daily:           (p) => api.get('/reports/daily', { params: p }),
   dwellTime:       (p) => api.get('/reports/dwell-time', { params: p }),

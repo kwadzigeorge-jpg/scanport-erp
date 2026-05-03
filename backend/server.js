@@ -77,6 +77,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  Port Terminal ERP API`);
   console.log(`  Running on http://localhost:${PORT}`);
   console.log(`  Environment: ${process.env.NODE_ENV || 'development'}\n`);
+  require('./src/services/scheduler').startScheduler();
 });
 
 module.exports = { app, server };

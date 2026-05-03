@@ -10,7 +10,7 @@ import {
   ToggleLeft, ToggleRight, Search, Filter, X,
   Lock, Unlock, LogOut, Eye, Activity, RefreshCw,
   CheckCircle, AlertTriangle, Clock, Monitor, ChevronRight,
-  RotateCcw
+  RotateCcw, Mail, Bell, Send
 } from 'lucide-react';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
@@ -20,6 +20,7 @@ const TABS = [
   { key: 'roles',     label: 'Roles & Permissions', icon: Shield },
   { key: 'config',    label: 'System Config',       icon: Settings },
   { key: 'reinstate', label: 'Reinstate Container', icon: RotateCcw },
+  { key: 'email',     label: 'Email & Alerts',      icon: Mail },
 ];
 
 export default function AdminPage() {
@@ -45,6 +46,7 @@ export default function AdminPage() {
         {tab === 'roles'     && <RolesPanel />}
         {tab === 'config'    && <ConfigPanel />}
         {tab === 'reinstate' && <ReinstatePanel />}
+        {tab === 'email'     && <EmailPanel />}
       </div>
     </div>
   );
@@ -951,6 +953,192 @@ function ReinstatePanel() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Email & Alerts Panel ─────────────────────────────────────────────────────
+function EmailPanel() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery('email-config', () => reportsApi.emailConfig().then(r => r.data));
+
+  const [form, setForm] = useState(null);
+  const [testTo, setTestTo] = useState('');
+  const [testing, setTesting] = useState(false);
+
+  // Sync form from fetched data
+  React.useEffect(() => {
+    if (data && !form) {
+      setForm({
+        alert_enabled: data.alert_enabled,
+        alert_recipients: (data.alert_recipients || []).join(', '),
+        daily_report_enabled: data.daily_report_enabled,
+        daily_report_time: data.daily_report_time || '17:00',
+        daily_report_recipients: (data.daily_report_recipients || []).join(', '),
+      });
+    }
+  }, [data]);
+
+  const saveMutation = useMutation(
+    (d) => reportsApi.updateEmailConfig(d),
+    {
+      onSuccess: () => { toast.success('Email settings saved.'); qc.invalidateQueries('email-config'); },
+      onError: (err) => toast.error(err.response?.data?.error || 'Save failed.'),
+    }
+  );
+
+  const handleSave = () => {
+    const parseEmails = (str) => str.split(',').map(s => s.trim()).filter(Boolean);
+    saveMutation.mutate({
+      alert_enabled: form.alert_enabled,
+      alert_recipients: parseEmails(form.alert_recipients),
+      daily_report_enabled: form.daily_report_enabled,
+      daily_report_time: form.daily_report_time,
+      daily_report_recipients: parseEmails(form.daily_report_recipients),
+    });
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      const res = await reportsApi.testEmail({ to: testTo || undefined });
+      toast.success(res.data.message);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Test failed.');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  if (isLoading || !form) return <div className="text-center py-12 text-gray-400">Loading...</div>;
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      {/* SMTP status banner */}
+      <div className={clsx('rounded-xl border p-4 flex items-start gap-3',
+        data.smtp_configured
+          ? 'bg-green-50 border-green-200'
+          : 'bg-amber-50 border-amber-200'
+      )}>
+        <Mail size={18} className={clsx('mt-0.5 shrink-0', data.smtp_configured ? 'text-green-600' : 'text-amber-600')} />
+        <div className="text-sm">
+          <p className={clsx('font-semibold', data.smtp_configured ? 'text-green-800' : 'text-amber-800')}>
+            {data.smtp_configured ? 'SMTP is configured' : 'SMTP not configured'}
+          </p>
+          <p className={clsx('mt-0.5', data.smtp_configured ? 'text-green-700' : 'text-amber-700')}>
+            {data.smtp_configured
+              ? 'Email sending is active. Alerts and reports will be delivered.'
+              : 'Add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM to your .env file on the server, then rebuild.'
+            }
+          </p>
+        </div>
+      </div>
+
+      {/* SLA Breach Alerts */}
+      <div className="card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bell size={16} className="text-red-500" />
+            <h3 className="font-semibold text-gray-900">SLA Breach Alerts</h3>
+          </div>
+          <button
+            onClick={() => setForm(f => ({ ...f, alert_enabled: !f.alert_enabled }))}
+            className={clsx('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              form.alert_enabled
+                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            )}>
+            {form.alert_enabled ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+            {form.alert_enabled ? 'Enabled' : 'Disabled'}
+          </button>
+        </div>
+        <p className="text-sm text-gray-500">
+          Sends an email the moment a container crosses the SLA threshold. Each container is alerted only once.
+        </p>
+        <div>
+          <label className="label">Alert Recipients <span className="text-gray-400 font-normal">(comma-separated emails)</span></label>
+          <textarea
+            className="input w-full h-20 resize-none font-mono text-sm"
+            placeholder="supervisor@port.com, manager@port.com"
+            value={form.alert_recipients}
+            onChange={e => setForm(f => ({ ...f, alert_recipients: e.target.value }))}
+          />
+        </div>
+      </div>
+
+      {/* Daily Report */}
+      <div className="card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Mail size={16} className="text-blue-500" />
+            <h3 className="font-semibold text-gray-900">Daily Operations Report</h3>
+          </div>
+          <button
+            onClick={() => setForm(f => ({ ...f, daily_report_enabled: !f.daily_report_enabled }))}
+            className={clsx('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              form.daily_report_enabled
+                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            )}>
+            {form.daily_report_enabled ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+            {form.daily_report_enabled ? 'Enabled' : 'Disabled'}
+          </button>
+        </div>
+        <p className="text-sm text-gray-500">
+          Sends a daily summary with throughput KPIs, area performance, and SLA exceptions.
+          Time is in <strong>UTC</strong> — adjust for your timezone (Ghana / GMT+0 is same as UTC).
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">Send Time (UTC)</label>
+            <input
+              type="time"
+              className="input"
+              value={form.daily_report_time}
+              onChange={e => setForm(f => ({ ...f, daily_report_time: e.target.value }))}
+            />
+          </div>
+        </div>
+        <div>
+          <label className="label">Report Recipients <span className="text-gray-400 font-normal">(comma-separated emails)</span></label>
+          <textarea
+            className="input w-full h-20 resize-none font-mono text-sm"
+            placeholder="manager@port.com, director@port.com"
+            value={form.daily_report_recipients}
+            onChange={e => setForm(f => ({ ...f, daily_report_recipients: e.target.value }))}
+          />
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          onClick={handleSave}
+          disabled={saveMutation.isLoading}
+          className="btn-primary">
+          {saveMutation.isLoading
+            ? <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            : 'Save Settings'
+          }
+        </button>
+
+        <div className="flex items-center gap-2 ml-auto">
+          <input
+            className="input text-sm py-2 w-52"
+            placeholder="test@example.com (optional)"
+            value={testTo}
+            onChange={e => setTestTo(e.target.value)}
+          />
+          <button
+            onClick={handleTest}
+            disabled={testing || !data.smtp_configured}
+            title={!data.smtp_configured ? 'Configure SMTP first' : 'Send a test email'}
+            className="btn-secondary flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+            <Send size={14} />
+            {testing ? 'Sending...' : 'Test Email'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
