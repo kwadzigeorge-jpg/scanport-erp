@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, ClipboardList,
   BarChart3, Settings, LogOut, Menu, X, Bell, LayoutGrid,
-  FlaskConical, MapPin
+  FlaskConical, MapPin, CalendarDays
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -16,6 +16,7 @@ const navItems = [
   { to: '/transactions', icon: ClipboardList,   label: 'Transactions',  permission: 'container:view' },
   { to: '/reports',      icon: BarChart3,       label: 'Reports',       permission: 'reports:view' },
   { to: '/admin',        icon: Settings,        label: 'Admin',         role: 'admin' },
+  { to: '/leave',        icon: CalendarDays,    label: 'Leave Mgmt',    roles: ['admin', 'supervisor'] },
 ];
 
 export default function Layout() {
@@ -30,6 +31,7 @@ export default function Layout() {
 
   const visibleNav = navItems.filter(item => {
     if (item.permission) return hasPermission(item.permission);
+    if (item.roles) return item.roles.some(r => hasRole(r));
     if (item.role) return hasRole(item.role);
     return true;
   });

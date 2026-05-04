@@ -12,6 +12,7 @@ import TransactionsPage from './pages/TransactionsPage';
 import BaysPage         from './pages/BaysPage';
 import ReportsPage      from './pages/ReportsPage';
 import AdminPage        from './pages/AdminPage';
+import LeavePage        from './pages/LeavePage';
 import NotFoundPage     from './pages/NotFoundPage';
 
 function ProtectedRoute({ children, roles, permission }) {
@@ -40,6 +41,7 @@ function AppRoutes() {
         <Route path="transactions" element={<ProtectedRoute permission="container:view"><TransactionsPage /></ProtectedRoute>} />
         <Route path="reports"      element={<ProtectedRoute permission="reports:view"><ReportsPage /></ProtectedRoute>} />
         <Route path="admin"        element={<ProtectedRoute roles={['admin']}><AdminPage /></ProtectedRoute>} />
+        <Route path="leave"        element={<ProtectedRoute roles={['admin', 'supervisor']}><LeavePage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />
