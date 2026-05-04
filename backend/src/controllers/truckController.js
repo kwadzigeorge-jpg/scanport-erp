@@ -90,25 +90,25 @@ async function createTruckAllocation(req, res, next) {
       if (dup.length) return res.status(409).json({ error: `Container ${c.number} already has an active allocation.` });
     }
 
-    // ── Resolve holding area ──
-    let areaId = holdingAreaId;
-    if (!areaId) {
-      const { rows: areas } = await client.query('SELECT id FROM holding_areas WHERE is_active=TRUE LIMIT 1');
-      if (!areas.length) return res.status(500).json({ error: 'No active holding areas.' });
-      areaId = areas[0].id;
-    }
-
-    // ── Resolve bay (must be free — no active truck in new or old flow) ──
+    // ── Resolve bay and holding area ──
     let resolvedBayId = bayId || null;
+    let areaId = holdingAreaId || null;
     const occupiedStatuses = "('BAY_ASSIGNED','ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED','IN_HOLDING_AREA')";
 
     if (resolvedBayId) {
+      // Specific bay requested — verify it is free
       const { rows: occ } = await client.query(
         `SELECT id FROM container_transactions WHERE bay_id=$1 AND status IN ${occupiedStatuses}`,
         [resolvedBayId]
       );
       if (occ.length) return res.status(409).json({ error: 'Selected bay is currently occupied. Choose another bay.' });
-    } else {
+      // Derive area from bay if not supplied
+      if (!areaId) {
+        const { rows: bi } = await client.query('SELECT holding_area_id FROM bays WHERE id=$1', [resolvedBayId]);
+        areaId = bi[0]?.holding_area_id;
+      }
+    } else if (areaId) {
+      // Specific area requested — find first free bay within it
       const { rows: freeBays } = await client.query(
         `SELECT b.id FROM bays b
          WHERE b.holding_area_id=$1 AND b.is_active=TRUE
@@ -119,12 +119,27 @@ async function createTruckAllocation(req, res, next) {
          ORDER BY b.bay_code LIMIT 1`,
         [areaId]
       );
+      if (!freeBays.length) return res.status(409).json({ error: 'Selected holding area is full.' });
+      resolvedBayId = freeBays[0].id;
+    } else {
+      // Auto-assign: search ALL active holding areas in order, fill Alpha before Beta
+      const { rows: freeBays } = await client.query(
+        `SELECT b.id, b.holding_area_id FROM bays b
+         JOIN holding_areas ha ON ha.id = b.holding_area_id
+         WHERE ha.is_active = TRUE AND b.is_active = TRUE
+           AND b.id NOT IN (
+             SELECT bay_id FROM container_transactions
+             WHERE status IN ${occupiedStatuses} AND bay_id IS NOT NULL
+           )
+         ORDER BY ha.id, b.bay_code LIMIT 1`
+      );
       if (!freeBays.length) {
         return res.status(409).json({
-          error: 'All bays are currently full. Please wait for a truck to be released before making a new allocation.',
+          error: 'All bays across all holding areas are currently full. Please wait for a truck to be released.',
         });
       }
       resolvedBayId = freeBays[0].id;
+      areaId = freeBays[0].holding_area_id;
     }
 
     // ── Create truck allocation ──
