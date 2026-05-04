@@ -25,8 +25,9 @@ router.get('/balances',         adminOrSuper, c.getBalances);
 router.get('/departments',      adminOrSuper, c.getDepartments);
 router.post('/departments',     adminOnly,    c.createDepartment);
 router.delete('/departments/:id', adminOnly,  c.deleteDepartment);
-router.post('/departments/:deptId/teams',        adminOnly, c.addTeam);
-router.delete('/departments/:deptId/teams/:teamId', adminOnly, c.deleteTeam);
+router.post('/departments/:deptId/teams',               adminOnly, c.addTeam);
+router.delete('/departments/:deptId/teams/:teamId',     adminOnly, c.deleteTeam);
+router.post('/teams/:teamId/replace-roster',            adminOnly, c.replaceTeamRoster);
 
 // Staff
 router.get('/staff',           adminOrSuper, c.getStaff);

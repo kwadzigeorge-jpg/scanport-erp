@@ -1,6 +1,19 @@
 const db = require('../config/database');
 
+// ─── Constants ────────────────────────────────────────────────────────────────
 const GIFT_TYPES = ['Maternity Leave', 'Paternity Leave'];
+
+// Entitlement by role: Spvr, M Spvr, Maintenance = 21 days; Staff = 18 days
+function entitlementForRole(role) {
+  return ['supervisor', 'm_supervisor', 'maintenance'].includes(role) ? 21 : 18;
+}
+
+const ROLE_LABELS = {
+  supervisor:   'Supervisor (Spvr)',
+  m_supervisor: "Marshal's Supervisor (M Spvr)",
+  maintenance:  'Maintenance Officer',
+  staff:        'Staff',
+};
 
 // ─── Seed data ────────────────────────────────────────────────────────────────
 const SEED_DEPTS = [
@@ -75,7 +88,7 @@ const SEED_DEPTS = [
     },
   },
   {
-    label: 'Intrusive Platform Teams',
+    label: 'Post-Scan Teams',
     teams: {
       'Intrusive Team A': [
         { name: 'Michael Fiawoyife', role: 'staff' },
@@ -174,6 +187,7 @@ const SEED_HOLIDAYS = [
 async function ensureSchema() {
   const client = await db.getClient();
   try {
+    // Create base tables
     await client.query(`
       CREATE TABLE IF NOT EXISTS lms_departments (
         id   SERIAL PRIMARY KEY,
@@ -191,7 +205,7 @@ async function ensureSchema() {
         team_id            INT REFERENCES lms_teams(id) ON DELETE SET NULL,
         name               VARCHAR(200) NOT NULL,
         role               VARCHAR(50)  NOT NULL DEFAULT 'staff',
-        annual_entitlement INT NOT NULL DEFAULT 21,
+        annual_entitlement INT NOT NULL DEFAULT 18,
         is_active          BOOLEAN DEFAULT TRUE,
         created_at         TIMESTAMPTZ DEFAULT NOW()
       );
@@ -203,8 +217,11 @@ async function ensureSchema() {
         end_date         DATE NOT NULL,
         working_days     INT  NOT NULL,
         year             INT  NOT NULL,
+        entitlement_year INT,
         is_gift_leave    BOOLEAN DEFAULT FALSE,
         status           VARCHAR(20) NOT NULL DEFAULT 'Pending',
+        auto_decision    BOOLEAN DEFAULT FALSE,
+        clash_with       TEXT,
         notes            TEXT,
         submitted_by     VARCHAR(200),
         approved_at      TIMESTAMPTZ,
@@ -221,9 +238,24 @@ async function ensureSchema() {
       );
     `);
 
-    // Seed only when tables are empty
-    const { rows: [deptCount] } = await client.query('SELECT COUNT(*) FROM lms_departments');
-    if (parseInt(deptCount.count) === 0) {
+    // Safe migrations for columns added after v1
+    await client.query(`
+      ALTER TABLE lms_leave_requests ADD COLUMN IF NOT EXISTS entitlement_year INT;
+      ALTER TABLE lms_leave_requests ADD COLUMN IF NOT EXISTS auto_decision BOOLEAN DEFAULT FALSE;
+      ALTER TABLE lms_leave_requests ADD COLUMN IF NOT EXISTS clash_with TEXT;
+    `);
+
+    // Fix entitlements for existing staff by role (idempotent)
+    await client.query(`
+      UPDATE lms_staff SET annual_entitlement = CASE
+        WHEN role IN ('supervisor', 'm_supervisor', 'maintenance') THEN 21
+        ELSE 18
+      END
+    `);
+
+    // Seed when tables are empty
+    const { rows: [{ count }] } = await client.query('SELECT COUNT(*) FROM lms_departments');
+    if (parseInt(count) === 0) {
       for (const dept of SEED_DEPTS) {
         const { rows: [d] } = await client.query(
           'INSERT INTO lms_departments (name) VALUES ($1) RETURNING id', [dept.label]
@@ -235,16 +267,16 @@ async function ensureSchema() {
           );
           for (const m of members) {
             await client.query(
-              'INSERT INTO lms_staff (team_id, name, role) VALUES ($1,$2,$3)',
-              [t.id, m.name, m.role]
+              'INSERT INTO lms_staff (team_id, name, role, annual_entitlement) VALUES ($1,$2,$3,$4)',
+              [t.id, m.name, m.role, entitlementForRole(m.role)]
             );
           }
         }
       }
     }
 
-    const { rows: [holCount] } = await client.query('SELECT COUNT(*) FROM lms_public_holidays');
-    if (parseInt(holCount.count) === 0) {
+    const { rows: [{ count: hc }] } = await client.query('SELECT COUNT(*) FROM lms_public_holidays');
+    if (parseInt(hc) === 0) {
       for (const h of SEED_HOLIDAYS) {
         await client.query(
           'INSERT INTO lms_public_holidays (date, name) VALUES ($1,$2) ON CONFLICT DO NOTHING',
@@ -276,22 +308,30 @@ async function getOverview(req, res, next) {
       `SELECT COUNT(*)::int AS cnt FROM lms_leave_requests WHERE status='Pending'`
     );
 
+    // Low balance: remaining ≤ 5 days for current year (including carry-over)
     const { rows: lowBalance } = await db.query(
-      `SELECT s.id, s.name, t.name AS team, s.annual_entitlement,
+      `SELECT s.id, s.name, t.name AS team, s.annual_entitlement, s.role,
               COALESCE(SUM(lr.working_days) FILTER (
-                WHERE lr.status='Approved' AND lr.year=$1 AND NOT lr.is_gift_leave
-              ), 0)::int AS used
+                WHERE lr.status='Approved' AND (lr.entitlement_year=$1 OR (lr.entitlement_year IS NULL AND lr.year=$1))
+                  AND NOT lr.is_gift_leave
+              ), 0)::int AS used_current,
+              COALESCE(SUM(lr.working_days) FILTER (
+                WHERE lr.status='Approved' AND (lr.entitlement_year=$1-1 OR (lr.entitlement_year IS NULL AND lr.year=$1-1))
+                  AND NOT lr.is_gift_leave
+              ), 0)::int AS used_prev
        FROM lms_staff s
        LEFT JOIN lms_teams t ON t.id = s.team_id
        LEFT JOIN lms_leave_requests lr ON lr.staff_id = s.id
        WHERE s.is_active = TRUE
-       GROUP BY s.id, s.name, t.name, s.annual_entitlement
-       HAVING s.annual_entitlement - COALESCE(SUM(lr.working_days) FILTER (
-         WHERE lr.status='Approved' AND lr.year=$1 AND NOT lr.is_gift_leave
-       ), 0) <= 5
+       GROUP BY s.id, s.name, t.name, s.annual_entitlement, s.role
+       HAVING (s.annual_entitlement + GREATEST(0, s.annual_entitlement - COALESCE(SUM(lr.working_days) FILTER (
+         WHERE lr.status='Approved' AND (lr.entitlement_year=$1-1 OR (lr.entitlement_year IS NULL AND lr.year=$1-1))
+           AND NOT lr.is_gift_leave), 0))
+         - COALESCE(SUM(lr.working_days) FILTER (
+             WHERE lr.status='Approved' AND (lr.entitlement_year=$1 OR (lr.entitlement_year IS NULL AND lr.year=$1))
+               AND NOT lr.is_gift_leave), 0)) <= 5
        ORDER BY (s.annual_entitlement - COALESCE(SUM(lr.working_days) FILTER (
-         WHERE lr.status='Approved' AND lr.year=$1 AND NOT lr.is_gift_leave
-       ), 0))`, [year]
+         WHERE lr.status='Approved' AND NOT lr.is_gift_leave), 0))`, [year]
     );
 
     return res.json({ onLeave, pendingCount, lowBalance, today });
@@ -301,14 +341,15 @@ async function getOverview(req, res, next) {
 // ─── Leave Requests ───────────────────────────────────────────────────────────
 async function getRequests(req, res, next) {
   try {
-    const { status, team, year, staffId, page = 1, limit = 100 } = req.query;
+    const { status, team, year, entitlementYear, staffId, page = 1, limit = 200 } = req.query;
     const conds = [];
     const params = [];
 
-    if (status)  { params.push(status);           conds.push(`lr.status=$${params.length}`); }
-    if (staffId) { params.push(parseInt(staffId)); conds.push(`lr.staff_id=$${params.length}`); }
-    if (team)    { params.push(team);              conds.push(`t.name=$${params.length}`); }
-    if (year)    { params.push(parseInt(year));    conds.push(`lr.year=$${params.length}`); }
+    if (status)          { params.push(status);                  conds.push(`lr.status=$${params.length}`); }
+    if (staffId)         { params.push(parseInt(staffId));        conds.push(`lr.staff_id=$${params.length}`); }
+    if (team)            { params.push(team);                    conds.push(`t.name=$${params.length}`); }
+    if (year)            { params.push(parseInt(year));           conds.push(`lr.year=$${params.length}`); }
+    if (entitlementYear) { params.push(parseInt(entitlementYear));conds.push(`lr.entitlement_year=$${params.length}`); }
 
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -337,78 +378,129 @@ async function getRequests(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Submit + Auto-Decision ───────────────────────────────────────────────────
 async function submitRequest(req, res, next) {
+  const client = await db.getClient();
   try {
-    const { staffId, leaveType, startDate, endDate, workingDays, year, notes } = req.body;
+    await client.query('BEGIN');
+
+    const { staffId, leaveType, startDate, endDate, workingDays, year, entitlementYear, notes } = req.body;
     if (!staffId || !leaveType || !startDate || !endDate || !workingDays || !year) {
+      await client.query('ROLLBACK');
       return res.status(400).json({ error: 'staffId, leaveType, startDate, endDate, workingDays, year are required.' });
     }
 
-    const { rows: [staff] } = await db.query('SELECT * FROM lms_staff WHERE id=$1', [staffId]);
-    if (!staff) return res.status(404).json({ error: 'Staff member not found.' });
+    const entYear = entitlementYear ? parseInt(entitlementYear) : parseInt(year);
 
-    // Check balance for non-gift annual leave
+    const { rows: [staff] } = await client.query(
+      `SELECT s.*, t.id AS team_id_val, t.name AS team_name
+       FROM lms_staff s LEFT JOIN lms_teams t ON t.id = s.team_id WHERE s.id=$1`, [staffId]
+    );
+    if (!staff) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Staff member not found.' }); }
+
     const isGift = GIFT_TYPES.includes(leaveType);
+
+    // ── Balance check (Annual Leave only) ──
     if (!isGift && leaveType === 'Annual Leave') {
-      const { rows: [bal] } = await db.query(
-        `SELECT COALESCE(SUM(working_days),0)::int AS used
-         FROM lms_leave_requests
-         WHERE staff_id=$1 AND status='Approved' AND year=$2 AND NOT is_gift_leave`,
-        [staffId, year]
+      // carry-over from entYear-1
+      const { rows: [prevUsed] } = await client.query(
+        `SELECT COALESCE(SUM(working_days),0)::int AS used FROM lms_leave_requests
+         WHERE staff_id=$1 AND status='Approved' AND NOT is_gift_leave
+           AND (entitlement_year=$2 OR (entitlement_year IS NULL AND year=$2))`,
+        [staffId, entYear - 1]
       );
-      const remaining = staff.annual_entitlement - bal.used;
+      const carryOver = Math.max(0, staff.annual_entitlement - prevUsed.used);
+
+      const { rows: [curUsed] } = await client.query(
+        `SELECT COALESCE(SUM(working_days),0)::int AS used FROM lms_leave_requests
+         WHERE staff_id=$1 AND status='Approved' AND NOT is_gift_leave
+           AND (entitlement_year=$2 OR (entitlement_year IS NULL AND year=$2))`,
+        [staffId, entYear]
+      );
+      const totalAvailable = staff.annual_entitlement + (entYear === parseInt(year) ? carryOver : 0);
+      const remaining = totalAvailable - curUsed.used;
+
       if (workingDays > remaining) {
+        await client.query('ROLLBACK');
         return res.status(409).json({
-          error: `Insufficient leave balance. ${remaining} day(s) remaining, request is for ${workingDays} day(s).`,
+          error: `Insufficient ${entYear} leave balance. ${remaining} day(s) available, request is for ${workingDays} day(s).`,
+          insufficientBalance: true,
+          remaining,
         });
       }
     }
 
-    // Check for date clashes within same team
-    const { rows: [teamRow] } = await db.query(
-      `SELECT t.id FROM lms_teams t JOIN lms_staff s ON s.team_id = t.id WHERE s.id=$1`, [staffId]
-    );
-    if (teamRow) {
-      const { rows: clash } = await db.query(
-        `SELECT lr.id, s.name FROM lms_leave_requests lr
+    // ── Clash detection within same team ──
+    let clashWith = null;
+    if (staff.team_id_val) {
+      const { rows: clashes } = await client.query(
+        `SELECT s.name, lr.start_date, lr.end_date
+         FROM lms_leave_requests lr
          JOIN lms_staff s ON s.id = lr.staff_id
-         WHERE s.team_id=$1 AND s.id != $2 AND lr.status='Approved'
-           AND lr.start_date <= $3 AND lr.end_date >= $4`,
-        [teamRow.id, staffId, endDate, startDate]
+         WHERE s.team_id = $1
+           AND s.id != $2
+           AND lr.status = 'Approved'
+           AND lr.start_date <= $3
+           AND lr.end_date   >= $4`,
+        [staff.team_id_val, staffId, endDate, startDate]
       );
-      if (clash.length > 0) {
-        const names = clash.map(r => r.name).join(', ');
-        return res.status(409).json({
-          error: `Date clash: ${names} from the same team already has approved leave overlapping these dates.`,
-          clash: true,
-        });
+      if (clashes.length > 0) {
+        clashWith = clashes.map(c =>
+          `${c.name} (${new Date(c.start_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} – ${new Date(c.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })})`
+        ).join('; ');
       }
     }
 
-    const { rows: [req_] } = await db.query(
+    const status    = clashWith ? 'Rejected' : 'Approved';
+    const approvedAt  = clashWith ? null : new Date();
+    const rejectedAt  = clashWith ? new Date() : null;
+    const rejReason   = clashWith
+      ? `Leave clash: ${clashWith} from the same team already have approved leave overlapping these dates.`
+      : null;
+
+    const { rows: [rec] } = await client.query(
       `INSERT INTO lms_leave_requests
-         (staff_id, leave_type, start_date, end_date, working_days, year,
-          is_gift_leave, status, notes, submitted_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'Pending',$8,$9)
+         (staff_id, leave_type, start_date, end_date, working_days, year, entitlement_year,
+          is_gift_leave, status, auto_decision, clash_with, notes, submitted_by,
+          approved_at, approved_by, rejected_at, rejected_by, rejection_reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING *`,
-      [staffId, leaveType, startDate, endDate, workingDays, year,
-       isGift, notes || null, req.user.fullName || req.user.username]
+      [staffId, leaveType, startDate, endDate, workingDays, parseInt(year), entYear,
+       isGift, status, clashWith || null, notes || null,
+       req.user.fullName || req.user.username,
+       approvedAt, approvedAt ? (req.user.fullName || req.user.username) : null,
+       rejectedAt, rejectedAt ? 'system' : null,
+       rejReason]
     );
 
-    return res.status(201).json(req_);
-  } catch (err) { next(err); }
+    await client.query('COMMIT');
+
+    return res.status(201).json({
+      ...rec,
+      staff_name: staff.name,
+      team_name: staff.team_name,
+      decision: status,
+      clash_reason: rejReason,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
 }
 
+// ─── Manual override (admin only) ────────────────────────────────────────────
 async function approveRequest(req, res, next) {
   try {
     const { rows: [r] } = await db.query(
       `UPDATE lms_leave_requests
-       SET status='Approved', approved_at=NOW(), approved_by=$1
-       WHERE id=$2 AND status='Pending'
-       RETURNING *`,
+       SET status='Approved', auto_decision=FALSE, approved_at=NOW(), approved_by=$1,
+           rejected_at=NULL, rejected_by=NULL, rejection_reason=NULL
+       WHERE id=$2 RETURNING *`,
       [req.user.fullName || req.user.username, req.params.id]
     );
-    if (!r) return res.status(404).json({ error: 'Pending request not found.' });
+    if (!r) return res.status(404).json({ error: 'Request not found.' });
     return res.json(r);
   } catch (err) { next(err); }
 }
@@ -418,12 +510,12 @@ async function rejectRequest(req, res, next) {
     const { reason } = req.body;
     const { rows: [r] } = await db.query(
       `UPDATE lms_leave_requests
-       SET status='Rejected', rejected_at=NOW(), rejected_by=$1, rejection_reason=$2
-       WHERE id=$3 AND status='Pending'
-       RETURNING *`,
+       SET status='Rejected', auto_decision=FALSE, rejected_at=NOW(), rejected_by=$1,
+           rejection_reason=$2, approved_at=NULL, approved_by=NULL
+       WHERE id=$3 RETURNING *`,
       [req.user.fullName || req.user.username, reason || null, req.params.id]
     );
-    if (!r) return res.status(404).json({ error: 'Pending request not found.' });
+    if (!r) return res.status(404).json({ error: 'Request not found.' });
     return res.json(r);
   } catch (err) { next(err); }
 }
@@ -436,7 +528,7 @@ async function deleteRequest(req, res, next) {
   } catch (err) { next(err); }
 }
 
-// ─── Balances ─────────────────────────────────────────────────────────────────
+// ─── Balances (with carry-over) ───────────────────────────────────────────────
 async function getBalances(req, res, next) {
   try {
     const year = parseInt(req.query.year) || new Date().getFullYear();
@@ -450,12 +542,16 @@ async function getBalances(req, res, next) {
     const { rows } = await db.query(
       `SELECT s.id, s.name, s.role, s.annual_entitlement,
               t.name AS team, d.name AS dept,
+              -- days used from PREVIOUS year's allocation (drawn this year or last)
               COALESCE(SUM(lr.working_days) FILTER (
-                WHERE lr.status='Approved' AND lr.year=$1 AND NOT lr.is_gift_leave
-              ),0)::int AS used,
-              (s.annual_entitlement - COALESCE(SUM(lr.working_days) FILTER (
-                WHERE lr.status='Approved' AND lr.year=$1 AND NOT lr.is_gift_leave
-              ),0))::int AS remaining
+                WHERE lr.status='Approved' AND NOT lr.is_gift_leave
+                  AND (lr.entitlement_year=$1-1 OR (lr.entitlement_year IS NULL AND lr.year=$1-1))
+              ), 0)::int AS prev_year_used,
+              -- days used from THIS year's allocation
+              COALESCE(SUM(lr.working_days) FILTER (
+                WHERE lr.status='Approved' AND NOT lr.is_gift_leave
+                  AND (lr.entitlement_year=$1 OR (lr.entitlement_year IS NULL AND lr.year=$1))
+              ), 0)::int AS current_year_used
        FROM lms_staff s
        LEFT JOIN lms_teams t ON t.id = s.team_id
        LEFT JOIN lms_departments d ON d.id = t.department_id
@@ -466,7 +562,15 @@ async function getBalances(req, res, next) {
       params
     );
 
-    return res.json(rows);
+    const result = rows.map(s => {
+      const carryOver    = Math.max(0, s.annual_entitlement - s.prev_year_used);
+      const totalBudget  = s.annual_entitlement + carryOver;
+      const used         = s.current_year_used;
+      const remaining    = totalBudget - used;
+      return { ...s, carry_over: carryOver, total_budget: totalBudget, used, remaining };
+    });
+
+    return res.json(result);
   } catch (err) { next(err); }
 }
 
@@ -475,9 +579,10 @@ async function getDepartments(req, res, next) {
   try {
     const { rows: depts } = await db.query(
       `SELECT d.id, d.name,
-              json_agg(json_build_object('id', t.id, 'name', t.name,
+              COALESCE(json_agg(json_build_object(
+                'id', t.id, 'name', t.name,
                 'member_count', (SELECT COUNT(*) FROM lms_staff WHERE team_id=t.id AND is_active=TRUE)
-              ) ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL) AS teams
+              ) ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '[]') AS teams
        FROM lms_departments d
        LEFT JOIN lms_teams t ON t.department_id = d.id
        GROUP BY d.id ORDER BY d.name`
@@ -531,24 +636,61 @@ async function deleteTeam(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Roster replace (monthly update) ─────────────────────────────────────────
+async function replaceTeamRoster(req, res, next) {
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    const { teamId } = req.params;
+    const { members } = req.body; // [{ name, role }]
+
+    if (!Array.isArray(members) || members.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'members array is required.' });
+    }
+
+    // Deactivate all current members (preserve leave records)
+    await client.query('UPDATE lms_staff SET is_active=FALSE WHERE team_id=$1', [teamId]);
+
+    // Insert new members
+    const added = [];
+    for (const m of members) {
+      if (!m.name?.trim()) continue;
+      const role = m.role || 'staff';
+      const { rows: [s] } = await client.query(
+        'INSERT INTO lms_staff (team_id, name, role, annual_entitlement) VALUES ($1,$2,$3,$4) RETURNING *',
+        [teamId, m.name.trim(), role, entitlementForRole(role)]
+      );
+      added.push(s);
+    }
+
+    await client.query('COMMIT');
+    return res.json({ replaced: added.length, members: added });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
+}
+
 // ─── Staff ────────────────────────────────────────────────────────────────────
 async function getStaff(req, res, next) {
   try {
     const { teamId, search } = req.query;
-    const conds = [];
+    const conds = ['s.is_active = TRUE'];
     const params = [];
 
     if (teamId) { params.push(parseInt(teamId)); conds.push(`s.team_id=$${params.length}`); }
     if (search) { params.push(`%${search}%`);    conds.push(`s.name ILIKE $${params.length}`); }
-
-    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
 
     const { rows } = await db.query(
       `SELECT s.*, t.name AS team_name, d.name AS dept_name
        FROM lms_staff s
        LEFT JOIN lms_teams t ON t.id = s.team_id
        LEFT JOIN lms_departments d ON d.id = t.department_id
-       ${where}
+       WHERE ${conds.join(' AND ')}
        ORDER BY d.name, t.name, s.name`,
       params
     );
@@ -560,10 +702,12 @@ async function addStaff(req, res, next) {
   try {
     const { teamId, name, role, annualEntitlement } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'Name is required.' });
+    const r = role || 'staff';
+    const ent = annualEntitlement != null ? parseInt(annualEntitlement) : entitlementForRole(r);
     const { rows: [s] } = await db.query(
       `INSERT INTO lms_staff (team_id, name, role, annual_entitlement)
        VALUES ($1,$2,$3,$4) RETURNING *`,
-      [teamId || null, name.trim(), role || 'staff', annualEntitlement || 21]
+      [teamId || null, name.trim(), r, ent]
     );
     return res.status(201).json(s);
   } catch (err) { next(err); }
@@ -575,11 +719,11 @@ async function updateStaff(req, res, next) {
     const updates = [];
     const params = [];
 
-    if (name !== undefined)             { params.push(name.trim());            updates.push(`name=$${params.length}`); }
-    if (role !== undefined)             { params.push(role);                   updates.push(`role=$${params.length}`); }
-    if (teamId !== undefined)           { params.push(teamId);                 updates.push(`team_id=$${params.length}`); }
-    if (annualEntitlement !== undefined){ params.push(annualEntitlement);      updates.push(`annual_entitlement=$${params.length}`); }
-    if (isActive !== undefined)         { params.push(isActive);               updates.push(`is_active=$${params.length}`); }
+    if (name !== undefined)              { params.push(name.trim());   updates.push(`name=$${params.length}`); }
+    if (role !== undefined)              { params.push(role);          updates.push(`role=$${params.length}`); }
+    if (teamId !== undefined)            { params.push(teamId);        updates.push(`team_id=$${params.length}`); }
+    if (annualEntitlement !== undefined) { params.push(annualEntitlement); updates.push(`annual_entitlement=$${params.length}`); }
+    if (isActive !== undefined)          { params.push(isActive);      updates.push(`is_active=$${params.length}`); }
 
     if (!updates.length) return res.status(400).json({ error: 'No fields to update.' });
 
@@ -630,10 +774,11 @@ async function deleteHoliday(req, res, next) {
 }
 
 module.exports = {
-  ensureSchema,
+  ensureSchema, ROLE_LABELS, entitlementForRole,
   getOverview, getRequests, submitRequest, approveRequest, rejectRequest, deleteRequest,
   getBalances,
   getDepartments, createDepartment, deleteDepartment, addTeam, deleteTeam,
+  replaceTeamRoster,
   getStaff, addStaff, updateStaff, removeStaff,
   getHolidays, addHoliday, deleteHoliday,
 };

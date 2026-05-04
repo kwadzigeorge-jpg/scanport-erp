@@ -139,6 +139,7 @@ export const leaveApi = {
   addStaff:      (d)        => api.post('/leave/staff', d),
   updateStaff:   (id, d)    => api.put(`/leave/staff/${id}`, d),
   removeStaff:   (id)       => api.delete(`/leave/staff/${id}`),
+  replaceRoster: (tid, d)   => api.post(`/leave/teams/${tid}/replace-roster`, d),
   holidays:      ()         => api.get('/leave/holidays'),
   addHoliday:    (d)        => api.post('/leave/holidays', d),
   deleteHoliday: (id)       => api.delete(`/leave/holidays/${id}`),
