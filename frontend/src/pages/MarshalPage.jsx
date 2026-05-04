@@ -270,53 +270,127 @@ function GateCheckInPanel() {
 }
 
 // ─── Step 1: Release Truck ────────────────────────────────────────────────────
+const RELEASE_STATUSES = 'ARRIVED_AT_BAY,UNDER_EXAMINATION,EXAMINATION_COMPLETED';
+
 function ReleaseTruckPanel() {
-  const [txn, setTxn]   = useState(null);
-  const [done, setDone] = useState(null);
+  const qc = useQueryClient();
+  const [selected, setSelected] = useState(null);
+  const [done, setDone]         = useState(null);
+
+  const { data, isLoading, refetch } = useQuery(
+    'release-queue',
+    () => containersApi.list({ status: RELEASE_STATUSES, limit: 50 }).then(r => r.data),
+    { refetchInterval: 10000 }
+  );
 
   const mutation = useMutation(
-    (data) => containersApi.confirmExit(data),
+    (containerNumber) => containersApi.confirmExit({ containerNumber }),
     {
-      onSuccess: (res) => { toast.success('Truck released!'); setDone(res.data); setTxn(null); },
+      onSuccess: (res) => {
+        toast.success('Truck released!');
+        setDone(res.data);
+        setSelected(null);
+        qc.invalidateQueries('release-queue');
+      },
       onError: (err) => toast.error(err.response?.data?.error || 'Failed.'),
     }
   );
 
-  const handleFound = (t) => {
-    const allowed = ['ARRIVED_AT_BAY', 'UNDER_EXAMINATION', 'EXAMINATION_COMPLETED'];
-    if (!allowed.includes(t.status)) {
-      toast.error(`Truck must be in the holding area. Current status: ${t.status}`);
-      return;
-    }
-    setTxn(t); setDone(null);
-  };
+  const queue = data?.transactions || [];
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-gray-500">Confirm the truck is cleared and record exit from the holding area.</p>
-      <LookupInput onFound={handleFound} placeholder="Container / waybill / transaction ID" />
-
-      {txn && (
-        <div className="space-y-3">
-          <TxnCard txn={txn} />
-          <button
-            onClick={() => mutation.mutate({ containerNumber: txn.container_number })}
-            disabled={mutation.isLoading}
-            className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-xl
-                       flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-          >
-            {mutation.isLoading
-              ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              : <><LogOut size={18} /> Release Truck &amp; Confirm Exit</>}
-          </button>
-        </div>
+      {/* Done banner */}
+      {done && (
+        <SuccessBanner icon={LogOut} color="green" title="Truck Released" lines={[
+          `Container: ${done.containerNumber || done.container_number}`,
+          `Waybill: ${done.waybillNumber || '—'}`,
+          done.dwellMinutes !== undefined ? `Total dwell: ${done.dwellMinutes} min` : null,
+        ]} />
       )}
 
-      {done && <SuccessBanner icon={LogOut} color="green" title="Truck Released" lines={[
-        `Container: ${done.containerNumber || done.container_number}`,
-        `Waybill: ${done.waybillNumber || '—'}`,
-        done.dwellMinutes !== undefined ? `Total dwell: ${done.dwellMinutes} min` : null,
-      ]} />}
+      {/* Queue header */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500 font-medium">
+          Trucks checked in, ready for release
+          {queue.length > 0 && (
+            <span className="ml-2 bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full">
+              {queue.length}
+            </span>
+          )}
+        </p>
+        <button onClick={() => refetch()} className="text-gray-400 hover:text-gray-600 transition-colors" title="Refresh">
+          <Search size={14} />
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-8">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-500" />
+        </div>
+      ) : !queue.length ? (
+        <div className="text-center py-8 text-sm text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+          No trucks currently in the holding area.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {queue.map(t => (
+            <div key={t.id} className={clsx(
+              'rounded-xl border-2 p-4 transition-all',
+              selected?.id === t.id ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white hover:border-gray-300'
+            )}>
+              {/* Summary row */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono font-bold text-gray-900">{t.container_number}</span>
+                    {t.waybill_number && <span className="font-mono text-xs text-gray-400">{t.waybill_number}</span>}
+                    <StatusBadge status={t.status} />
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+                    {t.truck_number && <span className="flex items-center gap-1"><Truck size={10}/>{t.truck_number}</span>}
+                    <span className="flex items-center gap-1"><MapPin size={10}/>{t.area_name || '—'} · Bay {t.bay_code || '—'}</span>
+                    <span className="flex items-center gap-1"><User size={10}/>{t.agent_name}</span>
+                  </div>
+                  {t.time_in && (
+                    <p className="text-xs text-gray-400">
+                      Checked in {format(new Date(t.time_in), 'dd MMM HH:mm')}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => { setSelected(selected?.id === t.id ? null : t); setDone(null); }}
+                  className={clsx(
+                    'shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors',
+                    selected?.id === t.id
+                      ? 'bg-gray-100 border-gray-300 text-gray-600'
+                      : 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'
+                  )}
+                >
+                  {selected?.id === t.id ? 'Cancel' : 'Release'}
+                </button>
+              </div>
+
+              {/* Expanded confirm */}
+              {selected?.id === t.id && (
+                <div className="mt-4 space-y-3 pt-4 border-t border-green-200">
+                  <TxnCard txn={t} />
+                  <button
+                    onClick={() => mutation.mutate(t.container_number)}
+                    disabled={mutation.isLoading}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-xl
+                               flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                  >
+                    {mutation.isLoading
+                      ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      : <><LogOut size={18} /> Release Truck &amp; Confirm Exit</>}
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
