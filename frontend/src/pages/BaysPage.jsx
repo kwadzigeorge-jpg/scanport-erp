@@ -5,11 +5,12 @@ import { format, formatDistanceToNow } from 'date-fns';
 import {
   LayoutGrid, Database, AlertTriangle, BarChart3,
   CheckSquare, List, HelpCircle, RefreshCw, Search,
-  Truck, User, Phone, Clock, LogOut, Container, ChevronDown, X
+  Truck, User, Phone, Clock, LogOut, Container, ChevronDown, X, Printer
 } from 'lucide-react';
 import io from 'socket.io-client';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
+import ChitPrintView from '../components/Containers/ChitPrintView';
 
 const TABS = [
   { key: 'allocation', label: 'Bays Allocation', icon: LayoutGrid },
@@ -103,7 +104,7 @@ function ReleaseModal({ truck, onClose, onConfirm, loading }) {
 }
 
 // ─── Bay Card ─────────────────────────────────────────────────────────────────
-function BayCard({ bay, onRelease }) {
+function BayCard({ bay, areaName, onRelease, onPrint }) {
   const { truck } = bay;
   const colors = bayColor(truck);
 
@@ -178,22 +179,30 @@ function BayCard({ bay, onRelease }) {
           )}
         </div>
 
-        {/* Release button — only for checked-in trucks */}
-        {truck.tx_status !== 'BAY_ASSIGNED' && (
+        {/* Actions */}
+        <div className="flex gap-1.5 mt-1">
           <button
-            onClick={() => onRelease(truck, bay.bay_code)}
-            className="w-full mt-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 transition-colors"
+            onClick={() => onPrint(truck, bay.bay_code, areaName)}
+            className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
           >
-            <LogOut size={12} /> Release Truck
+            <Printer size={11} /> Waybill
           </button>
-        )}
+          {truck.tx_status !== 'BAY_ASSIGNED' && (
+            <button
+              onClick={() => onRelease(truck, bay.bay_code)}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-semibold bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 transition-colors"
+            >
+              <LogOut size={11} /> Release
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
 // ─── Allocation Grid ──────────────────────────────────────────────────────────
-function AllocationView({ areas, search, onRelease }) {
+function AllocationView({ areas, search, onRelease, onPrint }) {
   return (
     <div className="space-y-8">
       {areas.map(area => {
@@ -223,7 +232,7 @@ function AllocationView({ areas, search, onRelease }) {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
               {baysToShow.map(bay => (
-                <BayCard key={bay.id} bay={bay} onRelease={onRelease} />
+                <BayCard key={bay.id} bay={bay} areaName={area.name} onRelease={onRelease} onPrint={onPrint} />
               ))}
             </div>
           </div>
@@ -234,7 +243,7 @@ function AllocationView({ areas, search, onRelease }) {
 }
 
 // ─── Data Table ───────────────────────────────────────────────────────────────
-function DataView({ areas, onRelease }) {
+function DataView({ areas, onRelease, onPrint }) {
   const rows = areas.flatMap(area =>
     area.bays
       .filter(b => b.truck)
@@ -246,7 +255,7 @@ function DataView({ areas, onRelease }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
-            <tr>{['Ref', 'Truck', 'Bay', 'Driver', 'Agent', 'Containers', 'Dwell', 'Action'].map(h =>
+            <tr>{['Ref', 'Truck', 'Bay', 'Driver', 'Agent', 'Containers', 'Dwell', 'Actions'].map(h =>
               <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
             )}</tr>
           </thead>
@@ -277,10 +286,16 @@ function DataView({ areas, onRelease }) {
                     )}>{formatDwell(t.dwell_minutes)}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <button onClick={() => onRelease(t, t.bay_code)}
-                      className="flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 px-2.5 py-1.5 rounded-lg border border-green-200">
-                      <LogOut size={12} /> Release
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => onPrint(t, t.bay_code, t.area_name)}
+                        className="flex items-center gap-1 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg border border-blue-200">
+                        <Printer size={12} /> Waybill
+                      </button>
+                      <button onClick={() => onRelease(t, t.bay_code)}
+                        className="flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 px-2.5 py-1.5 rounded-lg border border-green-200">
+                        <LogOut size={12} /> Release
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -456,7 +471,8 @@ function AnalyticsView({ stats, areas }) {
 export default function BaysPage() {
   const [tab, setTab]             = useState('allocation');
   const [search, setSearch]       = useState('');
-  const [releaseTarget, setReleaseTarget] = useState(null); // { truck, bayCode }
+  const [releaseTarget, setReleaseTarget] = useState(null);
+  const [printChit, setPrintChit] = useState(null);
   const qc = useQueryClient();
 
   const { data, isLoading, refetch } = useQuery(
@@ -490,6 +506,20 @@ export default function BaysPage() {
 
   const handleRelease = (truck, bayCode) => {
     setReleaseTarget({ ...truck, bay_code: bayCode });
+  };
+
+  const handlePrint = (truck, bayCode, areaName) => {
+    setPrintChit({
+      transaction_id:   truck.allocation_ref || '—',
+      container_number: truck.containers?.[0]?.container_number || truck.truck_number,
+      agent_name:       truck.agent_name,
+      agent_phone:      truck.agent_phone,
+      truck_number:     truck.truck_number,
+      area_name:        areaName,
+      bay_code:         bayCode,
+      qr_code_token:    truck.qr_token || null,
+      created_at:       new Date().toISOString(),
+    });
   };
 
   const tabAreas = tab === 'overstayed'
@@ -548,9 +578,9 @@ export default function BaysPage() {
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
           </div>
         ) : tab === 'allocation' || tab === 'queued' ? (
-          <AllocationView areas={tabAreas} search={search} onRelease={handleRelease} />
+          <AllocationView areas={tabAreas} search={search} onRelease={handleRelease} onPrint={handlePrint} />
         ) : tab === 'data' ? (
-          <DataView areas={areas} onRelease={handleRelease} />
+          <DataView areas={areas} onRelease={handleRelease} onPrint={handlePrint} />
         ) : tab === 'overstayed' ? (
           <OverstayedView areas={tabAreas} thresholdHours={stats.threshold_hours} onRelease={handleRelease} />
         ) : tab === 'released' ? (
@@ -569,6 +599,9 @@ export default function BaysPage() {
           loading={releaseMutation.isLoading}
         />
       )}
+
+      {/* Waybill print modal */}
+      {printChit && <ChitPrintView transaction={printChit} onClose={() => setPrintChit(null)} />}
     </div>
   );
 }

@@ -207,15 +207,18 @@ function PendingQueue({ onChitReady }) {
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
-export default function BayAllocationPage() {
-  // Chit state — shared across both flows
-  const [chit, setChit] = useState(null);
+const EMPTY_FORM = {
+  truckNumber: '', driverName: '', driverPhone: '',
+  agentName: '', agentPhone: '',
+  containers: [{ ...EMPTY_CONTAINER }],
+};
 
-  const [form, setForm] = useState({
-    truckNumber: '', driverName: '', driverPhone: '',
-    agentName: '', agentPhone: '',
-    containers: [{ ...EMPTY_CONTAINER }],
-  });
+export default function BayAllocationPage() {
+  const [chit, setChit]               = useState(null);
+  const [lastAgent, setLastAgent]     = useState(null); // { agentName, agentPhone }
+  const [agentPrompt, setAgentPrompt] = useState(false);
+
+  const [form, setForm]               = useState({ ...EMPTY_FORM });
   const [fieldErrors, setFieldErrors] = useState({});
 
   const { data: baysData } = useQuery(
@@ -228,7 +231,8 @@ export default function BayAllocationPage() {
     onSuccess: (res) => {
       const alloc = res.data;
       toast.success(`Truck ${alloc.truck_number} allocated to ${alloc.bay_code} — chit ready.`);
-      // Shape allocation result into a chit-compatible object
+      const agent = { agentName: form.agentName, agentPhone: form.agentPhone };
+      setLastAgent(agent);
       setChit({
         transaction_id:   alloc.allocation_ref,
         container_number: alloc.containers?.[0]?.container_number || alloc.truck_number,
@@ -240,11 +244,7 @@ export default function BayAllocationPage() {
         qr_code_token:    alloc.qr_token || null,
         created_at:       alloc.created_at || new Date().toISOString(),
       });
-      setForm({
-        truckNumber: '', driverName: '', driverPhone: '',
-        agentName: '', agentPhone: '',
-        containers: [{ ...EMPTY_CONTAINER }],
-      });
+      setForm({ ...EMPTY_FORM });
       setFieldErrors({});
     },
     onError: (err) => toast.error(err.response?.data?.error || 'Allocation failed.'),
@@ -262,8 +262,6 @@ export default function BayAllocationPage() {
     if (invalid)               { setFieldErrors(errors); return; }
     if (loadError)             { toast.error(loadError); return; }
     if (!form.truckNumber.trim()) { toast.error('Truck number is required.'); return; }
-    if (!form.driverName.trim())  { toast.error('Driver name is required.'); return; }
-    if (!form.driverPhone.trim()) { toast.error('Driver phone is required.'); return; }
     if (!form.agentName.trim())   { toast.error('Agent name is required.'); return; }
     if (!form.agentPhone.trim())  { toast.error('Agent phone is required.'); return; }
 
@@ -277,8 +275,45 @@ export default function BayAllocationPage() {
     });
   };
 
+  const handleChitClose = () => {
+    setChit(null);
+    if (lastAgent?.agentName) setAgentPrompt(true);
+  };
+
+  const acceptSameAgent = () => {
+    setForm(f => ({ ...EMPTY_FORM, agentName: lastAgent.agentName, agentPhone: lastAgent.agentPhone }));
+    setAgentPrompt(false);
+  };
+
+  const declineSameAgent = () => {
+    setLastAgent(null);
+    setAgentPrompt(false);
+  };
+
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto space-y-6">
+      {/* Same-agent prompt banner */}
+      {agentPrompt && lastAgent && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-4 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-blue-800">Same agent for next truck?</p>
+            <p className="text-xs text-blue-600 mt-0.5 truncate">
+              {lastAgent.agentName}{lastAgent.agentPhone ? ` · ${lastAgent.agentPhone}` : ''}
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={acceptSameAgent}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-1.5 rounded-lg transition-colors">
+              Yes, same agent
+            </button>
+            <button onClick={declineSameAgent}
+              className="bg-white hover:bg-gray-50 text-gray-600 text-sm font-semibold px-4 py-1.5 rounded-lg border border-gray-200 transition-colors">
+              New entry
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -339,16 +374,16 @@ export default function BayAllocationPage() {
           </h2>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <label className="label">Driver Name *</label>
+              <label className="label">Driver Name <span className="text-gray-400 font-normal text-xs">(optional)</span></label>
               <input className="input" placeholder="Full name" value={form.driverName}
-                onChange={e => setForm(f => ({ ...f, driverName: e.target.value }))} required />
+                onChange={e => setForm(f => ({ ...f, driverName: e.target.value }))} />
             </div>
             <div>
-              <label className="label">Driver Phone *</label>
+              <label className="label">Driver Phone <span className="text-gray-400 font-normal text-xs">(optional)</span></label>
               <div className="relative">
                 <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input className="input pl-8" placeholder="+233 244 000 000" value={form.driverPhone}
-                  onChange={e => setForm(f => ({ ...f, driverPhone: e.target.value }))} required />
+                  onChange={e => setForm(f => ({ ...f, driverPhone: e.target.value }))} />
               </div>
             </div>
           </div>
@@ -426,7 +461,7 @@ export default function BayAllocationPage() {
       </form>
 
       {/* Chit modal — opened by both flows */}
-      {chit && <ChitPrintView transaction={chit} onClose={() => setChit(null)} />}
+      {chit && <ChitPrintView transaction={chit} onClose={handleChitClose} />}
     </div>
   );
 }
