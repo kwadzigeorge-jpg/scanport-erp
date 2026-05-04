@@ -1,0 +1,639 @@
+const db = require('../config/database');
+
+const GIFT_TYPES = ['Maternity Leave', 'Paternity Leave'];
+
+// ─── Seed data ────────────────────────────────────────────────────────────────
+const SEED_DEPTS = [
+  {
+    label: 'Scanning Teams',
+    teams: {
+      'Scanning Team 1': [
+        { name: 'Dennis Gardiner', role: 'supervisor' },
+        { name: 'Mertz Matthew', role: 'staff' },
+        { name: 'Sitsope Cudjoe', role: 'staff' },
+        { name: 'Dorcas Gaayuoni Nantamba', role: 'staff' },
+        { name: 'Linda Debrah', role: 'staff' },
+        { name: 'Jasper Frimpong', role: 'supervisor' },
+      ],
+      'Scanning Team 2': [
+        { name: 'Janet Agyei-Gyane', role: 'supervisor' },
+        { name: 'Joseph Dabuo', role: 'staff' },
+        { name: 'Nana Yaw Mantey', role: 'staff' },
+        { name: 'Wendy Lartey', role: 'staff' },
+        { name: 'Stephanie Ackah Blay', role: 'staff' },
+        { name: 'Alex Danquah-Smith', role: 'supervisor' },
+      ],
+      'Scanning Team 3': [
+        { name: 'Eugenia Abbeo', role: 'supervisor' },
+        { name: 'Gifty Ampaabeng', role: 'staff' },
+        { name: 'Frank Onomah Hayford', role: 'staff' },
+        { name: 'Emmanuel Ackah', role: 'staff' },
+        { name: 'Gifty Yelifari', role: 'staff' },
+        { name: 'Paul Continua', role: 'supervisor' },
+      ],
+      'Scanning Team 4': [
+        { name: 'Linda Otwey', role: 'supervisor' },
+        { name: 'Lilian Osei', role: 'staff' },
+        { name: 'Frederick Ankrah', role: 'staff' },
+        { name: 'Sarah Adjabeng Mongson', role: 'staff' },
+        { name: 'Edwina Aku Addo', role: 'staff' },
+        { name: 'Pius Duvor', role: 'staff' },
+        { name: 'Kwabena Akuamoah', role: 'supervisor' },
+      ],
+      'Scanning Team 5': [
+        { name: 'Pamela Lamptey Mills', role: 'supervisor' },
+        { name: 'Salome Sinnia Gaayuoni', role: 'staff' },
+        { name: 'Justina S. Fosu', role: 'staff' },
+        { name: 'Vanessa Akumeh', role: 'staff' },
+        { name: 'Gabriel Wononua Aviella', role: 'staff' },
+        { name: 'Seth Ampem', role: 'supervisor' },
+      ],
+      'Scanning Team 6': [
+        { name: 'Priscilla Quagraine', role: 'supervisor' },
+        { name: 'Mubarik Sahanun', role: 'staff' },
+        { name: 'Andrew Nsowah', role: 'staff' },
+        { name: 'Mary Abalo', role: 'staff' },
+        { name: 'Briana Ayittah', role: 'staff' },
+        { name: 'Ampartey Boateng', role: 'supervisor' },
+      ],
+      'Scanning Team 7': [
+        { name: 'Kwadwo Asah-Opoku', role: 'supervisor' },
+        { name: 'Abdul-Rahman Imran', role: 'staff' },
+        { name: 'Evelyn Ashitey', role: 'staff' },
+        { name: 'Maud Adubea Osei', role: 'staff' },
+        { name: 'Don Annan', role: 'staff' },
+        { name: 'Ebenezer Mensah', role: 'supervisor' },
+      ],
+      'Scanning Team 8': [
+        { name: 'Kamaldeen Salifu', role: 'staff' },
+        { name: 'David Dabuq', role: 'staff' },
+        { name: 'Enoch Adjei Agyapong', role: 'staff' },
+        { name: 'Roland Abeiku Egyir', role: 'staff' },
+        { name: 'Dennis Amofah', role: 'staff' },
+        { name: 'Raymond Adu Parkoh', role: 'supervisor' },
+      ],
+    },
+  },
+  {
+    label: 'Intrusive Platform Teams',
+    teams: {
+      'Intrusive Team A': [
+        { name: 'Michael Fiawoyife', role: 'staff' },
+        { name: 'Francis Essel', role: 'staff' },
+        { name: 'Issahaku Nafisah', role: 'staff' },
+        { name: 'Elsie Ankrah', role: 'staff' },
+        { name: 'Nathaniel Codjoe', role: 'staff' },
+        { name: 'Ouedraogo Peter Anthony', role: 'staff' },
+        { name: 'Bright Nyadzro', role: 'staff' },
+        { name: 'Angela Dufie Agyemang', role: 'staff' },
+        { name: 'Anthony Blay', role: 'supervisor' },
+      ],
+      'Intrusive Team B': [
+        { name: 'Shelter Dogbatse', role: 'staff' },
+        { name: 'Talent Abalo', role: 'staff' },
+        { name: 'Saajida Osman Kasanga', role: 'staff' },
+        { name: 'Stacey Naa Adjeley Adjei', role: 'staff' },
+        { name: 'Emmanuel Kusark', role: 'staff' },
+        { name: 'Juliana Affum', role: 'staff' },
+        { name: 'Wisdom Zikpi', role: 'supervisor' },
+      ],
+      'Intrusive Team C': [
+        { name: 'Esi Bassaw', role: 'staff' },
+        { name: 'Joseph Baiden', role: 'staff' },
+        { name: 'Frederick Hunno-Osabutey', role: 'staff' },
+        { name: 'Godfred Nyame', role: 'staff' },
+        { name: 'Paul Essien', role: 'staff' },
+        { name: 'Kwabena Akosa', role: 'staff' },
+        { name: 'Kwaku Amoako-Atta', role: 'staff' },
+        { name: 'Florence Kapre', role: 'staff' },
+        { name: 'Francis Videy', role: 'supervisor' },
+      ],
+      'Intrusive Team D': [
+        { name: 'Alhassan Faisal', role: 'staff' },
+        { name: 'Grant Albert Asiakwa', role: 'staff' },
+        { name: 'Daniel Odei Fianko', role: 'staff' },
+        { name: 'Abdul-Malik Osumanu', role: 'staff' },
+        { name: 'Bismack Acheampong', role: 'staff' },
+        { name: 'Joshua Okpoti', role: 'staff' },
+        { name: 'Esther Dabier', role: 'staff' },
+        { name: 'Lily Ofosua Acheampong', role: 'staff' },
+        { name: 'Prince Obiri', role: 'supervisor' },
+      ],
+    },
+  },
+  {
+    label: 'Support Units',
+    teams: {
+      'Maintenance': [
+        { name: 'Kwesi Ofori-Boateng', role: 'maintenance' },
+        { name: 'Isaac Kofi Ohene', role: 'maintenance' },
+        { name: 'Emmanuel Adjei', role: 'maintenance' },
+        { name: 'Carl Selassie Tsatsu', role: 'maintenance' },
+      ],
+      'HSSE': [
+        { name: 'Kristopher Ohene Sam', role: 'staff' },
+        { name: 'Bernard Adokoh', role: 'staff' },
+        { name: 'Emmanuel Kissiedu', role: 'staff' },
+        { name: 'Julia Ofori-Ameyaw', role: 'staff' },
+        { name: 'Divine Senyemi', role: 'staff' },
+        { name: 'Augustina Obeng', role: 'staff' },
+        { name: 'George Sunday Namba', role: 'staff' },
+        { name: 'Amanda Mensah', role: 'staff' },
+        { name: 'Godwin Owusu', role: 'staff' },
+      ],
+    },
+  },
+];
+
+const SEED_HOLIDAYS = [
+  { date: '2025-01-01', name: "New Year's Day" },
+  { date: '2025-01-07', name: 'Constitution Day' },
+  { date: '2025-03-06', name: 'Independence Day' },
+  { date: '2025-04-18', name: 'Good Friday' },
+  { date: '2025-04-21', name: 'Easter Monday' },
+  { date: '2025-05-01', name: "Workers' Day" },
+  { date: '2025-05-25', name: 'Africa Day' },
+  { date: '2025-07-01', name: 'Republic Day' },
+  { date: '2025-09-21', name: "Founder's Day" },
+  { date: '2025-12-25', name: 'Christmas Day' },
+  { date: '2025-12-26', name: 'Boxing Day' },
+  { date: '2026-01-01', name: "New Year's Day" },
+  { date: '2026-01-07', name: 'Constitution Day' },
+  { date: '2026-03-06', name: 'Independence Day' },
+  { date: '2026-04-03', name: 'Good Friday' },
+  { date: '2026-04-06', name: 'Easter Monday' },
+  { date: '2026-05-01', name: "Workers' Day" },
+  { date: '2026-05-25', name: 'Africa Day' },
+  { date: '2026-07-01', name: 'Republic Day' },
+  { date: '2026-09-21', name: "Founder's Day" },
+  { date: '2026-12-25', name: 'Christmas Day' },
+  { date: '2026-12-26', name: 'Boxing Day' },
+];
+
+// ─── Schema setup ─────────────────────────────────────────────────────────────
+async function ensureSchema() {
+  const client = await db.getClient();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS lms_departments (
+        id   SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL UNIQUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS lms_teams (
+        id            SERIAL PRIMARY KEY,
+        department_id INT REFERENCES lms_departments(id) ON DELETE CASCADE,
+        name          VARCHAR(100) NOT NULL,
+        UNIQUE(department_id, name)
+      );
+      CREATE TABLE IF NOT EXISTS lms_staff (
+        id                 SERIAL PRIMARY KEY,
+        team_id            INT REFERENCES lms_teams(id) ON DELETE SET NULL,
+        name               VARCHAR(200) NOT NULL,
+        role               VARCHAR(50)  NOT NULL DEFAULT 'staff',
+        annual_entitlement INT NOT NULL DEFAULT 21,
+        is_active          BOOLEAN DEFAULT TRUE,
+        created_at         TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS lms_leave_requests (
+        id               SERIAL PRIMARY KEY,
+        staff_id         INT REFERENCES lms_staff(id) ON DELETE CASCADE,
+        leave_type       VARCHAR(60)  NOT NULL,
+        start_date       DATE NOT NULL,
+        end_date         DATE NOT NULL,
+        working_days     INT  NOT NULL,
+        year             INT  NOT NULL,
+        is_gift_leave    BOOLEAN DEFAULT FALSE,
+        status           VARCHAR(20) NOT NULL DEFAULT 'Pending',
+        notes            TEXT,
+        submitted_by     VARCHAR(200),
+        approved_at      TIMESTAMPTZ,
+        approved_by      VARCHAR(200),
+        rejected_at      TIMESTAMPTZ,
+        rejected_by      VARCHAR(200),
+        rejection_reason TEXT,
+        created_at       TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS lms_public_holidays (
+        id   SERIAL PRIMARY KEY,
+        date DATE NOT NULL UNIQUE,
+        name VARCHAR(100) NOT NULL
+      );
+    `);
+
+    // Seed only when tables are empty
+    const { rows: [deptCount] } = await client.query('SELECT COUNT(*) FROM lms_departments');
+    if (parseInt(deptCount.count) === 0) {
+      for (const dept of SEED_DEPTS) {
+        const { rows: [d] } = await client.query(
+          'INSERT INTO lms_departments (name) VALUES ($1) RETURNING id', [dept.label]
+        );
+        for (const [teamName, members] of Object.entries(dept.teams)) {
+          const { rows: [t] } = await client.query(
+            'INSERT INTO lms_teams (department_id, name) VALUES ($1,$2) RETURNING id',
+            [d.id, teamName]
+          );
+          for (const m of members) {
+            await client.query(
+              'INSERT INTO lms_staff (team_id, name, role) VALUES ($1,$2,$3)',
+              [t.id, m.name, m.role]
+            );
+          }
+        }
+      }
+    }
+
+    const { rows: [holCount] } = await client.query('SELECT COUNT(*) FROM lms_public_holidays');
+    if (parseInt(holCount.count) === 0) {
+      for (const h of SEED_HOLIDAYS) {
+        await client.query(
+          'INSERT INTO lms_public_holidays (date, name) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+          [h.date, h.name]
+        );
+      }
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// ─── Overview ─────────────────────────────────────────────────────────────────
+async function getOverview(req, res, next) {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const year  = new Date().getFullYear();
+
+    const { rows: onLeave } = await db.query(
+      `SELECT lr.id, s.name, t.name AS team, lr.leave_type, lr.end_date
+       FROM lms_leave_requests lr
+       JOIN lms_staff s ON s.id = lr.staff_id
+       LEFT JOIN lms_teams t ON t.id = s.team_id
+       WHERE lr.status = 'Approved' AND lr.start_date <= $1 AND lr.end_date >= $1
+       ORDER BY t.name, s.name`, [today]
+    );
+
+    const { rows: [{ cnt: pendingCount }] } = await db.query(
+      `SELECT COUNT(*)::int AS cnt FROM lms_leave_requests WHERE status='Pending'`
+    );
+
+    const { rows: lowBalance } = await db.query(
+      `SELECT s.id, s.name, t.name AS team, s.annual_entitlement,
+              COALESCE(SUM(lr.working_days) FILTER (
+                WHERE lr.status='Approved' AND lr.year=$1 AND NOT lr.is_gift_leave
+              ), 0)::int AS used
+       FROM lms_staff s
+       LEFT JOIN lms_teams t ON t.id = s.team_id
+       LEFT JOIN lms_leave_requests lr ON lr.staff_id = s.id
+       WHERE s.is_active = TRUE
+       GROUP BY s.id, s.name, t.name, s.annual_entitlement
+       HAVING s.annual_entitlement - COALESCE(SUM(lr.working_days) FILTER (
+         WHERE lr.status='Approved' AND lr.year=$1 AND NOT lr.is_gift_leave
+       ), 0) <= 5
+       ORDER BY (s.annual_entitlement - COALESCE(SUM(lr.working_days) FILTER (
+         WHERE lr.status='Approved' AND lr.year=$1 AND NOT lr.is_gift_leave
+       ), 0))`, [year]
+    );
+
+    return res.json({ onLeave, pendingCount, lowBalance, today });
+  } catch (err) { next(err); }
+}
+
+// ─── Leave Requests ───────────────────────────────────────────────────────────
+async function getRequests(req, res, next) {
+  try {
+    const { status, team, year, staffId, page = 1, limit = 100 } = req.query;
+    const conds = [];
+    const params = [];
+
+    if (status)  { params.push(status);           conds.push(`lr.status=$${params.length}`); }
+    if (staffId) { params.push(parseInt(staffId)); conds.push(`lr.staff_id=$${params.length}`); }
+    if (team)    { params.push(team);              conds.push(`t.name=$${params.length}`); }
+    if (year)    { params.push(parseInt(year));    conds.push(`lr.year=$${params.length}`); }
+
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const { rows } = await db.query(
+      `SELECT lr.*, s.name AS staff_name, s.role AS staff_role,
+              t.name AS team_name, d.name AS dept_name
+       FROM lms_leave_requests lr
+       JOIN lms_staff s ON s.id = lr.staff_id
+       LEFT JOIN lms_teams t ON t.id = s.team_id
+       LEFT JOIN lms_departments d ON d.id = t.department_id
+       ${where}
+       ORDER BY lr.created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, parseInt(limit), offset]
+    );
+
+    const { rows: [cnt] } = await db.query(
+      `SELECT COUNT(*)::int AS total FROM lms_leave_requests lr
+       JOIN lms_staff s ON s.id = lr.staff_id
+       LEFT JOIN lms_teams t ON t.id = s.team_id
+       ${where}`, params
+    );
+
+    return res.json({ requests: rows, total: cnt.total });
+  } catch (err) { next(err); }
+}
+
+async function submitRequest(req, res, next) {
+  try {
+    const { staffId, leaveType, startDate, endDate, workingDays, year, notes } = req.body;
+    if (!staffId || !leaveType || !startDate || !endDate || !workingDays || !year) {
+      return res.status(400).json({ error: 'staffId, leaveType, startDate, endDate, workingDays, year are required.' });
+    }
+
+    const { rows: [staff] } = await db.query('SELECT * FROM lms_staff WHERE id=$1', [staffId]);
+    if (!staff) return res.status(404).json({ error: 'Staff member not found.' });
+
+    // Check balance for non-gift annual leave
+    const isGift = GIFT_TYPES.includes(leaveType);
+    if (!isGift && leaveType === 'Annual Leave') {
+      const { rows: [bal] } = await db.query(
+        `SELECT COALESCE(SUM(working_days),0)::int AS used
+         FROM lms_leave_requests
+         WHERE staff_id=$1 AND status='Approved' AND year=$2 AND NOT is_gift_leave`,
+        [staffId, year]
+      );
+      const remaining = staff.annual_entitlement - bal.used;
+      if (workingDays > remaining) {
+        return res.status(409).json({
+          error: `Insufficient leave balance. ${remaining} day(s) remaining, request is for ${workingDays} day(s).`,
+        });
+      }
+    }
+
+    // Check for date clashes within same team
+    const { rows: [teamRow] } = await db.query(
+      `SELECT t.id FROM lms_teams t JOIN lms_staff s ON s.team_id = t.id WHERE s.id=$1`, [staffId]
+    );
+    if (teamRow) {
+      const { rows: clash } = await db.query(
+        `SELECT lr.id, s.name FROM lms_leave_requests lr
+         JOIN lms_staff s ON s.id = lr.staff_id
+         WHERE s.team_id=$1 AND s.id != $2 AND lr.status='Approved'
+           AND lr.start_date <= $3 AND lr.end_date >= $4`,
+        [teamRow.id, staffId, endDate, startDate]
+      );
+      if (clash.length > 0) {
+        const names = clash.map(r => r.name).join(', ');
+        return res.status(409).json({
+          error: `Date clash: ${names} from the same team already has approved leave overlapping these dates.`,
+          clash: true,
+        });
+      }
+    }
+
+    const { rows: [req_] } = await db.query(
+      `INSERT INTO lms_leave_requests
+         (staff_id, leave_type, start_date, end_date, working_days, year,
+          is_gift_leave, status, notes, submitted_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'Pending',$8,$9)
+       RETURNING *`,
+      [staffId, leaveType, startDate, endDate, workingDays, year,
+       isGift, notes || null, req.user.fullName || req.user.username]
+    );
+
+    return res.status(201).json(req_);
+  } catch (err) { next(err); }
+}
+
+async function approveRequest(req, res, next) {
+  try {
+    const { rows: [r] } = await db.query(
+      `UPDATE lms_leave_requests
+       SET status='Approved', approved_at=NOW(), approved_by=$1
+       WHERE id=$2 AND status='Pending'
+       RETURNING *`,
+      [req.user.fullName || req.user.username, req.params.id]
+    );
+    if (!r) return res.status(404).json({ error: 'Pending request not found.' });
+    return res.json(r);
+  } catch (err) { next(err); }
+}
+
+async function rejectRequest(req, res, next) {
+  try {
+    const { reason } = req.body;
+    const { rows: [r] } = await db.query(
+      `UPDATE lms_leave_requests
+       SET status='Rejected', rejected_at=NOW(), rejected_by=$1, rejection_reason=$2
+       WHERE id=$3 AND status='Pending'
+       RETURNING *`,
+      [req.user.fullName || req.user.username, reason || null, req.params.id]
+    );
+    if (!r) return res.status(404).json({ error: 'Pending request not found.' });
+    return res.json(r);
+  } catch (err) { next(err); }
+}
+
+async function deleteRequest(req, res, next) {
+  try {
+    const { rowCount } = await db.query('DELETE FROM lms_leave_requests WHERE id=$1', [req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: 'Request not found.' });
+    return res.json({ message: 'Deleted.' });
+  } catch (err) { next(err); }
+}
+
+// ─── Balances ─────────────────────────────────────────────────────────────────
+async function getBalances(req, res, next) {
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const { team, dept } = req.query;
+
+    const conds = ['s.is_active = TRUE'];
+    const params = [year];
+    if (team) { params.push(team); conds.push(`t.name=$${params.length}`); }
+    if (dept) { params.push(dept); conds.push(`d.name=$${params.length}`); }
+
+    const { rows } = await db.query(
+      `SELECT s.id, s.name, s.role, s.annual_entitlement,
+              t.name AS team, d.name AS dept,
+              COALESCE(SUM(lr.working_days) FILTER (
+                WHERE lr.status='Approved' AND lr.year=$1 AND NOT lr.is_gift_leave
+              ),0)::int AS used,
+              (s.annual_entitlement - COALESCE(SUM(lr.working_days) FILTER (
+                WHERE lr.status='Approved' AND lr.year=$1 AND NOT lr.is_gift_leave
+              ),0))::int AS remaining
+       FROM lms_staff s
+       LEFT JOIN lms_teams t ON t.id = s.team_id
+       LEFT JOIN lms_departments d ON d.id = t.department_id
+       LEFT JOIN lms_leave_requests lr ON lr.staff_id = s.id
+       WHERE ${conds.join(' AND ')}
+       GROUP BY s.id, s.name, s.role, s.annual_entitlement, t.name, d.name
+       ORDER BY d.name, t.name, s.name`,
+      params
+    );
+
+    return res.json(rows);
+  } catch (err) { next(err); }
+}
+
+// ─── Departments & Teams ──────────────────────────────────────────────────────
+async function getDepartments(req, res, next) {
+  try {
+    const { rows: depts } = await db.query(
+      `SELECT d.id, d.name,
+              json_agg(json_build_object('id', t.id, 'name', t.name,
+                'member_count', (SELECT COUNT(*) FROM lms_staff WHERE team_id=t.id AND is_active=TRUE)
+              ) ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL) AS teams
+       FROM lms_departments d
+       LEFT JOIN lms_teams t ON t.department_id = d.id
+       GROUP BY d.id ORDER BY d.name`
+    );
+    return res.json(depts);
+  } catch (err) { next(err); }
+}
+
+async function createDepartment(req, res, next) {
+  try {
+    const { name } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Name is required.' });
+    const { rows: [d] } = await db.query(
+      'INSERT INTO lms_departments (name) VALUES ($1) RETURNING *', [name.trim()]
+    );
+    return res.status(201).json(d);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Department already exists.' });
+    next(err);
+  }
+}
+
+async function deleteDepartment(req, res, next) {
+  try {
+    const { rowCount } = await db.query('DELETE FROM lms_departments WHERE id=$1', [req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: 'Department not found.' });
+    return res.json({ message: 'Deleted.' });
+  } catch (err) { next(err); }
+}
+
+async function addTeam(req, res, next) {
+  try {
+    const { name } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Team name is required.' });
+    const { rows: [t] } = await db.query(
+      'INSERT INTO lms_teams (department_id, name) VALUES ($1,$2) RETURNING *',
+      [req.params.deptId, name.trim()]
+    );
+    return res.status(201).json(t);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Team already exists in this department.' });
+    next(err);
+  }
+}
+
+async function deleteTeam(req, res, next) {
+  try {
+    const { rowCount } = await db.query('DELETE FROM lms_teams WHERE id=$1', [req.params.teamId]);
+    if (!rowCount) return res.status(404).json({ error: 'Team not found.' });
+    return res.json({ message: 'Deleted.' });
+  } catch (err) { next(err); }
+}
+
+// ─── Staff ────────────────────────────────────────────────────────────────────
+async function getStaff(req, res, next) {
+  try {
+    const { teamId, search } = req.query;
+    const conds = [];
+    const params = [];
+
+    if (teamId) { params.push(parseInt(teamId)); conds.push(`s.team_id=$${params.length}`); }
+    if (search) { params.push(`%${search}%`);    conds.push(`s.name ILIKE $${params.length}`); }
+
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+
+    const { rows } = await db.query(
+      `SELECT s.*, t.name AS team_name, d.name AS dept_name
+       FROM lms_staff s
+       LEFT JOIN lms_teams t ON t.id = s.team_id
+       LEFT JOIN lms_departments d ON d.id = t.department_id
+       ${where}
+       ORDER BY d.name, t.name, s.name`,
+      params
+    );
+    return res.json(rows);
+  } catch (err) { next(err); }
+}
+
+async function addStaff(req, res, next) {
+  try {
+    const { teamId, name, role, annualEntitlement } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Name is required.' });
+    const { rows: [s] } = await db.query(
+      `INSERT INTO lms_staff (team_id, name, role, annual_entitlement)
+       VALUES ($1,$2,$3,$4) RETURNING *`,
+      [teamId || null, name.trim(), role || 'staff', annualEntitlement || 21]
+    );
+    return res.status(201).json(s);
+  } catch (err) { next(err); }
+}
+
+async function updateStaff(req, res, next) {
+  try {
+    const { name, role, teamId, annualEntitlement, isActive } = req.body;
+    const updates = [];
+    const params = [];
+
+    if (name !== undefined)             { params.push(name.trim());            updates.push(`name=$${params.length}`); }
+    if (role !== undefined)             { params.push(role);                   updates.push(`role=$${params.length}`); }
+    if (teamId !== undefined)           { params.push(teamId);                 updates.push(`team_id=$${params.length}`); }
+    if (annualEntitlement !== undefined){ params.push(annualEntitlement);      updates.push(`annual_entitlement=$${params.length}`); }
+    if (isActive !== undefined)         { params.push(isActive);               updates.push(`is_active=$${params.length}`); }
+
+    if (!updates.length) return res.status(400).json({ error: 'No fields to update.' });
+
+    params.push(req.params.id);
+    const { rows: [s] } = await db.query(
+      `UPDATE lms_staff SET ${updates.join(', ')} WHERE id=$${params.length} RETURNING *`, params
+    );
+    if (!s) return res.status(404).json({ error: 'Staff not found.' });
+    return res.json(s);
+  } catch (err) { next(err); }
+}
+
+async function removeStaff(req, res, next) {
+  try {
+    await db.query('UPDATE lms_staff SET is_active=FALSE WHERE id=$1', [req.params.id]);
+    return res.json({ message: 'Staff deactivated.' });
+  } catch (err) { next(err); }
+}
+
+// ─── Public Holidays ──────────────────────────────────────────────────────────
+async function getHolidays(req, res, next) {
+  try {
+    const { rows } = await db.query('SELECT * FROM lms_public_holidays ORDER BY date');
+    return res.json(rows);
+  } catch (err) { next(err); }
+}
+
+async function addHoliday(req, res, next) {
+  try {
+    const { date, name } = req.body;
+    if (!date || !name) return res.status(400).json({ error: 'date and name are required.' });
+    const { rows: [h] } = await db.query(
+      'INSERT INTO lms_public_holidays (date, name) VALUES ($1,$2) RETURNING *', [date, name]
+    );
+    return res.status(201).json(h);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Holiday already exists for this date.' });
+    next(err);
+  }
+}
+
+async function deleteHoliday(req, res, next) {
+  try {
+    const { rowCount } = await db.query('DELETE FROM lms_public_holidays WHERE id=$1', [req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: 'Holiday not found.' });
+    return res.json({ message: 'Deleted.' });
+  } catch (err) { next(err); }
+}
+
+module.exports = {
+  ensureSchema,
+  getOverview, getRequests, submitRequest, approveRequest, rejectRequest, deleteRequest,
+  getBalances,
+  getDepartments, createDepartment, deleteDepartment, addTeam, deleteTeam,
+  getStaff, addStaff, updateStaff, removeStaff,
+  getHolidays, addHoliday, deleteHoliday,
+};

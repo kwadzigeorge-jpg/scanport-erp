@@ -121,4 +121,27 @@ export const reportsApi = {
   downloadAudit:   (p) => api.get('/reports/audit', { params: { ...p, format: 'xlsx' }, responseType: 'blob' }),
 };
 
+// ─── Leave Management ─────────────────────────────────────────────────────────
+export const leaveApi = {
+  overview:      ()         => api.get('/leave/overview'),
+  requests:      (p)        => api.get('/leave/requests', { params: p }),
+  submit:        (d)        => api.post('/leave/requests', d),
+  approve:       (id)       => api.put(`/leave/requests/${id}/approve`),
+  reject:        (id, d)    => api.put(`/leave/requests/${id}/reject`, d),
+  deleteReq:     (id)       => api.delete(`/leave/requests/${id}`),
+  balances:      (p)        => api.get('/leave/balances', { params: p }),
+  departments:   ()         => api.get('/leave/departments'),
+  createDept:    (d)        => api.post('/leave/departments', d),
+  deleteDept:    (id)       => api.delete(`/leave/departments/${id}`),
+  addTeam:       (dId, d)   => api.post(`/leave/departments/${dId}/teams`, d),
+  deleteTeam:    (dId, tId) => api.delete(`/leave/departments/${dId}/teams/${tId}`),
+  staff:         (p)        => api.get('/leave/staff', { params: p }),
+  addStaff:      (d)        => api.post('/leave/staff', d),
+  updateStaff:   (id, d)    => api.put(`/leave/staff/${id}`, d),
+  removeStaff:   (id)       => api.delete(`/leave/staff/${id}`),
+  holidays:      ()         => api.get('/leave/holidays'),
+  addHoliday:    (d)        => api.post('/leave/holidays', d),
+  deleteHoliday: (id)       => api.delete(`/leave/holidays/${id}`),
+};
+
 export default api;

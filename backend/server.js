@@ -50,6 +50,7 @@ app.use('/api/containers', require('./src/routes/containers'));
 app.use('/api/trucks',     require('./src/routes/trucks'));
 app.use('/api/dashboard',  require('./src/routes/dashboard'));
 app.use('/api/reports',    require('./src/routes/reports'));
+app.use('/api/leave',      require('./src/routes/leave'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
@@ -78,6 +79,9 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  Running on http://localhost:${PORT}`);
   console.log(`  Environment: ${process.env.NODE_ENV || 'development'}\n`);
   require('./src/services/scheduler').startScheduler();
+  require('./src/controllers/leaveController').ensureSchema()
+    .then(() => console.log('  LMS schema ready'))
+    .catch(e => console.error('  LMS schema error:', e.message));
 });
 
 module.exports = { app, server };
