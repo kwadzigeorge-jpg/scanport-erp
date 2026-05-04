@@ -40,11 +40,12 @@ async function createTruckAllocation(req, res, next) {
 
     // ── Validate required fields ──
     if (!truckNumber?.trim())   return res.status(400).json({ error: 'Truck number is required.' });
-    if (!driverName?.trim())    return res.status(400).json({ error: 'Driver name is required.' });
-    if (!driverPhone?.trim() || !validatePhoneNumber(driverPhone)) return res.status(400).json({ error: 'Valid driver phone is required.' });
     if (!agentName?.trim())     return res.status(400).json({ error: 'Agent name is required.' });
     if (!agentPhone?.trim() || !validatePhoneNumber(agentPhone))   return res.status(400).json({ error: 'Valid agent phone is required.' });
     if (!Array.isArray(containers) || containers.length === 0)     return res.status(400).json({ error: 'At least one container is required.' });
+
+    const driverNameVal  = driverName?.trim()  || null;
+    const driverPhoneVal = driverPhone?.trim()  || null;
 
     // ── Validate container numbers + sizes ──
     const validatedContainers = [];
@@ -58,6 +59,26 @@ async function createTruckAllocation(req, res, next) {
     // ── Validate truck load rules ──
     const loadErr = validateTruckLoad(validatedContainers);
     if (loadErr) return res.status(400).json({ error: loadErr });
+
+    // ── Agent container limit (max 10 active) ──
+    const ACTIVE_STATUSES = [
+      'ARRIVED_AT_BOOTH','PENDING_BAY_ASSIGNMENT','BAY_ASSIGNED',
+      'ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED',
+    ];
+    const { rows: agentCount } = await client.query(
+      `SELECT COUNT(*)::int AS cnt FROM container_transactions
+       WHERE agent_phone = $1 AND status = ANY($2)`,
+      [agentPhone.trim(), ACTIVE_STATUSES]
+    );
+    const existing = agentCount[0].cnt;
+    if (existing + validatedContainers.length > 10) {
+      const remaining = 10 - existing;
+      return res.status(409).json({
+        error: remaining <= 0
+          ? `Agent ${agentName.trim()} already has ${existing} active containers — the maximum is 10. They must release containers before new ones can be added.`
+          : `Agent ${agentName.trim()} has ${existing} active containers. Adding ${validatedContainers.length} would exceed the limit of 10. Only ${remaining} more container${remaining === 1 ? '' : 's'} can be assigned to this agent.`,
+      });
+    }
 
     // ── Check for duplicate active containers ──
     for (const c of validatedContainers) {
@@ -114,7 +135,7 @@ async function createTruckAllocation(req, res, next) {
           agent_name, agent_phone, holding_area_id, bay_id, status, time_in, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'IN_BAY',NOW(),$9)
        RETURNING *`,
-      [allocationRef, truckNumber.trim(), driverName.trim(), driverPhone.trim(),
+      [allocationRef, truckNumber.trim(), driverNameVal, driverPhoneVal,
        agentName.trim(), agentPhone.trim(), areaId, resolvedBayId, req.user.id]
     );
 
@@ -133,7 +154,7 @@ async function createTruckAllocation(req, res, next) {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'BAY_ASSIGNED',NOW(),$12,$13,$14)
          RETURNING id, transaction_id, container_number, container_size, status`,
         [txnId, c.number, c.size, agentName.trim(), agentPhone.trim(),
-         truckNumber.trim(), driverName.trim(), driverPhone.trim(),
+         truckNumber.trim(), driverNameVal, driverPhoneVal,
          areaId, resolvedBayId, truck.id,
          qrDataUrl, qrToken, req.user.id]
       );

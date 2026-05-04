@@ -391,9 +391,14 @@ export default function BayAllocationPage() {
 
         {/* Agent */}
         <div className="card p-5 space-y-4">
-          <h2 className="font-semibold text-sm uppercase tracking-wide text-blue-700 flex items-center gap-2">
-            <User size={15} /> Agent Details
-          </h2>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="font-semibold text-sm uppercase tracking-wide text-blue-700 flex items-center gap-2">
+              <User size={15} /> Agent Details
+            </h2>
+            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+              Max 10 active containers per agent
+            </span>
+          </div>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Agent Name *</label>
