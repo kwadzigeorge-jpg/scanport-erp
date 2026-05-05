@@ -145,4 +145,23 @@ export const leaveApi = {
   deleteHoliday: (id)       => api.delete(`/leave/holidays/${id}`),
 };
 
+// ─── Permissions & Roles (RBAC) ───────────────────────────────────────────────
+export const permissionsApi = {
+  listAtomic:          ()          => api.get('/permissions/atomic'),
+  listGroups:          ()          => api.get('/permissions/groups'),
+  createGroup:         (d)         => api.post('/permissions/groups', d),
+  updateGroup:         (id, d)     => api.put(`/permissions/groups/${id}`, d),
+  deleteGroup:         (id)        => api.delete(`/permissions/groups/${id}`),
+  listRoles:           ()          => api.get('/permissions/roles'),
+  getRole:             (id)        => api.get(`/permissions/roles/${id}`),
+  createRole:          (d)         => api.post('/permissions/roles', d),
+  updateRole:          (id, d)     => api.put(`/permissions/roles/${id}`, d),
+  deleteRole:          (id)        => api.delete(`/permissions/roles/${id}`),
+  getRoleHistory:      (id)        => api.get(`/permissions/roles/${id}/history`),
+  getUserOverrides:    (uid)       => api.get(`/permissions/users/${uid}/overrides`),
+  setUserOverride:     (uid, d)    => api.put(`/permissions/users/${uid}/overrides`, d),
+  removeUserOverride:  (uid, oid)  => api.delete(`/permissions/users/${uid}/overrides/${oid}`),
+  getUserEffective:    (uid)       => api.get(`/permissions/users/${uid}/effective`),
+};
+
 export default api;

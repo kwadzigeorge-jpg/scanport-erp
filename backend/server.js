@@ -44,13 +44,14 @@ app.use('/api/', rateLimit({
 app.set('io', io);
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
-app.use('/api/auth',       require('./src/routes/auth'));
-app.use('/api/users',      require('./src/routes/users'));
-app.use('/api/containers', require('./src/routes/containers'));
-app.use('/api/trucks',     require('./src/routes/trucks'));
-app.use('/api/dashboard',  require('./src/routes/dashboard'));
-app.use('/api/reports',    require('./src/routes/reports'));
-app.use('/api/leave',      require('./src/routes/leave'));
+app.use('/api/auth',        require('./src/routes/auth'));
+app.use('/api/users',       require('./src/routes/users'));
+app.use('/api/containers',  require('./src/routes/containers'));
+app.use('/api/trucks',      require('./src/routes/trucks'));
+app.use('/api/dashboard',   require('./src/routes/dashboard'));
+app.use('/api/reports',     require('./src/routes/reports'));
+app.use('/api/leave',       require('./src/routes/leave'));
+app.use('/api/permissions', require('./src/routes/permissions'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
@@ -79,6 +80,9 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  Running on http://localhost:${PORT}`);
   console.log(`  Environment: ${process.env.NODE_ENV || 'development'}\n`);
   require('./src/services/scheduler').startScheduler();
+  require('./src/controllers/permissionController').ensureRbacSchema()
+    .then(() => console.log('  RBAC schema ready'))
+    .catch(e => console.error('  RBAC schema error:', e.message));
   require('./src/controllers/leaveController').ensureSchema()
     .then(() => console.log('  LMS schema ready'))
     .catch(e => console.error('  LMS schema error:', e.message));

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const db = require('../config/database');
+const { computeEffectivePermissions } = require('../controllers/permissionController');
 
 /**
  * Verify JWT and attach user + permissions to req.
@@ -53,22 +54,15 @@ async function authenticate(req, res, next) {
     // Refresh last_active
     await db.query('UPDATE user_sessions SET last_active = NOW() WHERE token_hash = $1', [tokenHash]);
 
-    // Load permissions
-    const { rows: perms } = await db.query(
-      `SELECT p.name FROM permissions p
-       JOIN role_permissions rp ON rp.permission_id = p.id
-       JOIN roles r ON r.id = rp.role_id
-       JOIN users u ON u.role_id = r.id
-       WHERE u.id = $1`,
-      [session.user_id]
-    );
+    // Load effective permissions (includes group inheritance, user overrides, denies)
+    const permissions = await computeEffectivePermissions(session.user_id);
 
     req.user = {
       id: session.user_id,
       username: session.username,
       fullName: session.full_name,
       role: session.role,
-      permissions: perms.map(p => p.name),
+      permissions,
       tokenHash,
     };
 

@@ -11,17 +11,17 @@ const {
 router.use(authenticate);
 
 router.get('/roles',                               listRoles);
-router.get('/permissions',                         requirePermission('users:view'), listPermissions);
-router.get('/stats',                               requirePermission('users:view'), getUserStats);
-router.get('/sessions',                            requirePermission('users:view'), listActiveSessions);
-router.delete('/sessions/:sessionId',              requirePermission('users:edit'), killSession);
+router.get('/permissions',                         requirePermission('user.view'), listPermissions);
+router.get('/stats',                               requirePermission('user.view'), getUserStats);
+router.get('/sessions',                            requirePermission('session.view'), listActiveSessions);
+router.delete('/sessions/:sessionId',              requirePermission('session.manage'), killSession);
 
-router.get('/',                                    requirePermission('users:view'),       listUsers);
-router.get('/:id',                                 requirePermission('users:view'),       getUser);
-router.post('/',                                   requirePermission('users:create'),     createUser);
-router.put('/:id',                                 requirePermission('users:edit'),       updateUser);
-router.post('/:id/reset-password',                 requirePermission('users:edit'),       resetUserPassword);
-router.post('/:id/unlock',                         requirePermission('users:edit'),       unlockUser);
-router.delete('/:id/sessions',                     requirePermission('users:edit'),       killUserSessions);
+router.get('/',                                    requirePermission('user.view'),          listUsers);
+router.get('/:id',                                 requirePermission('user.view'),          getUser);
+router.post('/',                                   requirePermission('user.create'),        createUser);
+router.put('/:id',                                 requirePermission('user.edit'),          updateUser);
+router.post('/:id/reset-password',                 requirePermission('user.password_reset'),resetUserPassword);
+router.post('/:id/unlock',                         requirePermission('user.unlock'),        unlockUser);
+router.delete('/:id/sessions',                     requirePermission('user.session_kill'),  killUserSessions);
 
 module.exports = router;
