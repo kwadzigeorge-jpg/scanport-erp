@@ -33,13 +33,13 @@ function AppRoutes() {
 
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard"    element={<ProtectedRoute permission="dashboard:view"><DashboardPage /></ProtectedRoute>} />
-        <Route path="booth"        element={<ProtectedRoute permission="container:allocate"><BoothPage /></ProtectedRoute>} />
-<Route path="marshal"      element={<ProtectedRoute permission="container:confirm_entry"><MarshalPage /></ProtectedRoute>} />
-        <Route path="bays"         element={<ProtectedRoute permission="dashboard:view"><BaysPage /></ProtectedRoute>} />
-        <Route path="bay-allocation" element={<ProtectedRoute permission="container:allocate"><BayAllocationPage /></ProtectedRoute>} />
-        <Route path="transactions" element={<ProtectedRoute permission="container:view"><TransactionsPage /></ProtectedRoute>} />
-        <Route path="reports"      element={<ProtectedRoute permission="reports:view"><ReportsPage /></ProtectedRoute>} />
+        <Route path="dashboard"      element={<ProtectedRoute permission="dashboard.view"><DashboardPage /></ProtectedRoute>} />
+        <Route path="booth"          element={<ProtectedRoute permission="allocation.create"><BoothPage /></ProtectedRoute>} />
+        <Route path="marshal"        element={<ProtectedRoute permission="marshal.confirm_entry"><MarshalPage /></ProtectedRoute>} />
+        <Route path="bays"           element={<ProtectedRoute permission="bay.view"><BaysPage /></ProtectedRoute>} />
+        <Route path="bay-allocation" element={<ProtectedRoute permission="allocation.create"><BayAllocationPage /></ProtectedRoute>} />
+        <Route path="transactions"   element={<ProtectedRoute permission="container.view"><TransactionsPage /></ProtectedRoute>} />
+        <Route path="reports"        element={<ProtectedRoute permission="report.view"><ReportsPage /></ProtectedRoute>} />
         <Route path="admin"        element={<ProtectedRoute roles={['admin']}><AdminPage /></ProtectedRoute>} />
         <Route path="leave"        element={<ProtectedRoute roles={['admin', 'supervisor']}><LeavePage /></ProtectedRoute>} />
       </Route>
