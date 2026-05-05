@@ -16,30 +16,30 @@ router.use(authenticate);
 
 // ── Reference data ──────────────────────────────────────────────────────────
 router.get('/holding-areas', listHoldingAreas);
-router.get('/bays-view',     requirePermission('dashboard:view'), baysView);
-router.get('/status-summary', requirePermission('dashboard:view'), statusSummary);
+router.get('/bays-view',      requirePermission('bay.view'),        baysView);
+router.get('/status-summary', requirePermission('dashboard.view'),  statusSummary);
 
 // ── Booth Officer: check-in and bay assignment ──────────────────────────────
-router.post('/check-in',         requirePermission('container:allocate'), checkIn);
-router.post('/:id/assign-bay',   requirePermission('container:allocate'), assignBay);
+router.post('/check-in',         requirePermission('allocation.create'), checkIn);
+router.post('/:id/assign-bay',   requirePermission('allocation.create'), assignBay);
 
 // ── Legacy one-step allocation (kept for backward compat) ───────────────────
-router.post('/allocate',         requirePermission('container:allocate'), allocate);
+router.post('/allocate',         requirePermission('allocation.create'), allocate);
 
 // ── Marshal: full examination workflow ─────────────────────────────────────
-router.post('/confirm-entry',              requirePermission('container:confirm_entry'),      confirmEntry);
-router.post('/:id/start-examination',      requirePermission('container:start_examination'),  startExamination);
-router.post('/:id/complete-examination',   requirePermission('container:complete_examination'), completeExamination);
-router.post('/confirm-exit',               requirePermission('container:release'),            confirmExit);
+router.post('/confirm-entry',              requirePermission('marshal.confirm_entry'),        confirmEntry);
+router.post('/:id/start-examination',      requirePermission('marshal.start_examination'),    startExamination);
+router.post('/:id/complete-examination',   requirePermission('marshal.complete_examination'), completeExamination);
+router.post('/confirm-exit',               requirePermission('marshal.confirm_exit'),         confirmExit);
 
 // ── List / detail ────────────────────────────────────────────────────────────
-router.get('/',    requirePermission('container:view'), listTransactions);
-router.get('/:id', requirePermission('container:view'), getTransaction);
+router.get('/',    requirePermission('container.view'), listTransactions);
+router.get('/:id', requirePermission('container.view'), getTransaction);
 
 // ── Supervisor override ──────────────────────────────────────────────────────
-router.put('/:id/override', requirePermission('container:override'), override);
+router.put('/:id/override', requirePermission('container.override'), override);
 
 // ── Admin: reinstate a mistakenly released/cancelled container ───────────────
-router.post('/:id/reinstate', requirePermission('container:override'), reinstateContainer);
+router.post('/:id/reinstate', requirePermission('container.reinstate'), reinstateContainer);
 
 module.exports = router;

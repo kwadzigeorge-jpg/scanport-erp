@@ -11,26 +11,26 @@ const {
 router.use(authenticate);
 
 // ── New analytics endpoints ──────────────────────────────────────────────────
-router.get('/operations-dashboard', requirePermission('reports:view'), operationsDashboard);
-router.get('/dwell-analysis',       requirePermission('reports:view'), dwellAnalysis);
-router.get('/area-performance',     requirePermission('reports:view'), areaPerformance);
-router.get('/sla-exceptions',       requirePermission('reports:view'), slaExceptions);
-router.get('/export',               requirePermission('reports:view'), exportReport);
+router.get('/operations-dashboard', requirePermission('report.view'), operationsDashboard);
+router.get('/dwell-analysis',       requirePermission('report.view'), dwellAnalysis);
+router.get('/area-performance',     requirePermission('report.view'), areaPerformance);
+router.get('/sla-exceptions',       requirePermission('report.view'), slaExceptions);
+router.get('/export',               requirePermission('report.export'), exportReport);
 
 // ── Legacy endpoints (kept for compatibility) ────────────────────────────────
-router.get('/daily',             requirePermission('reports:view'), dailyReport);
-router.get('/dwell-time',        requirePermission('reports:view'), dwellTimeReport);
-router.get('/agent-performance', requirePermission('reports:view'), agentPerformanceReport);
-router.get('/exceptions',        requirePermission('reports:view'), exceptionReport);
-router.get('/audit',             requirePermission('audit:view'),   auditTrail);
+router.get('/daily',             requirePermission('report.view'),    dailyReport);
+router.get('/dwell-time',        requirePermission('report.view'),    dwellTimeReport);
+router.get('/agent-performance', requirePermission('report.view'),    agentPerformanceReport);
+router.get('/exceptions',        requirePermission('report.view'),    exceptionReport);
+router.get('/audit',             requirePermission('audit.view'),     auditTrail);
 
 // ── Email & alerts config ─────────────────────────────────────────────────────
-router.get('/email-config',  requirePermission('config:view'), getEmailConfig);
-router.put('/email-config',  requirePermission('config:edit'), updateEmailConfig);
-router.post('/test-email',   requirePermission('config:edit'), testEmail);
+router.get('/email-config',  requirePermission('report.email_config'), getEmailConfig);
+router.put('/email-config',  requirePermission('report.email_config'), updateEmailConfig);
+router.post('/test-email',   requirePermission('report.email_config'), testEmail);
 
 // ── System config ────────────────────────────────────────────────────────────
-router.get('/config',            requirePermission('config:view'),  getSystemConfig);
-router.put('/config',            requirePermission('config:edit'),  updateSystemConfig);
+router.get('/config',            requirePermission('config.view'),  getSystemConfig);
+router.put('/config',            requirePermission('config.edit'),  updateSystemConfig);
 
 module.exports = router;

@@ -7,9 +7,9 @@ const {
 
 router.use(authenticate);
 
-router.get('/bays',            requirePermission('container:view'),    getAvailableBays);
-router.get('/',                requirePermission('container:view'),    listTruckAllocations);
-router.post('/',               requirePermission('container:allocate'), createTruckAllocation);
-router.post('/:id/release',    requirePermission('container:confirm_exit'), releaseTruck);
+router.get('/bays',            requirePermission('allocation.view'),   getAvailableBays);
+router.get('/',                requirePermission('truck.view'),        listTruckAllocations);
+router.post('/',               requirePermission('truck.create'),      createTruckAllocation);
+router.post('/:id/release',    requirePermission('truck.release'),     releaseTruck);
 
 module.exports = router;
