@@ -167,7 +167,7 @@ async function createTruckAllocation(req, res, next) {
             holding_area_id, bay_id, truck_allocation_id,
             status, bay_assigned_time, qr_code_data, qr_code_token, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'BAY_ASSIGNED',NOW(),$12,$13,$14)
-         RETURNING id, transaction_id, container_number, container_size, status`,
+         RETURNING id, transaction_id, container_number, container_size, status, qr_code_token`,
         [txnId, c.number, c.size, agentName.trim(), agentPhone.trim(),
          truckNumber.trim(), driverNameVal, driverPhoneVal,
          areaId, resolvedBayId, truck.id,

@@ -235,13 +235,14 @@ export default function BayAllocationPage() {
       setLastAgent(agent);
       setChit({
         transaction_id:   alloc.allocation_ref,
-        container_number: alloc.containers?.[0]?.container_number || alloc.truck_number,
+        containers:       alloc.containers || [],
+        container_number: alloc.containers?.map(c => c.container_number).join(' / ') || alloc.truck_number,
         agent_name:       alloc.agent_name   || form.agentName,
         agent_phone:      alloc.agent_phone  || form.agentPhone,
         truck_number:     alloc.truck_number,
         area_name:        alloc.area_name,
         bay_code:         alloc.bay_code,
-        qr_code_token:    alloc.qr_token || null,
+        qr_code_token:    alloc.containers?.[0]?.qr_code_token || null,
         created_at:       alloc.created_at || new Date().toISOString(),
       });
       setForm({ ...EMPTY_FORM });
