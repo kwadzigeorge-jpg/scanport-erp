@@ -354,14 +354,13 @@ async function ensureRbacSchema() {
 
     // ── Seed default roles with groups + grants + denies ──
     for (const roleDef of DEFAULT_ROLES) {
-      // Ensure role exists with is_system flag
       const { rows: [role] } = await client.query(
         `UPDATE roles SET is_system = $1, description = $2 WHERE name = $3 RETURNING id`,
         [roleDef.is_system, roleDef.description, roleDef.name]
       );
-      if (!role) continue; // role doesn't exist yet (handled by initial DB seed)
+      if (!role) continue;
 
-      // Assign permission groups
+      // Assign permission groups table (for UI only)
       await client.query('DELETE FROM role_permission_groups WHERE role_id = $1', [role.id]);
       for (const groupName of roleDef.groups) {
         await client.query(
@@ -372,11 +371,17 @@ async function ensureRbacSchema() {
         );
       }
 
-      // Extra grants (clear legacy role_permissions first, re-add as 'grant')
-      await client.query(
-        `DELETE FROM role_permissions WHERE role_id = $1 AND type = 'grant'`, [role.id]
-      );
-      for (const code of roleDef.extra_grants) {
+      // Expand groups into a flat permission set (source of truth → role_permissions)
+      const allGrants = new Set();
+      for (const groupName of roleDef.groups) {
+        (PERMISSION_GROUPS[groupName] || []).forEach(p => allGrants.add(p));
+      }
+      roleDef.extra_grants.forEach(p => allGrants.add(p));
+      roleDef.denies.forEach(p => allGrants.delete(p)); // denies win
+
+      // Wipe and re-seed role_permissions for this role
+      await client.query(`DELETE FROM role_permissions WHERE role_id = $1`, [role.id]);
+      for (const code of allGrants) {
         await client.query(
           `INSERT INTO role_permissions (role_id, permission_id, type)
            SELECT $1, id, 'grant' FROM permissions WHERE name = $2
@@ -384,16 +389,11 @@ async function ensureRbacSchema() {
           [role.id, code]
         );
       }
-
-      // Denies
-      await client.query(
-        `DELETE FROM role_permissions WHERE role_id = $1 AND type = 'deny'`, [role.id]
-      );
       for (const code of roleDef.denies) {
         await client.query(
           `INSERT INTO role_permissions (role_id, permission_id, type)
            SELECT $1, id, 'deny' FROM permissions WHERE name = $2
-           ON CONFLICT DO NOTHING`,
+           ON CONFLICT (role_id, permission_id) DO UPDATE SET type = 'deny'`,
           [role.id, code]
         );
       }
