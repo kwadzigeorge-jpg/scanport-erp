@@ -9,12 +9,12 @@ import {
 import clsx from 'clsx';
 
 const navItems = [
-  { to: '/dashboard',    icon: LayoutDashboard, label: 'Dashboard',     permission: 'dashboard:view' },
-  { to: '/bays',           icon: LayoutGrid,    label: 'Bays View',      permission: 'dashboard:view' },
-  { to: '/bay-allocation', icon: MapPin,        label: 'Bay Allocation', permission: 'container:allocate' },
-  { to: '/marshal',        icon: FlaskConical,  label: 'Holding Area',   permission: 'container:confirm_entry' },
-  { to: '/transactions', icon: ClipboardList,   label: 'Transactions',  permission: 'container:view' },
-  { to: '/reports',      icon: BarChart3,       label: 'Reports',       permission: 'reports:view' },
+  { to: '/dashboard',    icon: LayoutDashboard, label: 'Dashboard',     permission: 'dashboard.view' },
+  { to: '/bays',         icon: LayoutGrid,      label: 'Bays View',     permission: 'bay.view' },
+  { to: '/bay-allocation',icon: MapPin,         label: 'Bay Allocation',permission: 'allocation.create' },
+  { to: '/marshal',      icon: FlaskConical,    label: 'Holding Area',  permission: 'marshal.confirm_entry' },
+  { to: '/transactions', icon: ClipboardList,   label: 'Transactions',  permission: 'container.view' },
+  { to: '/reports',      icon: BarChart3,       label: 'Reports',       permission: 'report.view' },
   { to: '/admin',        icon: Settings,        label: 'Admin',         role: 'admin' },
   { to: '/leave',        icon: CalendarDays,    label: 'Leave Mgmt',    roles: ['admin', 'supervisor'] },
 ];
