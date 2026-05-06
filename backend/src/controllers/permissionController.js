@@ -79,11 +79,35 @@ const ATOMIC_PERMISSIONS = [
   { name: 'session.view',         description: 'View active sessions' },
   { name: 'session.manage',       description: 'Manage and terminate sessions' },
   // Leave
-  { name: 'leave.view',           description: 'View leave records and balances' },
-  { name: 'leave.submit',         description: 'Submit leave requests' },
-  { name: 'leave.approve',        description: 'Approve or reject leave requests' },
-  { name: 'leave.manage_roster',  description: 'Manage leave staff roster' },
-  { name: 'leave.manage_holidays',description: 'Manage public holidays' },
+  { name: 'leave.view',                  description: 'View leave records and balances' },
+  { name: 'leave.submit',                description: 'Submit leave requests' },
+  { name: 'leave.approve',               description: 'Approve or reject leave requests' },
+  { name: 'leave.manage_roster',         description: 'Manage leave staff roster' },
+  { name: 'leave.manage_holidays',       description: 'Manage public holidays' },
+  // Inventory — Parts master
+  { name: 'part.view',                   description: 'View spare parts catalogue' },
+  { name: 'part.create',                 description: 'Create spare parts records' },
+  { name: 'part.edit',                   description: 'Edit spare parts records' },
+  { name: 'part.delete',                 description: 'Obsolete / delete spare parts' },
+  // Inventory — Stock movements
+  { name: 'stock.view',                  description: 'View stock balances and movement history' },
+  { name: 'stock.receive',               description: 'Receive stock in (STOCK_IN transactions)' },
+  { name: 'stock.issue',                 description: 'Issue stock out (STOCK_OUT transactions)' },
+  { name: 'stock.adjust',                description: 'Make cycle-count stock adjustments' },
+  { name: 'stock.transfer',              description: 'Transfer stock between locations' },
+  { name: 'stock.reserve',               description: 'Create and cancel stock reservations' },
+  { name: 'stock.approve',               description: 'Approve high-value stock adjustments' },
+  // Inventory — Suppliers & Equipment
+  { name: 'supplier.view',               description: 'View supplier records' },
+  { name: 'supplier.create',             description: 'Create supplier records' },
+  { name: 'supplier.edit',               description: 'Edit supplier records' },
+  { name: 'equipment.inventory_view',    description: 'View equipment master for inventory' },
+  { name: 'equipment.inventory_manage',  description: 'Create and edit equipment records' },
+  // Inventory — Reports & Alerts
+  { name: 'report.inventory_view',       description: 'View inventory reports and analytics' },
+  { name: 'report.inventory_export',     description: 'Export inventory reports to file' },
+  { name: 'alert.inventory_view',        description: 'View inventory alerts and reorder notifications' },
+  { name: 'settings.inventory',          description: 'Manage inventory settings and storage locations' },
 ];
 
 const PERMISSION_GROUPS = {
@@ -120,6 +144,20 @@ const PERMISSION_GROUPS = {
     'config.view','config.edit','audit.view','audit.export',
     'session.view','session.manage','report.email_config','report.schedule',
   ],
+  'Storekeeper': [
+    'part.view','stock.view','stock.receive','stock.issue',
+    'stock.reserve','alert.inventory_view','report.inventory_view',
+    'supplier.view','equipment.inventory_view',
+  ],
+  'Inventory Management': [
+    'part.view','part.create','part.edit',
+    'stock.view','stock.receive','stock.issue','stock.adjust',
+    'stock.transfer','stock.reserve','stock.approve',
+    'supplier.view','supplier.create','supplier.edit',
+    'equipment.inventory_view','equipment.inventory_manage',
+    'report.inventory_view','report.inventory_export',
+    'alert.inventory_view','settings.inventory',
+  ],
 };
 
 const DEFAULT_ROLES = [
@@ -135,6 +173,7 @@ const DEFAULT_ROLES = [
       'container.edit','container.delete',
       'holding_area.manage','bay.manage',
       'leave.approve','leave.manage_roster','leave.manage_holidays',
+      'part.delete',
     ],
     denies: [],
   },
