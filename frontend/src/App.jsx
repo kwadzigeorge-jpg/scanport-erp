@@ -47,7 +47,7 @@ function AppRoutes() {
         <Route path="leave"        element={<ProtectedRoute roles={['admin', 'supervisor']}><LeavePage /></ProtectedRoute>} />
         <Route path="inventory"    element={<ProtectedRoute permission="part.view"><InventoryPage /></ProtectedRoute>} />
         <Route path="stock"        element={<ProtectedRoute permission="stock.view"><StockPage /></ProtectedRoute>} />
-        <Route path="compliance"   element={<ProtectedRoute permission="compliance.view"><CompliancePage /></ProtectedRoute>} />
+        <Route path="compliance"   element={<ProtectedRoute roles={['admin','supervisor','compliance_officer','compliance_manager']}><CompliancePage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

@@ -17,7 +17,7 @@ const navItems = [
   { to: '/reports',      icon: BarChart3,       label: 'Reports',       permission: 'report.view' },
   { to: '/inventory',    icon: Package,         label: 'Parts Catalogue', permission: 'part.view' },
   { to: '/stock',        icon: Boxes,           label: 'Stock',           permission: 'stock.view' },
-  { to: '/compliance',   icon: ShieldCheck,     label: 'Compliance',      permission: 'compliance.view' },
+  { to: '/compliance',   icon: ShieldCheck,     label: 'Compliance',      roles: ['admin', 'supervisor', 'compliance_officer', 'compliance_manager'] },
   { to: '/admin',        icon: Settings,        label: 'Admin',         role: 'admin' },
   { to: '/leave',        icon: CalendarDays,    label: 'Leave Mgmt',    roles: ['admin', 'supervisor'] },
 ];
