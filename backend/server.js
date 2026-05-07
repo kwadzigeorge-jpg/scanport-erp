@@ -54,6 +54,7 @@ app.use('/api/leave',       require('./src/routes/leave'));
 app.use('/api/permissions', require('./src/routes/permissions'));
 app.use('/api/parts',       require('./src/routes/parts'));
 app.use('/api/stock',       require('./src/routes/stock'));
+app.use('/api/compliance',  require('./src/routes/compliance'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));

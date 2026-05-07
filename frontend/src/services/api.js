@@ -202,4 +202,56 @@ export const stockApi = {
   movementReport:    (p)     => api.get('/stock/reports/movement', { params: p }),
 };
 
+// ─── Compliance ───────────────────────────────────────────────────────────────
+export const complianceApi = {
+  // Dashboard
+  dashboard:              ()        => api.get('/compliance/dashboard'),
+
+  // Scanners
+  listScanners:           (p)       => api.get('/compliance/scanners', { params: p }),
+  getScanner:             (id)      => api.get(`/compliance/scanners/${id}`),
+  createScanner:          (d)       => api.post('/compliance/scanners', d),
+  updateScanner:          (id, d)   => api.put(`/compliance/scanners/${id}`, d),
+
+  // Certificates
+  listCertificates:       (p)       => api.get('/compliance/certificates', { params: p }),
+  createCertificate:      (d)       => api.post('/compliance/certificates', d),
+  updateCertificate:      (id, d)   => api.put(`/compliance/certificates/${id}`, d),
+  uploadCertificate:      (id, f)   => api.post(`/compliance/certificates/${id}/upload`, f, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  submitApplication:      (id, d)   => api.post(`/compliance/certificates/${id}/submit-application`, d),
+
+  // Survey Meters
+  listSurveyMeters:       (p)       => api.get('/compliance/survey-meters', { params: p }),
+  createSurveyMeter:      (d)       => api.post('/compliance/survey-meters', d),
+  updateSurveyMeter:      (id, d)   => api.put(`/compliance/survey-meters/${id}`, d),
+  logCalibration:         (d)       => api.post('/compliance/survey-meters/calibrations', d),
+
+  // Maintenance
+  listMaintenance:        (p)       => api.get('/compliance/maintenance', { params: p }),
+  logMaintenance:         (d)       => api.post('/compliance/maintenance', d),
+
+  // Breakdowns
+  listBreakdowns:         (p)       => api.get('/compliance/breakdowns', { params: p }),
+  logBreakdown:           (d)       => api.post('/compliance/breakdowns', d),
+  updateBreakdown:        (id, d)   => api.put(`/compliance/breakdowns/${id}`, d),
+
+  // Repairs
+  logRepair:              (d)       => api.post('/compliance/repairs', d),
+
+  // Annual Report
+  generateAnnualReport:   (d)       => api.post('/compliance/annual-report/generate', d),
+  getAnnualReport:        (year)    => api.get(`/compliance/annual-report/${year}`),
+  exportAnnualReport:     (year, f) => api.get(`/compliance/annual-report/${year}/export`, { params: { format: f }, responseType: f === 'xlsx' ? 'blob' : 'json' }),
+  submitAnnualReport:     (id, d)   => api.post(`/compliance/annual-report/${id}/submit`, d),
+
+  // Reports
+  maintenanceReport:      (p)       => api.get('/compliance/reports/maintenance', { params: p }),
+  vendorPerformance:      (p)       => api.get('/compliance/reports/vendor-performance', { params: p }),
+  complianceRate:         (p)       => api.get('/compliance/reports/compliance-rate', { params: p }),
+
+  // Notifications
+  notifications:          ()        => api.get('/compliance/notifications'),
+  markRead:               (id)      => api.put(`/compliance/notifications/${id}/read`),
+};
+
 export default api;
