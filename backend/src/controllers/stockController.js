@@ -683,16 +683,6 @@ async function getSlowMoversReport(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = {
-  getBalances, getPartStock, getLedger,
-  stockIn, stockOut, stockReturn, adjust, transfer,
-  createReservation, cancelReservation, listReservations,
-  getAlerts, resolveAlert,
-  getReorderList,
-  getValuationReport, getConsumptionReport, getSlowMoversReport,
-  getMovementReport,
-};
-
 // ─── Monthly Stock Movement Report ───────────────────────────────────────────
 async function getMovementReport(req, res, next) {
   try {
@@ -795,3 +785,13 @@ async function getMovementReport(req, res, next) {
     return res.json({ period: { from, to }, parts: data, summary });
   } catch (err) { next(err); }
 }
+
+module.exports = {
+  getBalances, getPartStock, getLedger,
+  stockIn, stockOut, stockReturn, adjust, transfer,
+  createReservation, cancelReservation, listReservations,
+  getAlerts, resolveAlert,
+  getReorderList,
+  getValuationReport, getConsumptionReport, getSlowMoversReport,
+  getMovementReport,
+};
