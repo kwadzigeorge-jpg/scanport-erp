@@ -15,6 +15,7 @@ import AdminPage        from './pages/AdminPage';
 import LeavePage        from './pages/LeavePage';
 import InventoryPage    from './pages/InventoryPage';
 import StockPage        from './pages/StockPage';
+import CompliancePage   from './pages/CompliancePage';
 import NotFoundPage     from './pages/NotFoundPage';
 
 function ProtectedRoute({ children, roles, permission }) {
@@ -46,6 +47,7 @@ function AppRoutes() {
         <Route path="leave"        element={<ProtectedRoute roles={['admin', 'supervisor']}><LeavePage /></ProtectedRoute>} />
         <Route path="inventory"    element={<ProtectedRoute permission="part.view"><InventoryPage /></ProtectedRoute>} />
         <Route path="stock"        element={<ProtectedRoute permission="stock.view"><StockPage /></ProtectedRoute>} />
+        <Route path="compliance"   element={<ProtectedRoute permission="compliance.view"><CompliancePage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />
