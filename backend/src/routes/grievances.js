@@ -9,6 +9,9 @@ router.use(authenticate);
 router.get('/dashboard',      requirePermission('grievance.view'),   gc.getDashboard);
 router.get('/export',         requirePermission('grievance.export'), gc.exportGrievances);
 router.post('/check-overdue', requirePermission('grievance.manage'), gc.checkOverdue);
+router.get('/config',         requirePermission('grievance.view'),   gc.listConfig);
+router.post('/config',        requirePermission('grievance.manage'), gc.createConfig);
+router.delete('/config/:id',  requirePermission('grievance.manage'), gc.deleteConfig);
 
 router.get('/',               requirePermission('grievance.view'),   gc.listGrievances);
 router.post('/',              requirePermission('grievance.create'),  gc.createGrievance);

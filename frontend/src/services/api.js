@@ -265,6 +265,9 @@ export const grievanceApi = {
   addNote:      (id, d)   => api.post(`/grievances/${id}/note`, d).then(r => r.data),
   checkOverdue: ()        => api.post('/grievances/check-overdue').then(r => r.data),
   export:       ()        => api.get('/grievances/export', { responseType: 'blob' }).then(r => r.data),
+  listConfig:   (type)    => api.get('/grievances/config', { params: { type } }).then(r => r.data),
+  createConfig: (data)    => api.post('/grievances/config', data).then(r => r.data),
+  deleteConfig: (id)      => api.delete(`/grievances/config/${id}`).then(r => r.data),
 };
 
 export default api;

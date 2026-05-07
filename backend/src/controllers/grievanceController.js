@@ -249,9 +249,51 @@ async function exportGrievances(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Config (departments & grievance types) ───────────────────────────────────
+async function listConfig(req, res, next) {
+  try {
+    const { type } = req.query;
+    const params = []; const conditions = [];
+    if (type) { params.push(type); conditions.push(`config_type=$${params.length}`); }
+    conditions.push(`is_active=TRUE`);
+    const { rows } = await db.query(
+      `SELECT * FROM grievance_config WHERE ${conditions.join(' AND ')} ORDER BY sort_order, label`,
+      params
+    );
+    return res.json(rows);
+  } catch (err) { next(err); }
+}
+
+async function createConfig(req, res, next) {
+  try {
+    const { config_type, value, label, sort_order } = req.body;
+    if (!config_type || !value?.trim() || !label?.trim())
+      return res.status(400).json({ error: 'config_type, value and label are required.' });
+    const { rows } = await db.query(`
+      INSERT INTO grievance_config (config_type, value, label, sort_order, created_by)
+      VALUES ($1,$2,$3,$4,$5) RETURNING *
+    `, [config_type, value.trim(), label.trim(), sort_order || 0, req.user.id]);
+    return res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'This value already exists.' });
+    next(err);
+  }
+}
+
+async function deleteConfig(req, res, next) {
+  try {
+    const { rowCount } = await db.query(
+      `UPDATE grievance_config SET is_active=FALSE WHERE id=$1`, [req.params.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Not found.' });
+    return res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   getDashboard, listGrievances, getGrievance,
   createGrievance, updateGrievance,
   changeStatus, addNote,
   checkOverdue, exportGrievances,
+  listConfig, createConfig, deleteConfig,
 };

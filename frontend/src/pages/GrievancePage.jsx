@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import {
   FolderOpen, CircleDot, Search, CheckCircle2, AlertTriangle,
   XCircle, Clock, Download, Plus, ChevronRight, MinusCircle,
-  BarChart2, Building2, X,
+  BarChart2, Building2, X, Settings, Trash2,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -101,14 +101,121 @@ const inp = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ou
 const sel = inp + ' bg-white';
 const ta  = inp + ' resize-none';
 
+// ─── Settings Modal ───────────────────────────────────────────────────────────
+function SettingsModal({ onClose }) {
+  const qc = useQueryClient();
+  const [tab, setTab] = useState('department');
+  const [newLabel, setNewLabel] = useState('');
+
+  const { data: items = [], isLoading } = useQuery(
+    ['grievance-config', tab],
+    () => grievanceApi.listConfig(tab),
+    { keepPreviousData: true }
+  );
+
+  const addMut = useMutation(grievanceApi.createConfig, {
+    onSuccess: () => {
+      toast.success('Added.');
+      qc.invalidateQueries(['grievance-config', tab]);
+      qc.invalidateQueries(['grievance-config', 'department']);
+      qc.invalidateQueries(['grievance-config', 'grievance_type']);
+      setNewLabel('');
+    },
+    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+  });
+
+  const delMut = useMutation(grievanceApi.deleteConfig, {
+    onSuccess: () => {
+      toast.success('Removed.');
+      qc.invalidateQueries(['grievance-config', tab]);
+      qc.invalidateQueries(['grievance-config', 'department']);
+      qc.invalidateQueries(['grievance-config', 'grievance_type']);
+    },
+    onError: () => toast.error('Failed to remove.'),
+  });
+
+  const handleAdd = () => {
+    if (!newLabel.trim()) return;
+    const value = tab === 'department'
+      ? newLabel.trim()
+      : newLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    addMut.mutate({ config_type: tab, value, label: newLabel.trim() });
+  };
+
+  const TABS = [
+    { key: 'department',    label: 'Departments' },
+    { key: 'grievance_type', label: 'Grievance Types' },
+  ];
+
+  return (
+    <Modal title="Grievance Settings" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          {TABS.map(t => (
+            <button key={t.key} onClick={() => { setTab(t.key); setNewLabel(''); }}
+              className={clsx('flex-1 text-sm py-1.5 rounded-md font-medium transition-colors',
+                tab === t.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {isLoading ? (
+          <div className="flex justify-center py-6">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+          </div>
+        ) : (
+          <div className="space-y-1 max-h-60 overflow-y-auto">
+            {items.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-4">No items yet.</p>
+            )}
+            {items.map(item => (
+              <div key={item.id}
+                className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-50 group">
+                <span className="text-sm text-gray-700">{item.label}</span>
+                <button onClick={() => delMut.mutate(item.id)}
+                  disabled={delMut.isLoading}
+                  className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-all">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="border-t border-gray-100 pt-3">
+          <p className="text-xs font-medium text-gray-500 mb-2">
+            Add {tab === 'department' ? 'Department' : 'Grievance Type'}
+          </p>
+          <div className="flex gap-2">
+            <input className={clsx(inp, 'flex-1')}
+              placeholder={tab === 'department' ? 'e.g. Legal' : 'e.g. Workplace Bullying'}
+              value={newLabel}
+              onChange={e => setNewLabel(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }} />
+            <button onClick={handleAdd} disabled={!newLabel.trim() || addMut.isLoading}
+              className="px-3 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50 shrink-0">
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── New Grievance Modal ──────────────────────────────────────────────────────
 function NewGrievanceModal({ onClose }) {
   const qc = useQueryClient();
+
+  const { data: depts = [] } = useQuery(['grievance-config', 'department'],  () => grievanceApi.listConfig('department'));
+  const { data: types = [] } = useQuery(['grievance-config', 'grievance_type'], () => grievanceApi.listConfig('grievance_type'));
+
   const [form, setForm] = useState({
     is_anonymous: false,
     employee_name: '',
     department: '',
-    grievance_type: 'harassment',
+    grievance_type: '',
     priority: 'normal',
     date_raised: new Date().toISOString().slice(0, 10),
     description: '',
@@ -147,14 +254,17 @@ function NewGrievanceModal({ onClose }) {
               required={!form.is_anonymous} />
           </Field>
           <Field label="Department" required>
-            <input className={inp} value={form.department}
-              onChange={e => set('department', e.target.value)}
-              placeholder="e.g. Administration" required />
+            <select className={sel} value={form.department}
+              onChange={e => set('department', e.target.value)} required>
+              <option value="">— Select department —</option>
+              {depts.map(d => <option key={d.id} value={d.value}>{d.label}</option>)}
+            </select>
           </Field>
           <Field label="Grievance Type" required>
             <select className={sel} value={form.grievance_type}
               onChange={e => set('grievance_type', e.target.value)} required>
-              {Object.entries(TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              <option value="">— Select type —</option>
+              {types.map(t => <option key={t.id} value={t.value}>{t.label}</option>)}
             </select>
           </Field>
           <Field label="Priority">
@@ -373,9 +483,13 @@ function CaseDetailModal({ grievance, onClose }) {
 export default function GrievancePage() {
   const qc = useQueryClient();
   const [showNew, setShowNew]       = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [selected, setSelected]     = useState(null);
   const [viewAll, setViewAll]       = useState(false);
   const [filters, setFilters]       = useState({ status: '', type: '', search: '' });
+
+  const { data: typeConfig = [] } = useQuery(['grievance-config', 'grievance_type'], () => grievanceApi.listConfig('grievance_type'));
+  const typeMap = Object.fromEntries(typeConfig.map(t => [t.value, t.label]));
 
   const { data: dashboard, isLoading: dashLoading } = useQuery(
     'grievance-dashboard', grievanceApi.dashboard, { refetchInterval: 60000 }
@@ -450,6 +564,11 @@ export default function GrievancePage() {
             className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg hover:bg-gray-50 text-gray-700 transition-colors">
             <Download size={14} className="text-gray-400" />
             Export
+          </button>
+          <button onClick={() => setShowSettings(true)}
+            className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg hover:bg-gray-50 text-gray-700 transition-colors"
+            title="Manage departments & grievance types">
+            <Settings size={14} className="text-gray-400" />
           </button>
           <button onClick={() => setShowNew(true)}
             className="flex items-center gap-2 px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">
@@ -539,7 +658,7 @@ export default function GrievancePage() {
                         : g.employee_name}
                     </td>
                     <td className="px-5 py-3 text-gray-500 text-sm">{g.department}</td>
-                    <td className="px-5 py-3 text-gray-600 text-sm">{TYPE_LABELS[g.grievance_type] || g.grievance_type}</td>
+                    <td className="px-5 py-3 text-gray-600 text-sm">{typeMap[g.grievance_type] || TYPE_LABELS[g.grievance_type] || g.grievance_type}</td>
                     <td className="px-5 py-3"><StatusBadge status={g.status} /></td>
                     <td className="px-5 py-3 text-gray-400 text-xs whitespace-nowrap">
                       {g.date_raised ? g.date_raised.slice(0, 10) : '—'}
@@ -576,7 +695,7 @@ export default function GrievancePage() {
                   <div key={t.grievance_type}>
                     <div className="flex justify-between items-baseline mb-1">
                       <span className="text-xs text-gray-600 truncate pr-2 leading-tight">
-                        {TYPE_LABELS[t.grievance_type] || t.grievance_type}
+                        {typeMap[t.grievance_type] || TYPE_LABELS[t.grievance_type] || t.grievance_type}
                       </span>
                       <span className="text-xs font-semibold text-gray-700 shrink-0">{t.count}</span>
                     </div>
@@ -613,6 +732,7 @@ export default function GrievancePage() {
       </div>
 
       {showNew && <NewGrievanceModal onClose={() => setShowNew(false)} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {selected && <CaseDetailModal grievance={selected} onClose={() => setSelected(null)} />}
     </div>
   );
