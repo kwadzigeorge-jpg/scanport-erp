@@ -254,4 +254,17 @@ export const complianceApi = {
   markRead:               (id)      => api.put(`/compliance/notifications/${id}/read`),
 };
 
+// ─── Grievances ───────────────────────────────────────────────────────────────
+export const grievanceApi = {
+  dashboard:    ()        => api.get('/grievances/dashboard').then(r => r.data),
+  list:         (params)  => api.get('/grievances', { params }).then(r => r.data),
+  get:          (id)      => api.get(`/grievances/${id}`).then(r => r.data),
+  create:       (data)    => api.post('/grievances', data).then(r => r.data),
+  update:       (id, d)   => api.put(`/grievances/${id}`, d).then(r => r.data),
+  changeStatus: (id, d)   => api.post(`/grievances/${id}/status`, d).then(r => r.data),
+  addNote:      (id, d)   => api.post(`/grievances/${id}/note`, d).then(r => r.data),
+  checkOverdue: ()        => api.post('/grievances/check-overdue').then(r => r.data),
+  export:       ()        => api.get('/grievances/export', { responseType: 'blob' }).then(r => r.data),
+};
+
 export default api;

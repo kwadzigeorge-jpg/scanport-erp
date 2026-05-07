@@ -16,6 +16,7 @@ import LeavePage        from './pages/LeavePage';
 import InventoryPage    from './pages/InventoryPage';
 import StockPage        from './pages/StockPage';
 import CompliancePage   from './pages/CompliancePage';
+import GrievancePage    from './pages/GrievancePage';
 import NotFoundPage     from './pages/NotFoundPage';
 
 function ProtectedRoute({ children, roles, permission }) {
@@ -48,6 +49,7 @@ function AppRoutes() {
         <Route path="inventory"    element={<ProtectedRoute permission="part.view"><InventoryPage /></ProtectedRoute>} />
         <Route path="stock"        element={<ProtectedRoute permission="stock.view"><StockPage /></ProtectedRoute>} />
         <Route path="compliance"   element={<ProtectedRoute><CompliancePage /></ProtectedRoute>} />
+        <Route path="grievances"   element={<ProtectedRoute><GrievancePage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

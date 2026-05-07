@@ -168,6 +168,9 @@ const PERMISSION_GROUPS = {
     'report.compliance_view','report.generate','report.submit',
     'settings.compliance_manage',
   ],
+  'Grievance Management': [
+    'grievance.view','grievance.create','grievance.manage','grievance.export',
+  ],
 };
 
 const DEFAULT_ROLES = [
@@ -197,6 +200,7 @@ const DEFAULT_ROLES = [
       'container.reinstate','audit.view','report.email_config',
       'leave.approve','leave.manage_roster','leave.manage_holidays',
       'compliance.view','maintenance.view','report.compliance_view',
+      'grievance.view','grievance.create','grievance.manage','grievance.export',
     ],
     denies: ['user.delete','role.delete','permission.assign','config.edit'],
   },
@@ -205,7 +209,7 @@ const DEFAULT_ROLES = [
     description: 'Handles gate check-in and bay allocation.',
     is_system: true,
     groups: ['Gate Operations','Allocation Management'],
-    extra_grants: ['allocation.chit_print'],
+    extra_grants: ['allocation.chit_print','grievance.view','grievance.create'],
     denies: ['gate.override','container.override','allocation.delete','truck.delete'],
   },
   {
@@ -213,7 +217,7 @@ const DEFAULT_ROLES = [
     description: 'Manages holding area entry, examination, and exit.',
     is_system: true,
     groups: ['Marshal Operations'],
-    extra_grants: ['dashboard.view'],
+    extra_grants: ['dashboard.view','grievance.view','grievance.create'],
     denies: ['gate.check_in','allocation.create','allocation.edit','truck.create','bay.assign'],
   },
 ];
