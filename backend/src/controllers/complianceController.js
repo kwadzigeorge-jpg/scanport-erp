@@ -106,7 +106,7 @@ async function updateScanner(req, res, next) {
                     'type','location','location_code','operational_status','date_commissioned',
                     'date_decommissioned','nra_source_registration_no','radiation_source_activity','notes'];
     const sets = []; const params = [];
-    fields.forEach(f => { if (req.body[f] !== undefined) { params.push(req.body[f]); sets.push(`${f}=$${params.length}`); }});
+    fields.forEach(f => { if (req.body[f] !== undefined) { params.push(req.body[f] === '' ? null : req.body[f]); sets.push(`${f}=$${params.length}`); }});
     if (!sets.length) return res.status(400).json({ error: 'No fields to update.' });
     params.push(req.user.id); sets.push(`updated_by=$${params.length}`);
     params.push(id);
@@ -172,7 +172,7 @@ async function updateCertificate(req, res, next) {
                     'certificate_issue_date','certificate_expiry_date','is_current',
                     'application_submitted_date','application_reference','notes'];
     const sets = []; const params = [];
-    fields.forEach(f => { if (req.body[f] !== undefined) { params.push(req.body[f]); sets.push(`${f}=$${params.length}`); }});
+    fields.forEach(f => { if (req.body[f] !== undefined) { params.push(req.body[f] === '' ? null : req.body[f]); sets.push(`${f}=$${params.length}`); }});
     if (!sets.length) return res.status(400).json({ error: 'No fields to update.' });
     params.push(req.user.id); sets.push(`updated_by=$${params.length}`);
     params.push(id);
@@ -247,7 +247,7 @@ async function updateSurveyMeter(req, res, next) {
     const fields = ['asset_tag','serial_number','meter_type','manufacturer','model',
                     'assigned_to_scanner_id','location','operational_status','date_acquired','notes'];
     const sets = []; const params = [];
-    fields.forEach(f => { if (req.body[f] !== undefined) { params.push(req.body[f]); sets.push(`${f}=$${params.length}`); }});
+    fields.forEach(f => { if (req.body[f] !== undefined) { params.push(req.body[f] === '' ? null : req.body[f]); sets.push(`${f}=$${params.length}`); }});
     if (!sets.length) return res.status(400).json({ error: 'No fields to update.' });
     params.push(req.user.id); sets.push(`updated_by=$${params.length}`);
     params.push(id);
