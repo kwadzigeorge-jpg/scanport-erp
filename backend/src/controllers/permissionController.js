@@ -158,6 +158,16 @@ const PERMISSION_GROUPS = {
     'report.inventory_view','report.inventory_export',
     'alert.inventory_view','settings.inventory',
   ],
+  'Compliance Management': [
+    'compliance.view','compliance.edit','compliance.submit_application',
+    'compliance.upload_certificate','compliance.delete',
+    'maintenance.log','maintenance.view',
+    'breakdown.log','breakdown.edit','breakdown.close',
+    'repair.log','repair.edit',
+    'calibration.log','calibration.upload',
+    'report.compliance_view','report.generate','report.submit',
+    'settings.compliance_manage',
+  ],
 };
 
 const DEFAULT_ROLES = [
@@ -186,6 +196,7 @@ const DEFAULT_ROLES = [
       'truck.dwell_override','allocation.override','container.override',
       'container.reinstate','audit.view','report.email_config',
       'leave.approve','leave.manage_roster','leave.manage_holidays',
+      'compliance.view','maintenance.view','report.compliance_view',
     ],
     denies: ['user.delete','role.delete','permission.assign','config.edit'],
   },
