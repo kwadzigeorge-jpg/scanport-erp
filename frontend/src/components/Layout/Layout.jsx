@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, ClipboardList,
   BarChart3, Settings, LogOut, Menu, X, Bell, LayoutGrid,
-  FlaskConical, MapPin, CalendarDays, Package
+  FlaskConical, MapPin, CalendarDays, Package, Boxes
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -15,7 +15,8 @@ const navItems = [
   { to: '/marshal',      icon: FlaskConical,    label: 'Holding Area',  permission: 'marshal.confirm_entry' },
   { to: '/transactions', icon: ClipboardList,   label: 'Transactions',  permission: 'container.view' },
   { to: '/reports',      icon: BarChart3,       label: 'Reports',       permission: 'report.view' },
-  { to: '/inventory',    icon: Package,         label: 'Inventory',     permission: 'part.view' },
+  { to: '/inventory',    icon: Package,         label: 'Parts Catalogue', permission: 'part.view' },
+  { to: '/stock',        icon: Boxes,           label: 'Stock',           permission: 'stock.view' },
   { to: '/admin',        icon: Settings,        label: 'Admin',         role: 'admin' },
   { to: '/leave',        icon: CalendarDays,    label: 'Leave Mgmt',    roles: ['admin', 'supervisor'] },
 ];
