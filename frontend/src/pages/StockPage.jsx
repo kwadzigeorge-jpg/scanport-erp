@@ -737,10 +737,10 @@ function MovementReportTab() {
 
   const { from, to } = getMonthBounds(year, month);
 
-  const { data, isLoading, isFetching } = useQuery(
+  const { data, isLoading, isFetching, error } = useQuery(
     ['movement-report', from, to, categoryId],
     () => stockApi.movementReport({ from, to, category_id: categoryId || undefined }).then(r => r.data),
-    { keepPreviousData: true }
+    { keepPreviousData: true, retry: 1 }
   );
 
   const { data: cats = [] } = useQuery('part-categories', () => partsApi.listCategories().then(r => r.data));
@@ -894,6 +894,10 @@ function MovementReportTab() {
       {/* ── Table ── */}
       {isLoading ? (
         <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>
+      ) : error ? (
+        <div className="text-center py-20 text-red-500 text-sm">
+          Failed to load report: {error.response?.data?.error || error.message}
+        </div>
       ) : parts.length === 0 ? (
         <div className="text-center py-20 text-gray-400 text-sm">No parts found for this period.</div>
       ) : (
