@@ -199,6 +199,7 @@ export const stockApi = {
   valuation:         (p)     => api.get('/stock/reports/valuation', { params: p }),
   consumption:       (p)     => api.get('/stock/reports/consumption', { params: p }),
   slowMovers:        (p)     => api.get('/stock/reports/slow-movers', { params: p }),
+  movementReport:    (p)     => api.get('/stock/reports/movement', { params: p }),
 };
 
 export default api;

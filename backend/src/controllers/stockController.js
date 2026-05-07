@@ -690,4 +690,108 @@ module.exports = {
   getAlerts, resolveAlert,
   getReorderList,
   getValuationReport, getConsumptionReport, getSlowMoversReport,
+  getMovementReport,
 };
+
+// ─── Monthly Stock Movement Report ───────────────────────────────────────────
+async function getMovementReport(req, res, next) {
+  try {
+    const now = new Date();
+    const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+    const defaultTo   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    const from       = req.query.from ? new Date(req.query.from + 'T00:00:00') : defaultFrom;
+    const to         = req.query.to   ? new Date(req.query.to   + 'T23:59:59') : defaultTo;
+    const categoryId = req.query.category_id || null;
+
+    const params = [from, to];
+    const catFilter = categoryId ? `AND sp.category_id = $${params.length + 1}` : '';
+    if (categoryId) params.push(parseInt(categoryId));
+
+    const { rows } = await db.query(`
+      SELECT
+        sp.id,
+        sp.part_number,
+        sp.description,
+        sp.unit_of_measure,
+        sp.criticality,
+        sp.reorder_point,
+        sp.unit_cost,
+        sp.currency,
+        COALESCE(pc.name, 'Uncategorised') AS category,
+        COALESCE((
+          SELECT SUM(sl0.qty) FROM stock_ledger sl0
+          WHERE sl0.part_id = sp.id AND sl0.created_at < $1
+        ), 0)::NUMERIC AS opening_qty,
+        COALESCE((
+          SELECT SUM(sl_in.qty) FROM stock_ledger sl_in
+          WHERE sl_in.part_id = sp.id
+            AND sl_in.created_at >= $1 AND sl_in.created_at <= $2
+            AND sl_in.txn_type IN ('STOCK_IN','RETURN','TRANSFER_IN')
+        ), 0)::NUMERIC AS stock_in,
+        COALESCE((
+          SELECT ABS(SUM(sl_out.qty)) FROM stock_ledger sl_out
+          WHERE sl_out.part_id = sp.id
+            AND sl_out.created_at >= $1 AND sl_out.created_at <= $2
+            AND sl_out.txn_type IN ('STOCK_OUT','TRANSFER_OUT')
+        ), 0)::NUMERIC AS stock_out,
+        COALESCE((
+          SELECT SUM(sl_adj.qty) FROM stock_ledger sl_adj
+          WHERE sl_adj.part_id = sp.id
+            AND sl_adj.created_at >= $1 AND sl_adj.created_at <= $2
+            AND sl_adj.txn_type = 'ADJUSTMENT'
+        ), 0)::NUMERIC AS adjustments,
+        COALESCE((
+          SELECT SUM(sl_c.qty) FROM stock_ledger sl_c
+          WHERE sl_c.part_id = sp.id AND sl_c.created_at <= $2
+        ), 0)::NUMERIC AS closing_qty
+      FROM spare_parts sp
+      LEFT JOIN part_categories pc ON pc.id = sp.category_id
+      WHERE sp.status = 'ACTIVE' ${catFilter}
+      ORDER BY COALESCE(pc.name, 'Uncategorised'), sp.part_number
+    `, params);
+
+    let rowNo = 0;
+    const data = rows.map(r => {
+      rowNo++;
+      const closing = parseFloat(r.closing_qty);
+      const rop     = parseFloat(r.reorder_point);
+      const stockIn = parseFloat(r.stock_in);
+      const stockOut= parseFloat(r.stock_out);
+      const adj     = parseFloat(r.adjustments);
+      const cost    = parseFloat(r.unit_cost);
+      return {
+        row_no:        rowNo,
+        id:            r.id,
+        part_number:   r.part_number,
+        description:   r.description,
+        unit_of_measure: r.unit_of_measure,
+        criticality:   r.criticality,
+        category:      r.category,
+        reorder_point: rop,
+        unit_cost:     cost,
+        currency:      r.currency,
+        opening_qty:   parseFloat(r.opening_qty),
+        stock_in:      stockIn,
+        stock_out:     stockOut,
+        adjustments:   adj,
+        closing_qty:   closing,
+        closing_value: closing * cost,
+        has_movement:  stockIn > 0 || stockOut > 0 || adj !== 0,
+        stock_status:  closing === 0 ? 'STOCKOUT' : (rop > 0 && closing <= rop ? 'LOW' : 'OK'),
+      };
+    });
+
+    const summary = {
+      total_parts:         data.length,
+      parts_with_movement: data.filter(r => r.has_movement).length,
+      total_opening_qty:   data.reduce((s, r) => s + r.opening_qty, 0),
+      total_stock_in:      data.reduce((s, r) => s + r.stock_in, 0),
+      total_stock_out:     data.reduce((s, r) => s + r.stock_out, 0),
+      total_closing_qty:   data.reduce((s, r) => s + r.closing_qty, 0),
+      total_closing_value: data.reduce((s, r) => s + r.closing_value, 0),
+    };
+
+    return res.json({ period: { from, to }, parts: data, summary });
+  } catch (err) { next(err); }
+}

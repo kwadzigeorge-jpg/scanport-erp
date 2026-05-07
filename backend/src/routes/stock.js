@@ -31,5 +31,6 @@ router.get('/reorder-list',               requirePermission('stock.view'),      
 router.get('/reports/valuation',          requirePermission('report.inventory_view'), sc.getValuationReport);
 router.get('/reports/consumption',        requirePermission('report.inventory_view'), sc.getConsumptionReport);
 router.get('/reports/slow-movers',        requirePermission('report.inventory_view'), sc.getSlowMoversReport);
+router.get('/reports/movement',           requirePermission('report.inventory_view'), sc.getMovementReport);
 
 module.exports = router;

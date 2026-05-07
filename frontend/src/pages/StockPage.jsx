@@ -7,6 +7,7 @@ import {
   PackagePlus, PackageMinus, ArrowLeftRight, SlidersHorizontal,
   ClipboardList, AlertTriangle, Search, ChevronLeft, ChevronRight,
   X, TrendingDown, Package, DollarSign, AlertCircle, CheckCircle, Bell,
+  FileBarChart2, Download, Printer, ChevronDown, ChevronUp, Filter,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -700,11 +701,302 @@ function AlertsTab() {
   );
 }
 
+// ─── Monthly Stock Movement Report ───────────────────────────────────────────
+function fmt(n, dec = 0) {
+  return Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+
+function getMonthBounds(year, month) {
+  const from = `${year}-${String(month).padStart(2, '0')}-01`;
+  const last  = new Date(year, month, 0).getDate();
+  const to    = `${year}-${String(month).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+  return { from, to };
+}
+
+const MONTH_NAMES = ['January','February','March','April','May','June',
+  'July','August','September','October','November','December'];
+
+function StatusDot({ status }) {
+  const colors = { OK: 'bg-green-500', LOW: 'bg-yellow-500', STOCKOUT: 'bg-red-500' };
+  const labels = { OK: 'OK', LOW: 'Low', STOCKOUT: 'Out' };
+  return (
+    <span className="flex items-center gap-1">
+      <span className={clsx('inline-block w-2 h-2 rounded-full', colors[status] || 'bg-gray-300')} />
+      <span className="text-xs text-gray-500">{labels[status] || status}</span>
+    </span>
+  );
+}
+
+function MovementReportTab() {
+  const now   = new Date();
+  const [year,  setYear]  = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [categoryId, setCategoryId] = useState('');
+  const [movementOnly, setMovementOnly] = useState(false);
+  const [collapsed, setCollapsed] = useState({});
+
+  const { from, to } = getMonthBounds(year, month);
+
+  const { data, isLoading, isFetching } = useQuery(
+    ['movement-report', from, to, categoryId],
+    () => stockApi.movementReport({ from, to, category_id: categoryId || undefined }).then(r => r.data),
+    { keepPreviousData: true }
+  );
+
+  const { data: cats = [] } = useQuery('part-categories', () => partsApi.listCategories().then(r => r.data));
+
+  const parts   = data ? (movementOnly ? data.parts.filter(p => p.has_movement) : data.parts) : [];
+  const summary = data?.summary || {};
+
+  // Group by category
+  const grouped = parts.reduce((acc, p) => {
+    (acc[p.category] = acc[p.category] || []).push(p);
+    return acc;
+  }, {});
+
+  const navMonth = (delta) => {
+    let m = month + delta, y = year;
+    if (m > 12) { m = 1;  y++; }
+    if (m < 1)  { m = 12; y--; }
+    setMonth(m); setYear(y);
+  };
+
+  const exportCSV = () => {
+    const header = ['No','Part Number','Description','Category','Criticality','UOM',
+                    'Opening Qty','Stock In','Stock Out','Adjustments','Closing Qty',
+                    'Unit Cost (GHS)','Closing Value (GHS)','Status'];
+    const rows = parts.map((p, i) => [
+      i + 1, p.part_number, `"${p.description.replace(/"/g, '""')}"`,
+      p.category, p.criticality, p.unit_of_measure,
+      p.opening_qty, p.stock_in, p.stock_out, p.adjustments, p.closing_qty,
+      p.unit_cost.toFixed(4), p.closing_value.toFixed(2), p.stock_status,
+    ]);
+    const totalRow = ['TOTAL','','','','','',
+      fmt(summary.total_opening_qty), fmt(summary.total_stock_in),
+      fmt(summary.total_stock_out), '', fmt(summary.total_closing_qty),
+      '', fmt(summary.total_closing_value, 2), ''];
+    const csv = [header, ...rows, totalRow].map(r => r.join(',')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `stock-movement-${MONTH_NAMES[month - 1]}-${year}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const printReport = () => {
+    const style = document.createElement('style');
+    style.id = '_print_override';
+    style.textContent = `
+      @media print {
+        body > * { display: none !important; }
+        #stock-movement-report { display: block !important; position: static !important; }
+        #stock-movement-report .no-print { display: none !important; }
+        @page { margin: 1cm; size: A4 landscape; }
+      }
+    `;
+    document.head.appendChild(style);
+    window.print();
+    setTimeout(() => { const el = document.getElementById('_print_override'); if (el) el.remove(); }, 1500);
+  };
+
+  const COL_W = 'text-right';
+
+  const CategorySubtotal = ({ rows }) => {
+    const si  = rows.reduce((s, r) => s + r.stock_in, 0);
+    const so  = rows.reduce((s, r) => s + r.stock_out, 0);
+    const adj = rows.reduce((s, r) => s + r.adjustments, 0);
+    const cl  = rows.reduce((s, r) => s + r.closing_qty, 0);
+    const val = rows.reduce((s, r) => s + r.closing_value, 0);
+    return (
+      <tr className="bg-gray-50 text-xs font-semibold text-gray-600 border-t border-gray-300">
+        <td colSpan={6} className="px-3 py-1.5 text-right italic">Sub-total</td>
+        <td className={clsx('px-3 py-1.5', COL_W)}></td>
+        <td className={clsx('px-3 py-1.5 text-green-700', COL_W)}>{si > 0 ? fmt(si) : '—'}</td>
+        <td className={clsx('px-3 py-1.5 text-red-700', COL_W)}>{so > 0 ? fmt(so) : '—'}</td>
+        <td className={clsx('px-3 py-1.5', COL_W)}>{adj !== 0 ? fmt(adj) : '—'}</td>
+        <td className={clsx('px-3 py-1.5', COL_W)}>{fmt(cl)}</td>
+        <td className={clsx('px-3 py-1.5', COL_W)}>{val > 0 ? `GHS ${fmt(val, 2)}` : '—'}</td>
+        <td />
+      </tr>
+    );
+  };
+
+  return (
+    <div id="stock-movement-report">
+      {/* ── Controls ── */}
+      <div className="no-print flex flex-wrap items-center gap-3 mb-4">
+        {/* Period nav */}
+        <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-lg px-2 py-1.5">
+          <button onClick={() => navMonth(-1)} className="p-1 hover:bg-gray-100 rounded">
+            <ChevronLeft size={16} />
+          </button>
+          <span className="text-sm font-medium px-2 min-w-[130px] text-center">
+            {MONTH_NAMES[month - 1]} {year}
+          </span>
+          <button onClick={() => navMonth(1)} className="p-1 hover:bg-gray-100 rounded">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+
+        {/* Category filter */}
+        <select value={categoryId} onChange={e => setCategoryId(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+          <option value="">All Categories</option>
+          {cats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+
+        {/* Movement only toggle */}
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <div onClick={() => setMovementOnly(v => !v)}
+            className={clsx('w-8 h-4 rounded-full transition-colors relative',
+              movementOnly ? 'bg-blue-600' : 'bg-gray-300')}>
+            <span className={clsx('absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform',
+              movementOnly ? 'left-4' : 'left-0.5')} />
+          </div>
+          With movement only
+        </label>
+
+        <div className="flex-1" />
+
+        {/* Actions */}
+        {isFetching && <span className="text-xs text-gray-400">Refreshing…</span>}
+        <button onClick={exportCSV} disabled={!data || isLoading}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">
+          <Download size={14} /> Export CSV
+        </button>
+        <button onClick={printReport} disabled={!data || isLoading}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          <Printer size={14} /> Print
+        </button>
+      </div>
+
+      {/* ── Print header (hidden on screen) ── */}
+      <div className="hidden print:block mb-4">
+        <p className="text-lg font-bold">SCANPORT LTD — MPS Port, Scanport Store</p>
+        <p className="text-sm font-semibold">Stock Movement / Position Report</p>
+        <p className="text-xs text-gray-600">Period: {MONTH_NAMES[month - 1]} {year} &nbsp;|&nbsp; Generated: {new Date().toLocaleString()}</p>
+      </div>
+
+      {/* ── Summary cards ── */}
+      {data && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <SummaryCard icon={Package}      label="Total Parts"    value={fmt(summary.total_parts)} color="bg-blue-600" />
+          <SummaryCard icon={PackagePlus}  label="Total Stock In" value={fmt(summary.total_stock_in)} color="bg-green-600" />
+          <SummaryCard icon={PackageMinus} label="Total Stock Out" value={fmt(summary.total_stock_out)} color="bg-red-500" />
+          <SummaryCard icon={DollarSign}   label="Closing Value"
+            value={`GHS ${fmt(summary.total_closing_value, 2)}`}
+            sub={`${fmt(summary.parts_with_movement)} parts moved`} color="bg-purple-600" />
+        </div>
+      )}
+
+      {/* ── Table ── */}
+      {isLoading ? (
+        <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>
+      ) : parts.length === 0 ? (
+        <div className="text-center py-20 text-gray-400 text-sm">No parts found for this period.</div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto text-xs">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                <th className="px-3 py-2.5 text-left w-8">#</th>
+                <th className="px-3 py-2.5 text-left">Part Number</th>
+                <th className="px-3 py-2.5 text-left">Description</th>
+                <th className="px-3 py-2.5 text-left">Criticality</th>
+                <th className="px-3 py-2.5 text-left">UOM</th>
+                <th className="px-3 py-2.5 text-left">ROP</th>
+                <th className="px-3 py-2.5 text-right">Opening</th>
+                <th className="px-3 py-2.5 text-right text-green-700">Stock In</th>
+                <th className="px-3 py-2.5 text-right text-red-700">Stock Out</th>
+                <th className="px-3 py-2.5 text-right">Adj</th>
+                <th className="px-3 py-2.5 text-right font-bold">Closing</th>
+                <th className="px-3 py-2.5 text-right">Value (GHS)</th>
+                <th className="px-3 py-2.5 text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(grouped).map(([cat, catRows]) => {
+                const isOpen = !collapsed[cat];
+                return (
+                  <React.Fragment key={cat}>
+                    {/* Category header */}
+                    <tr className="bg-blue-50 border-t border-gray-200 cursor-pointer no-print"
+                      onClick={() => setCollapsed(c => ({ ...c, [cat]: !c[cat] }))}>
+                      <td colSpan={13} className="px-3 py-2 font-semibold text-blue-800 text-xs">
+                        <span className="flex items-center gap-1.5">
+                          {isOpen ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+                          {cat} <span className="font-normal text-blue-500">({catRows.length} part{catRows.length !== 1 ? 's' : ''})</span>
+                        </span>
+                      </td>
+                    </tr>
+                    {/* Print-only static category header */}
+                    <tr className="hidden print:table-row bg-blue-50 border-t border-gray-200">
+                      <td colSpan={13} className="px-3 py-1.5 font-semibold text-blue-800 text-xs">{cat}</td>
+                    </tr>
+
+                    {isOpen && catRows.map(p => (
+                      <tr key={p.id} className={clsx(
+                        'border-t border-gray-100 hover:bg-gray-50',
+                        p.stock_status === 'STOCKOUT' && 'bg-red-50/40',
+                        p.stock_status === 'LOW' && 'bg-yellow-50/40',
+                      )}>
+                        <td className="px-3 py-2 text-gray-400">{p.row_no}</td>
+                        <td className="px-3 py-2 font-mono font-medium text-gray-800 whitespace-nowrap">{p.part_number}</td>
+                        <td className="px-3 py-2 text-gray-700 max-w-[220px] truncate" title={p.description}>{p.description}</td>
+                        <td className="px-3 py-2">
+                          <Badge map={CRITICALITY_BADGE} value={p.criticality} />
+                        </td>
+                        <td className="px-3 py-2 text-gray-500">{p.unit_of_measure}</td>
+                        <td className="px-3 py-2 text-right text-gray-500">{p.reorder_point > 0 ? fmt(p.reorder_point) : '—'}</td>
+                        <td className="px-3 py-2 text-right text-gray-700">{fmt(p.opening_qty)}</td>
+                        <td className="px-3 py-2 text-right font-medium text-green-700">{p.stock_in > 0 ? fmt(p.stock_in) : '—'}</td>
+                        <td className="px-3 py-2 text-right font-medium text-red-700">{p.stock_out > 0 ? fmt(p.stock_out) : '—'}</td>
+                        <td className={clsx('px-3 py-2 text-right', p.adjustments > 0 ? 'text-green-600' : p.adjustments < 0 ? 'text-red-600' : 'text-gray-400')}>
+                          {p.adjustments !== 0 ? (p.adjustments > 0 ? '+' : '') + fmt(p.adjustments) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right font-bold text-gray-900">{fmt(p.closing_qty)}</td>
+                        <td className="px-3 py-2 text-right text-gray-600">
+                          {p.closing_value > 0 ? fmt(p.closing_value, 2) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-center"><StatusDot status={p.stock_status} /></td>
+                      </tr>
+                    ))}
+                    {isOpen && <CategorySubtotal rows={catRows} />}
+                  </React.Fragment>
+                );
+              })}
+
+              {/* Grand total */}
+              <tr className="border-t-2 border-gray-400 bg-gray-100 font-bold text-gray-900 text-xs">
+                <td colSpan={6} className="px-3 py-2.5 text-right uppercase tracking-wide">Grand Total</td>
+                <td className="px-3 py-2.5 text-right">{fmt(summary.total_opening_qty)}</td>
+                <td className="px-3 py-2.5 text-right text-green-700">{fmt(summary.total_stock_in)}</td>
+                <td className="px-3 py-2.5 text-right text-red-700">{fmt(summary.total_stock_out)}</td>
+                <td className="px-3 py-2.5 text-right">—</td>
+                <td className="px-3 py-2.5 text-right">{fmt(summary.total_closing_qty)}</td>
+                <td className="px-3 py-2.5 text-right">GHS {fmt(summary.total_closing_value, 2)}</td>
+                <td />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 mt-2 no-print">
+        Report period: {from} to {to} &nbsp;·&nbsp; {parts.length} part{parts.length !== 1 ? 's' : ''} shown
+      </p>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'balances', label: 'Stock Balances', icon: Package },
-  { id: 'reorder',  label: 'Reorder List',   icon: AlertTriangle },
-  { id: 'alerts',   label: 'Alerts',          icon: Bell },
+  { id: 'balances', label: 'Stock Balances',   icon: Package },
+  { id: 'reorder',  label: 'Reorder List',     icon: AlertTriangle },
+  { id: 'alerts',   label: 'Alerts',           icon: Bell },
+  { id: 'report',   label: 'Movement Report',  icon: FileBarChart2 },
 ];
 
 export default function StockPage() {
@@ -732,6 +1024,7 @@ export default function StockPage() {
       {tab === 'balances' && <BalancesTab />}
       {tab === 'reorder'  && <ReorderTab />}
       {tab === 'alerts'   && <AlertsTab />}
+      {tab === 'report'   && <MovementReportTab />}
     </div>
   );
 }
