@@ -6,7 +6,7 @@ import { stockApi, partsApi } from '../services/api';
 import {
   PackagePlus, PackageMinus, ArrowLeftRight, SlidersHorizontal,
   ClipboardList, AlertTriangle, Search, ChevronLeft, ChevronRight,
-  X, TrendingDown, Package, DollarSign, AlertCircle,
+  X, TrendingDown, Package, DollarSign, AlertCircle, CheckCircle, Bell,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -530,10 +530,181 @@ function ReorderTab() {
   );
 }
 
+// ─── Alerts Tab ──────────────────────────────────────────────────────────────
+const ALERT_TYPE_BADGE = {
+  LOW_STOCK:    'bg-yellow-100 text-yellow-700',
+  STOCKOUT:     'bg-red-100 text-red-700',
+  EXCESS_STOCK: 'bg-blue-100 text-blue-700',
+};
+
+const SEVERITY_BADGE = {
+  CRITICAL: 'bg-red-100 text-red-700',
+  HIGH:     'bg-orange-100 text-orange-700',
+  MEDIUM:   'bg-yellow-100 text-yellow-700',
+  LOW:      'bg-gray-100 text-gray-500',
+};
+
+function AlertsTab() {
+  const { hasPermission } = useAuth();
+  const qc = useQueryClient();
+  const [filters, setFilters] = useState({ alert_type: '', severity: '', is_resolved: 'false' });
+
+  const { data: alerts, isLoading } = useQuery(
+    ['alerts', filters],
+    () => stockApi.alerts({ alert_type: filters.alert_type || undefined, severity: filters.severity || undefined, is_resolved: filters.is_resolved }).then(r => r.data),
+    { refetchInterval: 60000 }
+  );
+
+  const resolveMut = useMutation(
+    (id) => stockApi.resolveAlert(id),
+    {
+      onSuccess: () => { toast.success('Alert resolved.'); qc.invalidateQueries('alerts'); qc.invalidateQueries('balances'); },
+      onError:   (e) => toast.error(e.response?.data?.error || 'Failed.'),
+    }
+  );
+
+  const items = Array.isArray(alerts) ? alerts : [];
+
+  const counts = {
+    STOCKOUT:     items.filter(a => a.alert_type === 'STOCKOUT').length,
+    LOW_STOCK:    items.filter(a => a.alert_type === 'LOW_STOCK').length,
+    EXCESS_STOCK: items.filter(a => a.alert_type === 'EXCESS_STOCK').length,
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Summary pills */}
+      {filters.is_resolved === 'false' && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            <AlertCircle size={14} className="text-red-500" />
+            <span className="text-sm font-medium text-red-700">{counts.STOCKOUT} Stockout{counts.STOCKOUT !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2">
+            <TrendingDown size={14} className="text-yellow-600" />
+            <span className="text-sm font-medium text-yellow-700">{counts.LOW_STOCK} Low Stock</span>
+          </div>
+          <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+            <Package size={14} className="text-blue-500" />
+            <span className="text-sm font-medium text-blue-700">{counts.EXCESS_STOCK} Excess</span>
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <select className={clsx(sel, 'w-40')} value={filters.alert_type} onChange={e => setFilters(f => ({ ...f, alert_type: e.target.value }))}>
+          <option value="">All Types</option>
+          <option value="STOCKOUT">Stockout</option>
+          <option value="LOW_STOCK">Low Stock</option>
+          <option value="EXCESS_STOCK">Excess Stock</option>
+        </select>
+        <select className={clsx(sel, 'w-36')} value={filters.severity} onChange={e => setFilters(f => ({ ...f, severity: e.target.value }))}>
+          <option value="">All Severity</option>
+          {['CRITICAL','HIGH','MEDIUM','LOW'].map(v => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <div className="ml-auto flex gap-1 bg-gray-100 rounded-lg p-1">
+          <button onClick={() => setFilters(f => ({ ...f, is_resolved: 'false' }))}
+            className={clsx('px-3 py-1.5 text-xs font-medium rounded-md transition-colors', filters.is_resolved === 'false' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+            Active
+          </button>
+          <button onClick={() => setFilters(f => ({ ...f, is_resolved: 'true' }))}
+            className={clsx('px-3 py-1.5 text-xs font-medium rounded-md transition-colors', filters.is_resolved === 'true' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+            Resolved
+          </button>
+        </div>
+      </div>
+
+      {/* Alerts table */}
+      {!isLoading && items.length === 0 ? (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-8 text-center">
+          <CheckCircle size={32} className="text-green-500 mx-auto mb-2" />
+          <p className="text-green-700 font-medium">{filters.is_resolved === 'true' ? 'No resolved alerts.' : 'No active alerts — stock levels are healthy.'}</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                  <th className="px-4 py-3 text-left">Part</th>
+                  <th className="px-4 py-3 text-left">Type</th>
+                  <th className="px-4 py-3 text-left">Severity</th>
+                  <th className="px-4 py-3 text-right">Current Qty</th>
+                  <th className="px-4 py-3 text-right">Threshold</th>
+                  <th className="px-4 py-3 text-left">Supplier</th>
+                  <th className="px-4 py-3 text-right">Lead Time</th>
+                  <th className="px-4 py-3 text-left">Raised</th>
+                  {filters.is_resolved === 'false' && hasPermission('stock.adjust') && (
+                    <th className="px-4 py-3 text-right">Action</th>
+                  )}
+                  {filters.is_resolved === 'true' && (
+                    <th className="px-4 py-3 text-left">Resolved</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {isLoading ? (
+                  <tr><td colSpan={9} className="py-16 text-center text-gray-400">Loading…</td></tr>
+                ) : items.map(a => (
+                  <tr key={a.id} className={clsx('hover:bg-gray-50 transition-colors', a.severity === 'CRITICAL' && !a.is_resolved && 'bg-red-50/20')}>
+                    <td className="px-4 py-3">
+                      <p className="font-mono text-xs text-gray-500">{a.part_number}</p>
+                      <p className="font-medium text-gray-900 text-xs">{a.description}</p>
+                      <p className="text-xs text-gray-400">{a.unit_of_measure}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', ALERT_TYPE_BADGE[a.alert_type] || 'bg-gray-100 text-gray-500')}>
+                        {a.alert_type?.replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', SEVERITY_BADGE[a.severity] || 'bg-gray-100 text-gray-500')}>
+                        {a.severity}
+                      </span>
+                    </td>
+                    <td className={clsx('px-4 py-3 text-right text-xs font-medium', parseFloat(a.current_qty_on_hand) <= 0 ? 'text-red-600' : 'text-yellow-600')}>
+                      {parseFloat(a.current_qty_on_hand).toFixed(2)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-xs text-gray-500">{parseFloat(a.threshold_qty || a.reorder_point || 0).toFixed(2)}</td>
+                    <td className="px-4 py-3">
+                      <p className="text-xs text-gray-700">{a.supplier_name || '—'}</p>
+                      {a.supplier_phone && <p className="text-xs text-gray-400">{a.supplier_phone}</p>}
+                    </td>
+                    <td className="px-4 py-3 text-right text-xs text-gray-500">{a.lead_time_days ?? '—'} days</td>
+                    <td className="px-4 py-3 text-xs text-gray-400">{new Date(a.created_at).toLocaleDateString()}</td>
+                    {filters.is_resolved === 'false' && hasPermission('stock.adjust') && (
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => { if (confirm('Mark this alert as resolved?')) resolveMut.mutate(a.id); }}
+                          disabled={resolveMut.isLoading}
+                          className="flex items-center gap-1 text-xs text-green-600 hover:bg-green-50 border border-green-200 px-2 py-1 rounded-lg transition-colors ml-auto disabled:opacity-50"
+                        >
+                          <CheckCircle size={12} /> Resolve
+                        </button>
+                      </td>
+                    )}
+                    {filters.is_resolved === 'true' && (
+                      <td className="px-4 py-3 text-xs text-gray-400">
+                        {a.resolved_at ? new Date(a.resolved_at).toLocaleDateString() : '—'}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'balances', label: 'Stock Balances', icon: Package },
   { id: 'reorder',  label: 'Reorder List',   icon: AlertTriangle },
+  { id: 'alerts',   label: 'Alerts',          icon: Bell },
 ];
 
 export default function StockPage() {
@@ -560,6 +731,7 @@ export default function StockPage() {
 
       {tab === 'balances' && <BalancesTab />}
       {tab === 'reorder'  && <ReorderTab />}
+      {tab === 'alerts'   && <AlertsTab />}
     </div>
   );
 }
