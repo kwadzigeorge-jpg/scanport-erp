@@ -9,7 +9,11 @@ DECLARE
 BEGIN
 
   -- Require an admin user to exist
-  SELECT id INTO v_admin_id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1;
+  SELECT u.id INTO v_admin_id
+  FROM users u
+  JOIN roles r ON r.id = u.role_id
+  WHERE r.name = 'admin'
+  ORDER BY u.created_at LIMIT 1;
   IF v_admin_id IS NULL THEN
     RAISE EXCEPTION 'Seed requires at least one admin user. Create an admin account first.';
   END IF;
