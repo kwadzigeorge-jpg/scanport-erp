@@ -33,8 +33,7 @@ BEGIN
      'Port Terminal', 'SCAN-05', 'active', '2020-01-01', v_admin_id),
     ('2669', '10031', 'Siemens', 'Accelerator Scanner', 'fixed',
      'Port Terminal', 'SCAN-06', 'active', '2020-01-01', v_admin_id)
-  ON CONFLICT (scanner_serial) DO NOTHING
-  RETURNING id;
+  ON CONFLICT (scanner_serial) DO NOTHING;
 
   -- Get each scanner id
   SELECT id INTO s2660 FROM compliance_scanners WHERE scanner_serial = '2660';
