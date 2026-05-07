@@ -13,6 +13,7 @@ import BaysPage         from './pages/BaysPage';
 import ReportsPage      from './pages/ReportsPage';
 import AdminPage        from './pages/AdminPage';
 import LeavePage        from './pages/LeavePage';
+import InventoryPage    from './pages/InventoryPage';
 import NotFoundPage     from './pages/NotFoundPage';
 
 function ProtectedRoute({ children, roles, permission }) {
@@ -42,6 +43,7 @@ function AppRoutes() {
         <Route path="reports"        element={<ProtectedRoute permission="report.view"><ReportsPage /></ProtectedRoute>} />
         <Route path="admin"        element={<ProtectedRoute roles={['admin']}><AdminPage /></ProtectedRoute>} />
         <Route path="leave"        element={<ProtectedRoute roles={['admin', 'supervisor']}><LeavePage /></ProtectedRoute>} />
+        <Route path="inventory"    element={<ProtectedRoute permission="part.view"><InventoryPage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

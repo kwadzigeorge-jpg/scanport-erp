@@ -164,4 +164,41 @@ export const permissionsApi = {
   getUserEffective:    (uid)       => api.get(`/permissions/users/${uid}/effective`),
 };
 
+// ─── Spare Parts / Inventory ──────────────────────────────────────────────────
+export const partsApi = {
+  list:             (p)      => api.get('/parts', { params: p }),
+  get:              (id)     => api.get(`/parts/${id}`),
+  create:           (d)      => api.post('/parts', d),
+  update:           (id, d)  => api.put(`/parts/${id}`, d),
+  remove:           (id)     => api.delete(`/parts/${id}`),
+  listCategories:   ()       => api.get('/parts/categories'),
+  createCategory:   (d)      => api.post('/parts/categories', d),
+  updateCategory:   (id, d)  => api.put(`/parts/categories/${id}`, d),
+  deleteCategory:   (id)     => api.delete(`/parts/categories/${id}`),
+  listSuppliers:    (p)      => api.get('/parts/suppliers', { params: p }),
+  createSupplier:   (d)      => api.post('/parts/suppliers', d),
+  updateSupplier:   (id, d)  => api.put(`/parts/suppliers/${id}`, d),
+  listLocations:    ()       => api.get('/parts/locations'),
+  createLocation:   (d)      => api.post('/parts/locations', d),
+  updateLocation:   (id, d)  => api.put(`/parts/locations/${id}`, d),
+  listEquipment:    ()       => api.get('/parts/equipment'),
+};
+
+export const stockApi = {
+  balances:          (p)     => api.get('/stock/balances', { params: p }),
+  partStock:         (id)    => api.get(`/stock/balances/${id}`),
+  ledger:            (id, p) => api.get(`/stock/ledger/${id}`, { params: p }),
+  stockIn:           (d)     => api.post('/stock/in', d),
+  stockOut:          (d)     => api.post('/stock/out', d),
+  stockReturn:       (d)     => api.post('/stock/return', d),
+  adjust:            (d)     => api.post('/stock/adjust', d),
+  transfer:          (d)     => api.post('/stock/transfer', d),
+  alerts:            (p)     => api.get('/stock/alerts', { params: p }),
+  resolveAlert:      (id, d) => api.put(`/stock/alerts/${id}/resolve`, d),
+  reorderList:       ()      => api.get('/stock/reorder-list'),
+  valuation:         (p)     => api.get('/stock/reports/valuation', { params: p }),
+  consumption:       (p)     => api.get('/stock/reports/consumption', { params: p }),
+  slowMovers:        (p)     => api.get('/stock/reports/slow-movers', { params: p }),
+};
+
 export default api;
