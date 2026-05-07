@@ -37,8 +37,10 @@ async function operationsDashboard(req, res, next) {
   try {
     const slaMinutes = await getSlaMinutes();
     const today = new Date().toISOString().slice(0, 10);
+    const from = req.query.from || today;
+    const to   = req.query.to   || today;
 
-    // Active containers with live dwell
+    // Active containers with live dwell (always current state, no date filter)
     const { rows: active } = await db.query(`
       SELECT ct.id, ct.transaction_id, ct.container_number, ct.waybill_number,
              ct.agent_name, ct.truck_number, ct.status,
@@ -52,13 +54,13 @@ async function operationsDashboard(req, res, next) {
       ORDER BY live_dwell_minutes DESC
     `, [ACTIVE_STATUSES]);
 
-    // Released today
+    // Released in the selected date range
     const { rows: releasedToday } = await db.query(`
       SELECT COUNT(*)::int AS count,
              ROUND(AVG(dwell_minutes))::int AS avg_dwell
       FROM container_transactions
-      WHERE status='EXITED' AND DATE(time_out)=$1
-    `, [today]);
+      WHERE status='EXITED' AND DATE(time_out) BETWEEN $1 AND $2
+    `, [from, to]);
 
     // Total bays
     const { rows: bays } = await db.query(`SELECT COUNT(*)::int AS total FROM bays WHERE is_active=TRUE`);
@@ -68,6 +70,7 @@ async function operationsDashboard(req, res, next) {
 
     return res.json({
       sla_minutes: slaMinutes,
+      from, to,
       kpi: {
         containers_in_holding: active.length,
         avg_dwell_active: active.length

@@ -232,6 +232,13 @@ function ReportTable({ loading, rows, columns, onRowClick, rowClassName }) {
 }
 
 // ─── Page 1: Operations Control Dashboard ─────────────────────────────────────
+function periodLabel(filters) {
+  if (filters.preset === 'today')     return 'today';
+  if (filters.preset === 'yesterday') return 'yesterday';
+  if (filters.preset === 'week')      return 'last 7 days';
+  return `${filters.from} – ${filters.to}`;
+}
+
 function DashboardTab({ filters, onSelectContainer }) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -240,8 +247,8 @@ function DashboardTab({ filters, onSelectContainer }) {
   }, []);
 
   const { data, isLoading, refetch } = useQuery(
-    ['ops-dashboard'],
-    () => reportsApi.operationsDashboard({}).then(r => r.data),
+    ['ops-dashboard', filters.from, filters.to],
+    () => reportsApi.operationsDashboard({ from: filters.from, to: filters.to }).then(r => r.data),
     { refetchInterval: 30000 }
   );
 
@@ -258,7 +265,7 @@ function DashboardTab({ filters, onSelectContainer }) {
     <div className="space-y-5">
       {/* KPI row */}
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-600">Live Operations — auto-refreshes every 30s</h2>
+        <h2 className="text-sm font-semibold text-gray-600">Live Operations — auto-refreshes every 30s · Period: {periodLabel(filters)}</h2>
         <button onClick={() => refetch()} className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">
           <RefreshCw size={15} />
         </button>
@@ -266,7 +273,7 @@ function DashboardTab({ filters, onSelectContainer }) {
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <KPICard label="In Holding" value={kpi.containers_in_holding ?? '—'} sub="active containers" />
-        <KPICard label="Avg Dwell Today" value={kpi.avg_dwell_today != null ? fmtDwell(kpi.avg_dwell_today) : '—'} sub="released containers" />
+        <KPICard label="Avg Dwell" value={kpi.avg_dwell_today != null ? fmtDwell(kpi.avg_dwell_today) : '—'} sub={`released — ${periodLabel(filters)}`} />
         <KPICard
           label="Active Breaches" value={kpi.active_breaches ?? '—'}
           sub="exceeding SLA" accent={kpi.active_breaches > 0 ? 'red' : null}
@@ -276,7 +283,7 @@ function DashboardTab({ filters, onSelectContainer }) {
           value={kpi.longest_dwell_minutes != null ? fmtDwell(kpi.longest_dwell_minutes) : '—'}
           sub={kpi.longest_container || ''}
           accent={kpi.longest_dwell_minutes > slaMin ? 'red' : kpi.longest_dwell_minutes > slaMin * 0.8 ? 'amber' : null} />
-        <KPICard label="Throughput Today" value={kpi.throughput_today ?? '—'} sub="containers released" accent="blue" />
+        <KPICard label="Throughput" value={kpi.throughput_today ?? '—'} sub={`released — ${periodLabel(filters)}`} accent="blue" />
         <KPICard
           label="Capacity"
           value={`${kpi.utilisation_pct ?? 0}%`}
@@ -426,7 +433,7 @@ function DwellTab({ filters, onSelectContainer }) {
 
 // ─── Page 3: Area Performance ─────────────────────────────────────────────────
 function AreasTab({ filters }) {
-  const { data, isLoading } = useQuery(
+  const { data, isLoading, error } = useQuery(
     ['area-performance', filters.from, filters.to],
     () => reportsApi.areaPerformance({ from: filters.from, to: filters.to }).then(r => r.data),
     { refetchInterval: 60000 }
@@ -435,10 +442,18 @@ function AreasTab({ filters }) {
   const slaMin = data?.sla_minutes || 180;
   const areas  = data?.areas || [];
 
+  if (error) return (
+    <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+      Failed to load area data: {error.response?.data?.error || error.message}
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       {/* Area cards */}
-      {isLoading ? <div className="text-center py-12 text-gray-400 text-sm">Loading…</div> : (
+      {isLoading ? <div className="text-center py-12 text-gray-400 text-sm">Loading…</div> : areas.length === 0 ? (
+        <div className="text-center py-12 text-gray-400 text-sm">No holding areas configured. Add holding areas in the system settings.</div>
+      ) : (
         <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {areas.map(a => {
             const pct = a.total_bays ? Math.round((a.active_containers / a.total_bays) * 100) : 0;
