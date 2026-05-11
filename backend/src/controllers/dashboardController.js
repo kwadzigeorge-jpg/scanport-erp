@@ -70,6 +70,14 @@ async function getSummary(req, res, next) {
       [['BAY_ASSIGNED','ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED']]
     );
 
+    // Truck counts
+    const { rows: truckRows } = await db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status='IN_BAY')::int AS active,
+         COUNT(*) FILTER (WHERE DATE(time_in)=CURRENT_DATE)::int AS arrived_today
+       FROM truck_allocations`
+    );
+
     // Active user sessions
     const { rows: activeSessions } = await db.query(
       `SELECT u.id, u.username, u.full_name, r.name AS role, s.last_active, s.ip_address
@@ -128,6 +136,10 @@ async function getSummary(req, res, next) {
       bays: {
         total: totalBays, occupied: occupiedBays, free: totalBays - occupiedBays,
         utilization_pct: totalBays > 0 ? Math.round((occupiedBays / totalBays) * 100) : 0,
+      },
+      trucks: {
+        active: truckRows[0].active,
+        arrived_today: truckRows[0].arrived_today,
       },
       areaStats,
       activeSessions,

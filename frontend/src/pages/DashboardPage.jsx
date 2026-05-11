@@ -6,7 +6,7 @@ import { io as socketIO } from 'socket.io-client';
 import {
   LayoutDashboard, Container, MapPin, Microscope, CheckCircle,
   LogOut, AlertTriangle, Clock, Users, Activity,
-  RefreshCw, BarChart3
+  RefreshCw, BarChart3, Truck,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import clsx from 'clsx';
@@ -210,6 +210,7 @@ export default function DashboardPage() {
   const s       = data?.summary || {};
   const today   = data?.today   || {};
   const bays    = data?.bays    || {};
+  const trucks  = data?.trucks  || {};
   const threshold = data?.overstayThresholdHours || 3;
 
   return (
@@ -226,9 +227,10 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatTile label="Active Containers" value={s.total_active} icon={Container} color="blue" sub="in system now" />
         <StatTile label="At Bay / In Exam" value={(s.arrived_at_bay||0)+(s.under_examination||0)+(s.examination_completed||0)} icon={Microscope} color="yellow" sub="undergoing processing" />
+        <StatTile label="Trucks in Bay" value={trucks.active} icon={Truck} color="purple" sub={`${trucks.arrived_today ?? '—'} arrived today`} />
         <StatTile label="Exited Today" value={today.exited} icon={LogOut} color="green" sub={`Avg dwell: ${today.avg_dwell||0} min`} />
         <StatTile label="Overstayed" value={s.overstayed} icon={AlertTriangle} color={s.overstayed > 0 ? 'red' : 'gray'} sub={`>${threshold}h`} />
       </div>

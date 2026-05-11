@@ -270,6 +270,129 @@ async function sendDailyReport() {
   }
 }
 
+// ─── Compliance Reminders ─────────────────────────────────────────────────────
+function compliancePriority(daysBefore) {
+  if (daysBefore <= 7)  return 'critical';
+  if (daysBefore <= 14) return 'high';
+  if (daysBefore <= 60) return 'medium';
+  return 'low';
+}
+
+function complianceNotifType(eventType) {
+  const map = {
+    certificate_expiry:       'cert_expiring',
+    application_deadline:     'application_overdue',
+    survey_meter_calibration: 'calibration_due',
+    annual_report_due:        'report_due',
+  };
+  return map[eventType] || 'info';
+}
+
+async function processComplianceConfig(cfg) {
+  let rows = [];
+
+  if (cfg.event_type === 'certificate_expiry') {
+    ({ rows } = await db.query(`
+      SELECT cc.id AS entity_id, 'certificate' AS entity_type,
+             cs.scanner_serial, cs.manufacturer, cs.model, cs.location,
+             cc.certificate_expiry_date::text AS due_date,
+             (cc.certificate_expiry_date - CURRENT_DATE) AS days_remaining
+      FROM compliance_certificates cc
+      JOIN compliance_scanners cs ON cs.id = cc.scanner_id
+      WHERE cc.is_current = TRUE
+        AND cc.certificate_expiry_date IS NOT NULL
+        AND cc.certification_status NOT IN ('expired')
+        AND (cc.certificate_expiry_date - CURRENT_DATE) BETWEEN 0 AND $1
+    `, [cfg.days_before]));
+
+  } else if (cfg.event_type === 'application_deadline') {
+    ({ rows } = await db.query(`
+      SELECT cc.id AS entity_id, 'certificate' AS entity_type,
+             cs.scanner_serial, cs.manufacturer, cs.model, cs.location,
+             cc.application_deadline::text AS due_date,
+             (cc.application_deadline - CURRENT_DATE) AS days_remaining
+      FROM compliance_certificates cc
+      JOIN compliance_scanners cs ON cs.id = cc.scanner_id
+      WHERE cc.is_current = TRUE
+        AND cc.application_deadline IS NOT NULL
+        AND cc.application_submitted_date IS NULL
+        AND (cc.application_deadline - CURRENT_DATE) BETWEEN -7 AND $1
+    `, [cfg.days_before]));
+
+  } else if (cfg.event_type === 'survey_meter_calibration') {
+    ({ rows } = await db.query(`
+      SELECT sm.id AS entity_id, 'survey_meter' AS entity_type,
+             sm.serial_number AS scanner_serial, sm.manufacturer, sm.model,
+             sm.location, sm.calibration_expiry_date::text AS due_date,
+             (sm.calibration_expiry_date - CURRENT_DATE) AS days_remaining
+      FROM compliance_survey_meters sm
+      WHERE sm.calibration_expiry_date IS NOT NULL
+        AND sm.operational_status = 'active'
+        AND (sm.calibration_expiry_date - CURRENT_DATE) BETWEEN 0 AND $1
+    `, [cfg.days_before]));
+  }
+
+  let count = 0;
+  for (const row of rows) {
+    const { rows: already } = await db.query(`
+      SELECT 1 FROM compliance_reminder_log
+      WHERE config_id = $1 AND entity_id = $2 AND DATE(sent_at) = CURRENT_DATE
+      LIMIT 1
+    `, [cfg.id, row.entity_id]);
+    if (already.length) continue;
+
+    const daysRem = parseInt(row.days_remaining, 10);
+    const priority = compliancePriority(cfg.days_before);
+    const notifType = complianceNotifType(cfg.event_type);
+
+    let title, body;
+    if (cfg.event_type === 'certificate_expiry') {
+      const when = daysRem === 0 ? 'TODAY' : `in ${daysRem} day${daysRem !== 1 ? 's' : ''}`;
+      title = `Certificate expiring ${when}: ${row.scanner_serial}`;
+      body  = `${row.manufacturer} ${row.model} at ${row.location}. Expires ${row.due_date}.`;
+    } else if (cfg.event_type === 'application_deadline') {
+      const when = daysRem <= 0 ? `${Math.abs(daysRem)} day(s) OVERDUE` : `in ${daysRem} day${daysRem !== 1 ? 's' : ''}`;
+      title = `Application deadline ${when}: ${row.scanner_serial}`;
+      body  = `${row.manufacturer} ${row.model} at ${row.location}. Application due ${row.due_date}.`;
+    } else if (cfg.event_type === 'survey_meter_calibration') {
+      const when = daysRem === 0 ? 'TODAY' : `in ${daysRem} day${daysRem !== 1 ? 's' : ''}`;
+      title = `Calibration due ${when}: ${row.scanner_serial}`;
+      body  = `${row.manufacturer} ${row.model} at ${row.location}. Calibration expires ${row.due_date}.`;
+    }
+
+    await db.query(`
+      INSERT INTO compliance_notifications (role_target, type, title, body, link, priority)
+      VALUES ('supervisor', $1, $2, $3, '/compliance', $4)
+    `, [notifType, title, body, priority]);
+
+    await db.query(`
+      INSERT INTO compliance_reminder_log
+        (config_id, entity_type, entity_id, channel, recipient, message, status)
+      VALUES ($1, $2, $3, $4, 'compliance_role', $5, 'sent')
+    `, [cfg.id, row.entity_type, row.entity_id, cfg.channel, body]);
+
+    count++;
+  }
+  return count;
+}
+
+async function runComplianceReminders() {
+  const { rows: configs } = await db.query(`
+    SELECT * FROM compliance_reminder_config
+    WHERE is_active = TRUE
+    ORDER BY event_type, days_before DESC
+  `);
+
+  let total = 0;
+  for (const cfg of configs) {
+    try { total += await processComplianceConfig(cfg); }
+    catch (err) {
+      console.error(`[compliance] Config ${cfg.event_type}@${cfg.days_before}d error:`, err.message);
+    }
+  }
+  if (total) console.log(`[compliance] ${total} reminder notification(s) created`);
+}
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 function startScheduler() {
   ensureAlertsTable().catch(err => console.error('[scheduler] Table setup error:', err.message));
@@ -299,7 +422,13 @@ function startScheduler() {
     }
   });
 
-  console.log('[scheduler] Started — SLA checks every 5 min, daily report on schedule');
+  // Compliance reminders — daily at 07:00 UTC
+  cron.schedule('0 7 * * *', async () => {
+    try { await runComplianceReminders(); }
+    catch (err) { console.error('[scheduler] Compliance reminders error:', err.message); }
+  });
+
+  console.log('[scheduler] Started — SLA checks every 5 min, daily report on schedule, compliance reminders at 07:00 UTC');
 }
 
-module.exports = { startScheduler, sendDailyReport, checkSlaBreaches };
+module.exports = { startScheduler, sendDailyReport, checkSlaBreaches, runComplianceReminders };

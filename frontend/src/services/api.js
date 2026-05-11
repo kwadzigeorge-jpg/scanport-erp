@@ -252,6 +252,7 @@ export const complianceApi = {
   // Notifications
   notifications:          ()        => api.get('/compliance/notifications'),
   markRead:               (id)      => api.put(`/compliance/notifications/${id}/read`),
+  triggerReminders:       ()        => api.post('/compliance/notifications/run-reminders'),
 };
 
 // ─── Grievances ───────────────────────────────────────────────────────────────

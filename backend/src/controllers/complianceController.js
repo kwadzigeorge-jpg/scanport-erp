@@ -705,10 +705,17 @@ async function getComplianceRate(req, res, next) {
 async function getNotifications(req, res, next) {
   try {
     const { rows } = await db.query(`
-      SELECT * FROM compliance_notifications
-      WHERE (user_id=$1 OR role_target=(SELECT r.name FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=$1))
-        AND is_dismissed=FALSE
-      ORDER BY created_at DESC
+      WITH user_role AS (
+        SELECT r.name AS role_name FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = $1
+      )
+      SELECT n.* FROM compliance_notifications n, user_role
+      WHERE n.is_dismissed = FALSE
+        AND (
+          n.user_id = $1
+          OR n.role_target = user_role.role_name
+          OR (n.role_target = 'supervisor' AND user_role.role_name = 'admin')
+        )
+      ORDER BY n.created_at DESC
       LIMIT 50
     `, [req.user.id]);
     return res.json(rows);
@@ -717,7 +724,18 @@ async function getNotifications(req, res, next) {
 
 async function markNotificationRead(req, res, next) {
   try {
-    await db.query(`UPDATE compliance_notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2`, [req.params.id, req.user.id]);
+    await db.query(
+      `UPDATE compliance_notifications SET is_read=TRUE WHERE id=$1`,
+      [req.params.id]
+    );
+    return res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+async function triggerReminders(req, res, next) {
+  try {
+    const { runComplianceReminders } = require('../services/scheduler');
+    await runComplianceReminders();
     return res.json({ ok: true });
   } catch (err) { next(err); }
 }
@@ -732,5 +750,5 @@ module.exports = {
   getDashboard,
   generateAnnualReport, getAnnualReport, submitAnnualReport, exportAnnualReport,
   getMaintenanceReport, getVendorPerformance, getComplianceRate,
-  getNotifications, markNotificationRead,
+  getNotifications, markNotificationRead, triggerReminders,
 };

@@ -57,5 +57,6 @@ router.get('/reports/compliance-rate',      requirePermission('report.compliance
 // ── Notifications ─────────────────────────────────────────────────────────────
 router.get('/notifications',                requirePermission('compliance.view'),          cc.getNotifications);
 router.put('/notifications/:id/read',       requirePermission('compliance.view'),          cc.markNotificationRead);
+router.post('/notifications/run-reminders', requirePermission('compliance.edit'),          cc.triggerReminders);
 
 module.exports = router;

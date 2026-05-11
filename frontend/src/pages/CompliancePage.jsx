@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { complianceApi } from '../services/api';
 import { format, parseISO } from 'date-fns';
@@ -8,7 +8,7 @@ import {
   ShieldCheck, AlertTriangle, Clock, Wrench, Zap, FileText,
   Plus, X, Upload, Download, RefreshCw, ChevronRight,
   CheckCircle, XCircle, AlertCircle, Activity, Calendar,
-  Search, Filter, BarChart3, Send,
+  Search, Filter, BarChart3, Send, Bell,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -1385,6 +1385,120 @@ function AnnualReportTab() {
   );
 }
 
+// ─── Notification Bell ────────────────────────────────────────────────────────
+const NOTIF_PRIORITY = {
+  critical: 'bg-red-100 text-red-700 border-red-200',
+  high:     'bg-orange-100 text-orange-700 border-orange-200',
+  medium:   'bg-yellow-100 text-yellow-700 border-yellow-200',
+  low:      'bg-gray-100 text-gray-600 border-gray-200',
+};
+
+function NotificationBell() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const qc = useQueryClient();
+
+  const { data: notifs = [] } = useQuery(
+    ['compliance-notifications'],
+    () => complianceApi.notifications().then(r => r.data),
+    { refetchInterval: 60_000 }
+  );
+
+  const markRead = useMutation(id => complianceApi.markRead(id), {
+    onSuccess: () => qc.invalidateQueries(['compliance-notifications']),
+  });
+
+  const triggerMut = useMutation(() => complianceApi.triggerReminders(), {
+    onSuccess: () => {
+      toast.success('Reminder check complete');
+      qc.invalidateQueries(['compliance-notifications']);
+    },
+    onError: () => toast.error('Reminder check failed'),
+  });
+
+  const unread = notifs.filter(n => !n.is_read).length;
+
+  useEffect(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div className="relative ml-auto shrink-0" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="relative p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+        title="Compliance notifications"
+      >
+        <Bell size={18} />
+        {unread > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5">
+            {unread > 9 ? '9+' : unread}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-96 bg-white rounded-xl shadow-xl border border-gray-200 z-50 flex flex-col max-h-[480px]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <span className="font-semibold text-sm text-gray-800">Compliance Alerts</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => triggerMut.mutate()}
+                disabled={triggerMut.isLoading}
+                className="text-xs text-blue-600 hover:underline disabled:opacity-50"
+                title="Run reminder check now"
+              >
+                {triggerMut.isLoading ? 'Checking…' : 'Check now'}
+              </button>
+              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-y-auto flex-1">
+            {notifs.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">No notifications</p>
+            ) : (
+              notifs.map(n => (
+                <div
+                  key={n.id}
+                  className={clsx(
+                    'px-4 py-3 border-b border-gray-50 flex gap-3 items-start',
+                    !n.is_read && 'bg-blue-50'
+                  )}
+                >
+                  <div className={clsx('mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold border shrink-0',
+                    NOTIF_PRIORITY[n.priority] || NOTIF_PRIORITY.low)}>
+                    {n.priority?.toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-800 leading-snug">{n.title}</p>
+                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{n.body}</p>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      {format(parseISO(n.created_at), 'dd MMM yyyy HH:mm')}
+                    </p>
+                  </div>
+                  {!n.is_read && (
+                    <button
+                      onClick={() => markRead.mutate(n.id)}
+                      className="shrink-0 text-[10px] text-blue-600 hover:underline mt-0.5"
+                    >
+                      Mark read
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CompliancePage() {
   const [tab, setTab] = useState('dashboard');
@@ -1404,6 +1518,7 @@ export default function CompliancePage() {
             <t.icon size={15} />{t.label}
           </button>
         ))}
+        <NotificationBell />
       </div>
 
       {/* Content */}
