@@ -255,6 +255,17 @@ export const complianceApi = {
   triggerReminders:       ()        => api.post('/compliance/notifications/run-reminders'),
 };
 
+// ─── Service Feedback ─────────────────────────────────────────────────────────
+export const feedbackApi = {
+  submit:       (d)        => api.post('/feedback', d).then(r => r.data),
+  dashboard:    ()         => api.get('/feedback/dashboard').then(r => r.data),
+  list:         (params)   => api.get('/feedback', { params }).then(r => r.data),
+  get:          (id)       => api.get(`/feedback/${id}`).then(r => r.data),
+  changeStatus: (id, d)    => api.post(`/feedback/${id}/status`, d).then(r => r.data),
+  addNote:      (id, d)    => api.post(`/feedback/${id}/note`, d).then(r => r.data),
+  export:       ()         => api.get('/feedback/export', { responseType: 'blob' }).then(r => r.data),
+};
+
 // ─── Grievances ───────────────────────────────────────────────────────────────
 export const grievanceApi = {
   dashboard:    ()        => api.get('/grievances/dashboard').then(r => r.data),

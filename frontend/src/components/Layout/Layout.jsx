@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ClipboardList,
   BarChart3, Settings, LogOut, Menu, X, Bell, LayoutGrid,
   FlaskConical, MapPin, CalendarDays, Package, Boxes, ShieldCheck, Scale,
-  Sun, Moon,
+  Sun, Moon, MessageSquare,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -20,7 +20,8 @@ const navItems = [
   { to: '/inventory',    icon: Package,         label: 'Parts Catalogue', permission: 'part.view' },
   { to: '/stock',        icon: Boxes,           label: 'Stock',           permission: 'stock.view' },
   { to: '/compliance',   icon: ShieldCheck,     label: 'Compliance' },
-  { to: '/grievances',   icon: Scale,           label: 'Grievances' },
+  { to: '/grievances',      icon: Scale,           label: 'Grievances' },
+  { to: '/service-feedback', icon: MessageSquare,  label: 'Svc Feedback', permission: 'feedback.view' },
   { to: '/admin',        icon: Settings,        label: 'Admin',         role: 'admin' },
   { to: '/leave',        icon: CalendarDays,    label: 'Leave Mgmt',    roles: ['admin', 'supervisor'] },
 ];

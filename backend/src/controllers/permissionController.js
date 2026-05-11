@@ -171,6 +171,9 @@ const PERMISSION_GROUPS = {
   'Grievance Management': [
     'grievance.view','grievance.create','grievance.manage','grievance.export',
   ],
+  'Service Feedback': [
+    'feedback.view','feedback.manage','feedback.export',
+  ],
 };
 
 const DEFAULT_ROLES = [
@@ -201,6 +204,7 @@ const DEFAULT_ROLES = [
       'leave.approve','leave.manage_roster','leave.manage_holidays',
       'compliance.view','maintenance.view','report.compliance_view',
       'grievance.view','grievance.create','grievance.manage','grievance.export',
+      'feedback.view','feedback.manage','feedback.export',
     ],
     denies: ['user.delete','role.delete','permission.assign','config.edit'],
   },
@@ -209,7 +213,7 @@ const DEFAULT_ROLES = [
     description: 'Handles gate check-in and bay allocation.',
     is_system: true,
     groups: ['Gate Operations','Allocation Management'],
-    extra_grants: ['allocation.chit_print','grievance.view','grievance.create'],
+    extra_grants: ['allocation.chit_print','grievance.view','grievance.create','feedback.view'],
     denies: ['gate.override','container.override','allocation.delete','truck.delete'],
   },
   {

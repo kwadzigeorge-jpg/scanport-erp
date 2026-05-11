@@ -56,6 +56,7 @@ app.use('/api/parts',       require('./src/routes/parts'));
 app.use('/api/stock',       require('./src/routes/stock'));
 app.use('/api/compliance',  require('./src/routes/compliance'));
 app.use('/api/grievances',  require('./src/routes/grievances'));
+app.use('/api/feedback',    require('./src/routes/feedback'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));

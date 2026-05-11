@@ -17,8 +17,10 @@ import LeavePage        from './pages/LeavePage';
 import InventoryPage    from './pages/InventoryPage';
 import StockPage        from './pages/StockPage';
 import CompliancePage   from './pages/CompliancePage';
-import GrievancePage    from './pages/GrievancePage';
-import NotFoundPage     from './pages/NotFoundPage';
+import GrievancePage         from './pages/GrievancePage';
+import ServiceFeedbackPage   from './pages/ServiceFeedbackPage';
+import FeedbackFormPage      from './pages/FeedbackFormPage';
+import NotFoundPage          from './pages/NotFoundPage';
 
 function ProtectedRoute({ children, roles, permission }) {
   const { user, loading, hasRole, hasPermission } = useAuth();
@@ -34,6 +36,7 @@ function AppRoutes() {
 
   return (
     <Routes>
+      <Route path="/feedback" element={<FeedbackFormPage />} />
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
 
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
@@ -50,7 +53,8 @@ function AppRoutes() {
         <Route path="inventory"    element={<ProtectedRoute permission="part.view"><InventoryPage /></ProtectedRoute>} />
         <Route path="stock"        element={<ProtectedRoute permission="stock.view"><StockPage /></ProtectedRoute>} />
         <Route path="compliance"   element={<ProtectedRoute><CompliancePage /></ProtectedRoute>} />
-        <Route path="grievances"   element={<ProtectedRoute><GrievancePage /></ProtectedRoute>} />
+        <Route path="grievances"        element={<ProtectedRoute><GrievancePage /></ProtectedRoute>} />
+        <Route path="service-feedback" element={<ProtectedRoute permission="feedback.view"><ServiceFeedbackPage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />
