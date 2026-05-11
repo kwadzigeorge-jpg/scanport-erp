@@ -75,7 +75,8 @@ async function getSummary(req, res, next) {
       `SELECT
          COUNT(*) FILTER (WHERE status='IN_BAY')::int AS active,
          COUNT(*) FILTER (WHERE DATE(time_in)=CURRENT_DATE)::int AS arrived_today
-       FROM truck_allocations`
+       FROM truck_allocations
+       WHERE status='IN_BAY' OR DATE(time_in)=CURRENT_DATE`
     );
 
     // Active user sessions
