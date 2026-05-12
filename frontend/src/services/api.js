@@ -200,6 +200,11 @@ export const stockApi = {
   consumption:       (p)     => api.get('/stock/reports/consumption', { params: p }),
   slowMovers:        (p)     => api.get('/stock/reports/slow-movers', { params: p }),
   movementReport:    (p)     => api.get('/stock/reports/movement', { params: p }),
+  // Checkouts
+  checkoutStats:     ()      => api.get('/stock/checkouts/stats').then(r => r.data),
+  listCheckouts:     (p)     => api.get('/stock/checkouts', { params: p }).then(r => r.data),
+  createCheckout:    (d)     => api.post('/stock/checkouts', d).then(r => r.data),
+  returnCheckout:    (id, d) => api.post(`/stock/checkouts/${id}/return`, d).then(r => r.data),
 };
 
 // ─── Compliance ───────────────────────────────────────────────────────────────

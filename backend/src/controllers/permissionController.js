@@ -97,6 +97,7 @@ const ATOMIC_PERMISSIONS = [
   { name: 'stock.transfer',              description: 'Transfer stock between locations' },
   { name: 'stock.reserve',               description: 'Create and cancel stock reservations' },
   { name: 'stock.approve',               description: 'Approve high-value stock adjustments' },
+  { name: 'stock.checkout',             description: 'Issue parts to officers and record returns' },
   // Inventory — Suppliers & Equipment
   { name: 'supplier.view',               description: 'View supplier records' },
   { name: 'supplier.create',             description: 'Create supplier records' },
@@ -146,13 +147,13 @@ const PERMISSION_GROUPS = {
   ],
   'Storekeeper': [
     'part.view','stock.view','stock.receive','stock.issue',
-    'stock.reserve','alert.inventory_view','report.inventory_view',
+    'stock.checkout','stock.reserve','alert.inventory_view','report.inventory_view',
     'supplier.view','equipment.inventory_view',
   ],
   'Inventory Management': [
     'part.view','part.create','part.edit',
     'stock.view','stock.receive','stock.issue','stock.adjust',
-    'stock.transfer','stock.reserve','stock.approve',
+    'stock.transfer','stock.reserve','stock.approve','stock.checkout',
     'supplier.view','supplier.create','supplier.edit',
     'equipment.inventory_view','equipment.inventory_manage',
     'report.inventory_view','report.inventory_export',
@@ -205,6 +206,7 @@ const DEFAULT_ROLES = [
       'compliance.view','maintenance.view','report.compliance_view',
       'grievance.view','grievance.create','grievance.manage','grievance.export',
       'feedback.view','feedback.manage','feedback.export',
+      'stock.view','stock.checkout',
     ],
     denies: ['user.delete','role.delete','permission.assign','config.edit'],
   },

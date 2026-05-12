@@ -1,7 +1,8 @@
 const router = require('express').Router();
 const { authenticate }      = require('../middleware/auth');
 const { requirePermission }  = require('../middleware/rbac');
-const sc = require('../controllers/stockController');
+const sc  = require('../controllers/stockController');
+const co  = require('../controllers/checkoutController');
 
 router.use(authenticate);
 
@@ -32,5 +33,11 @@ router.get('/reports/valuation',          requirePermission('report.inventory_vi
 router.get('/reports/consumption',        requirePermission('report.inventory_view'), sc.getConsumptionReport);
 router.get('/reports/slow-movers',        requirePermission('report.inventory_view'), sc.getSlowMoversReport);
 router.get('/reports/movement',           requirePermission('stock.view'),           sc.getMovementReport);
+
+// ── Parts Checkouts ──────────────────────────────────────────────────────────
+router.get('/checkouts/stats',    requirePermission('stock.view'),     co.getStats);
+router.get('/checkouts',          requirePermission('stock.view'),     co.listCheckouts);
+router.post('/checkouts',         requirePermission('stock.checkout'), co.createCheckout);
+router.post('/checkouts/:id/return', requirePermission('stock.checkout'), co.returnCheckout);
 
 module.exports = router;
