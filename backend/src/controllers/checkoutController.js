@@ -3,16 +3,46 @@ const db = require('../config/database');
 // ─── Personnel ────────────────────────────────────────────────────────────────
 async function listPersonnel(req, res, next) {
   try {
-    const { department } = req.query;
+    const { department, all } = req.query;
     const params = [];
-    const cond   = ['is_active = TRUE'];
+    const cond   = [];
+    if (!all) cond.push('is_active = TRUE');
     if (department) { params.push(department); cond.push(`department = $${params.length}`); }
+    const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
     const { rows } = await db.query(
-      `SELECT id, name, department, is_active FROM stores_personnel
-       WHERE ${cond.join(' AND ')} ORDER BY name ASC`,
+      `SELECT id, name, department, is_active FROM stores_personnel ${where} ORDER BY name ASC`,
       params
     );
     return res.json(rows);
+  } catch (err) { next(err); }
+}
+
+async function updatePersonnel(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { name, department, is_active } = req.body;
+    const sets = []; const params = [];
+    if (name       !== undefined) { params.push(name.trim());   sets.push(`name=$${params.length}`); }
+    if (department !== undefined) { params.push(department);    sets.push(`department=$${params.length}`); }
+    if (is_active  !== undefined) { params.push(is_active);     sets.push(`is_active=$${params.length}`); }
+    if (!sets.length) return res.status(400).json({ error: 'Nothing to update.' });
+    params.push(id);
+    const { rows: [row] } = await db.query(
+      `UPDATE stores_personnel SET ${sets.join(', ')} WHERE id=$${params.length} RETURNING *`, params
+    );
+    if (!row) return res.status(404).json({ error: 'Not found.' });
+    return res.json(row);
+  } catch (err) { next(err); }
+}
+
+async function removePersonnel(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { rows: [row] } = await db.query(
+      `UPDATE stores_personnel SET is_active=FALSE WHERE id=$1 RETURNING *`, [id]
+    );
+    if (!row) return res.status(404).json({ error: 'Not found.' });
+    return res.json(row);
   } catch (err) { next(err); }
 }
 
@@ -319,6 +349,6 @@ async function returnCheckout(req, res, next) {
 }
 
 module.exports = {
-  listPersonnel, addPersonnel, getStats, listCheckouts,
-  createRequest, fulfillRequest, returnCheckout,
+  listPersonnel, addPersonnel, updatePersonnel, removePersonnel,
+  getStats, listCheckouts, createRequest, fulfillRequest, returnCheckout,
 };

@@ -35,8 +35,10 @@ router.get('/reports/slow-movers',        requirePermission('report.inventory_vi
 router.get('/reports/movement',           requirePermission('stock.view'),           sc.getMovementReport);
 
 // ── Stores Personnel ─────────────────────────────────────────────────────────
-router.get('/personnel',          requirePermission('stock.view'),     co.listPersonnel);
-router.post('/personnel',         requirePermission('stock.checkout'), co.addPersonnel);
+router.get('/personnel',            requirePermission('stock.view'),     co.listPersonnel);
+router.post('/personnel',           requirePermission('stock.checkout'), co.addPersonnel);
+router.put('/personnel/:id',        requirePermission('stock.checkout'), co.updatePersonnel);
+router.delete('/personnel/:id',     requirePermission('stock.checkout'), co.removePersonnel);
 
 // ── Parts Issued (Checkouts) ─────────────────────────────────────────────────
 router.get('/checkouts/stats',          requirePermission('stock.view'),     co.getStats);

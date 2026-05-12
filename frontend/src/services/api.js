@@ -204,6 +204,8 @@ export const stockApi = {
   // Personnel
   personnel:         (p)     => api.get('/stock/personnel', { params: p }).then(r => r.data),
   addPersonnel:      (d)     => api.post('/stock/personnel', d).then(r => r.data),
+  updatePersonnel:   (id, d) => api.put(`/stock/personnel/${id}`, d).then(r => r.data),
+  removePersonnel:   (id)    => api.delete(`/stock/personnel/${id}`).then(r => r.data),
   // Parts request workflow
   checkoutStats:     ()      => api.get('/stock/checkouts/stats').then(r => r.data),
   listCheckouts:     (p)     => api.get('/stock/checkouts', { params: p }).then(r => r.data),

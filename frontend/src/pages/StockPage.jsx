@@ -996,6 +996,124 @@ function MovementReportTab() {
   );
 }
 
+// ─── Personnel Manager ────────────────────────────────────────────────────────
+function PersonnelManagerModal({ onClose }) {
+  const qc = useQueryClient();
+  const [activeTab, setActiveTab] = useState('mde');
+  const [newName, setNewName] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const { data: allPersonnel = [], isLoading } = useQuery(
+    ['personnel-all'],
+    () => stockApi.personnel({ all: true }),
+    { refetchOnWindowFocus: false }
+  );
+
+  const mde    = allPersonnel.filter(p => p.department === 'mde');
+  const stores = allPersonnel.filter(p => p.department === 'stores');
+  const list   = activeTab === 'mde' ? mde : stores;
+
+  const refresh = () => {
+    qc.invalidateQueries('personnel-all');
+    qc.invalidateQueries('personnel-mde');
+    qc.invalidateQueries('personnel-stores');
+    qc.invalidateQueries('storePersonnel');
+  };
+
+  const addMut = useMutation(
+    (name) => stockApi.addPersonnel({ name, department: activeTab }),
+    {
+      onSuccess: () => { toast.success('Person added.'); setNewName(''); refresh(); },
+      onError:   (e) => toast.error(e.response?.data?.error || 'Failed to add.'),
+    }
+  );
+
+  const toggleMut = useMutation(
+    ({ id, is_active }) => stockApi.updatePersonnel(id, { is_active }),
+    {
+      onSuccess: () => { toast.success('Updated.'); refresh(); },
+      onError:   () => toast.error('Failed to update.'),
+    }
+  );
+
+  const handleAdd = (e) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    addMut.mutate(newName.trim());
+  };
+
+  const deptLabel = activeTab === 'mde' ? 'MDE Staff' : 'Stores Officers';
+
+  return (
+    <div className="space-y-4">
+      {/* Tab toggle */}
+      <div className="flex rounded-xl border border-gray-200 overflow-hidden text-sm font-medium">
+        {[['mde','MDE Staff'],['stores','Stores Officers']].map(([key, label]) => (
+          <button key={key} onClick={() => { setActiveTab(key); setNewName(''); }}
+            className={clsx('flex-1 py-2.5 transition-colors',
+              activeTab === key ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50')}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Add form */}
+      <form onSubmit={handleAdd} className="flex gap-2">
+        <input
+          className={clsx(inp, 'flex-1')}
+          placeholder={`Add new ${deptLabel.toLowerCase()} member…`}
+          value={newName}
+          onChange={e => setNewName(e.target.value)}
+        />
+        <button type="submit" disabled={addMut.isLoading || !newName.trim()}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg disabled:opacity-50 whitespace-nowrap">
+          {addMut.isLoading ? 'Adding…' : '+ Add'}
+        </button>
+      </form>
+
+      {/* List */}
+      <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-4 py-2 border-b border-gray-200 bg-white">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{deptLabel} — {list.length} member{list.length !== 1 ? 's' : ''}</p>
+        </div>
+        {isLoading ? (
+          <p className="px-4 py-6 text-sm text-center text-gray-400">Loading…</p>
+        ) : list.length === 0 ? (
+          <p className="px-4 py-6 text-sm text-center text-gray-400">No members yet. Add one above.</p>
+        ) : (
+          <ul className="divide-y divide-gray-100">
+            {list.map(p => (
+              <li key={p.id} className={clsx('flex items-center justify-between px-4 py-3 gap-3',
+                !p.is_active && 'opacity-50')}>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={clsx('w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0',
+                    activeTab === 'mde' ? 'bg-purple-500' : 'bg-blue-500')}>
+                    {p.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className={clsx('text-sm font-medium truncate', p.is_active ? 'text-gray-900' : 'text-gray-400 line-through')}>{p.name}</p>
+                    {!p.is_active && <p className="text-xs text-gray-400">Inactive</p>}
+                  </div>
+                </div>
+                <button
+                  onClick={() => toggleMut.mutate({ id: p.id, is_active: !p.is_active })}
+                  disabled={toggleMut.isLoading}
+                  className={clsx('text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap shrink-0',
+                    p.is_active
+                      ? 'border-red-200 text-red-600 hover:bg-red-50'
+                      : 'border-green-200 text-green-600 hover:bg-green-50')}>
+                  {p.is_active ? 'Remove' : 'Restore'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <p className="text-xs text-gray-400 text-center">Removing a member hides them from dropdowns but preserves their history.</p>
+    </div>
+  );
+}
+
 // ─── Parts Request Workflow ───────────────────────────────────────────────────
 const STATUS_CFG = {
   pending:  { label: 'Pending',  bg: 'bg-amber-100',  text: 'text-amber-700',  Icon: Clock        },
@@ -1385,10 +1503,16 @@ function CheckoutsTab() {
         </div>
         <input type="date" value={filters.from} onChange={e => setF('from', e.target.value)} className={clsx(sel, 'w-36')} />
         <input type="date" value={filters.to}   onChange={e => setF('to',   e.target.value)} className={clsx(sel, 'w-36')} />
-        <button onClick={() => setModal({ type: 'request' })}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors ml-auto whitespace-nowrap">
-          <PackagePlus size={14} /> Request Part
-        </button>
+        <div className="flex items-center gap-2 ml-auto">
+          <button onClick={() => setModal({ type: 'personnel' })}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors whitespace-nowrap">
+            <UserCheck size={14} /> Manage People
+          </button>
+          <button onClick={() => setModal({ type: 'request' })}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap">
+            <PackagePlus size={14} /> Request Part
+          </button>
+        </div>
       </div>
 
       {/* Table */}
@@ -1489,6 +1613,11 @@ function CheckoutsTab() {
       {modal?.type === 'return' && (
         <Modal title="Return Part to Stores" onClose={() => setModal(null)}>
           <ReturnModal record={modal.record} onClose={() => setModal(null)} onSuccess={onMoved} />
+        </Modal>
+      )}
+      {modal?.type === 'personnel' && (
+        <Modal title="Manage MDE Staff & Stores Officers" onClose={() => setModal(null)} wide>
+          <PersonnelManagerModal onClose={() => setModal(null)} />
         </Modal>
       )}
     </div>
