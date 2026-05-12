@@ -393,9 +393,23 @@ async function runComplianceReminders() {
   if (total) console.log(`[compliance] ${total} reminder notification(s) created`);
 }
 
+// ─── Daily truck reset ────────────────────────────────────────────────────────
+async function autoReleaseStaleTrucks() {
+  const { rowCount } = await db.query(`
+    UPDATE truck_allocations
+    SET status = 'RELEASED', time_out = NOW(), updated_at = NOW()
+    WHERE status = 'IN_BAY'
+      AND DATE(time_in) < CURRENT_DATE
+  `);
+  if (rowCount > 0) console.log(`[scheduler] Auto-released ${rowCount} stale IN_BAY truck(s) from previous day(s)`);
+}
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 function startScheduler() {
   ensureAlertsTable().catch(err => console.error('[scheduler] Table setup error:', err.message));
+
+  // Release any trucks still IN_BAY from previous days (runs on startup + midnight)
+  autoReleaseStaleTrucks().catch(err => console.error('[scheduler] Stale truck release error:', err.message));
 
   // SLA breach check every 5 minutes
   cron.schedule('*/5 * * * *', async () => {
@@ -428,7 +442,13 @@ function startScheduler() {
     catch (err) { console.error('[scheduler] Compliance reminders error:', err.message); }
   });
 
-  console.log('[scheduler] Started — SLA checks every 5 min, daily report on schedule, compliance reminders at 07:00 UTC');
+  // Auto-release stale IN_BAY trucks at midnight UTC
+  cron.schedule('0 0 * * *', async () => {
+    try { await autoReleaseStaleTrucks(); }
+    catch (err) { console.error('[scheduler] Stale truck release error:', err.message); }
+  });
+
+  console.log('[scheduler] Started — SLA checks every 5 min, daily report on schedule, compliance reminders at 07:00 UTC, truck reset at midnight');
 }
 
 module.exports = { startScheduler, sendDailyReport, checkSlaBreaches, runComplianceReminders };
