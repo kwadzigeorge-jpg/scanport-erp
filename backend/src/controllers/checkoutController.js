@@ -234,8 +234,8 @@ async function fulfillRequest(req, res, next) {
          (part_id, location_id, txn_type, txn_ref, qty, unit_cost, qty_before, qty_after, purpose, notes, created_by)
        VALUES ($1,$2,'STOCK_OUT',$3,$4,$5,$6,$7,$8,$9,$10)`,
       [co.part_id, location_id, txn_ref, -qtyNum, unit_cost, on_hand, qty_after,
-       co.work_order ? `ISSUE: ${co.work_order}` : 'ISSUE',
-       `Issued to ${co.officer_name} — picked by ${person.name}${notes ? ` (${notes})` : ''}`,
+       co.work_order ? 'WORK_ORDER' : null,
+       `Issued to ${co.officer_name} — WO: ${co.work_order || 'N/A'} — picked by ${person.name}${notes ? ` (${notes})` : ''}`,
        req.user.id]
     );
 
