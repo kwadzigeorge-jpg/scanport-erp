@@ -34,10 +34,14 @@ router.get('/reports/consumption',        requirePermission('report.inventory_vi
 router.get('/reports/slow-movers',        requirePermission('report.inventory_view'), sc.getSlowMoversReport);
 router.get('/reports/movement',           requirePermission('stock.view'),           sc.getMovementReport);
 
-// ── Parts Checkouts ──────────────────────────────────────────────────────────
-router.get('/checkouts/stats',    requirePermission('stock.view'),     co.getStats);
-router.get('/checkouts',          requirePermission('stock.view'),     co.listCheckouts);
-router.post('/checkouts',         requirePermission('stock.checkout'), co.createCheckout);
+// ── Stores Personnel ─────────────────────────────────────────────────────────
+router.get('/personnel',          requirePermission('stock.view'),     co.listPersonnel);
+router.post('/personnel',         requirePermission('stock.checkout'), co.addPersonnel);
+
+// ── Parts Issued (Checkouts) ─────────────────────────────────────────────────
+router.get('/checkouts/stats',       requirePermission('stock.view'),     co.getStats);
+router.get('/checkouts',             requirePermission('stock.view'),     co.listCheckouts);
+router.post('/checkouts',            requirePermission('stock.checkout'), co.createCheckout);
 router.post('/checkouts/:id/return', requirePermission('stock.checkout'), co.returnCheckout);
 
 module.exports = router;

@@ -11,8 +11,8 @@ CREATE TABLE parts_checkouts (
   location_id         INT          NOT NULL REFERENCES storage_locations(id),
   qty                 NUMERIC(12,4) NOT NULL CHECK (qty > 0),
 
-  -- Who took it
-  officer_id          UUID         NOT NULL REFERENCES users(id),
+  -- Who took it (personnel_id added by migration 016)
+  officer_id          UUID         REFERENCES users(id),
   officer_name        VARCHAR(200) NOT NULL,
 
   -- When / why
@@ -31,9 +31,9 @@ CREATE TABLE parts_checkouts (
   return_notes        TEXT,
   return_txn_ref      VARCHAR(30),
 
-  -- Status (overdue computed at query time)
-  status              VARCHAR(20)  NOT NULL DEFAULT 'active'
-                        CHECK (status IN ('active','returned','lost')),
+  -- Status
+  status              VARCHAR(20)  NOT NULL DEFAULT 'issued'
+                        CHECK (status IN ('issued','returned','lost')),
 
   -- Meta
   created_by          UUID REFERENCES users(id),

@@ -200,7 +200,10 @@ export const stockApi = {
   consumption:       (p)     => api.get('/stock/reports/consumption', { params: p }),
   slowMovers:        (p)     => api.get('/stock/reports/slow-movers', { params: p }),
   movementReport:    (p)     => api.get('/stock/reports/movement', { params: p }),
-  // Checkouts
+  // Personnel
+  personnel:         ()      => api.get('/stock/personnel').then(r => r.data),
+  addPersonnel:      (d)     => api.post('/stock/personnel', d).then(r => r.data),
+  // Issues register
   checkoutStats:     ()      => api.get('/stock/checkouts/stats').then(r => r.data),
   listCheckouts:     (p)     => api.get('/stock/checkouts', { params: p }).then(r => r.data),
   createCheckout:    (d)     => api.post('/stock/checkouts', d).then(r => r.data),
