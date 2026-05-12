@@ -5,13 +5,14 @@ const {
   dailyReport, dwellTimeReport, agentPerformanceReport,
   auditTrail, exceptionReport, getSystemConfig, updateSystemConfig,
   operationsDashboard, dwellAnalysis, areaPerformance, slaExceptions, exportReport,
-  getEmailConfig, updateEmailConfig, testEmail,
+  getEmailConfig, updateEmailConfig, testEmail, dwellTrend,
 } = require('../controllers/reportController');
 
 router.use(authenticate);
 
 // ── New analytics endpoints ──────────────────────────────────────────────────
 router.get('/operations-dashboard', requirePermission('report.view'), operationsDashboard);
+router.get('/dwell-trend',          requirePermission('report.view'), dwellTrend);
 router.get('/dwell-analysis',       requirePermission('report.view'), dwellAnalysis);
 router.get('/area-performance',     requirePermission('report.view'), areaPerformance);
 router.get('/sla-exceptions',       requirePermission('report.view'), slaExceptions);

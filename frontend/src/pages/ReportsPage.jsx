@@ -5,7 +5,8 @@ import { format } from 'date-fns';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip,
+  BarChart, Bar, LineChart, Line, Area, AreaChart,
+  XAxis, YAxis, Tooltip, CartesianGrid,
   ResponsiveContainer, ReferenceLine, Cell,
 } from 'recharts';
 import {
@@ -305,6 +306,9 @@ function DashboardTab({ filters, onSelectContainer }) {
         </div>
       </div>
 
+      {/* Dwell trend */}
+      <DwellTrendChart slaMin={slaMin} />
+
       {/* Live containers table */}
       <div>
         <h3 className="text-sm font-semibold text-gray-700 mb-2">
@@ -336,6 +340,117 @@ function DashboardTab({ filters, onSelectContainer }) {
           ]}
         />
       </div>
+    </div>
+  );
+}
+
+// ─── Dwell Trend Chart ────────────────────────────────────────────────────────
+function DwellTrendChart({ slaMin }) {
+  const [period, setPeriod] = useState('daily');
+
+  const { data, isLoading } = useQuery(
+    ['dwell-trend', period],
+    () => reportsApi.dwellTrend({ period }).then(r => r.data),
+    { refetchInterval: 300000 }
+  );
+
+  const rows = data?.rows || [];
+  const thresholdMin = slaMin || data?.sla_minutes || 180;
+
+  const PERIODS = [
+    { key: 'daily',   label: 'Daily',   sub: 'Last 30 days' },
+    { key: 'weekly',  label: 'Weekly',  sub: 'Last 12 weeks' },
+    { key: 'monthly', label: 'Monthly', sub: 'Last 12 months' },
+  ];
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null;
+    const d = payload[0]?.value;
+    return (
+      <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs">
+        <p className="font-semibold text-gray-700 mb-1">{label}</p>
+        <p className="text-blue-600">Avg dwell: <span className="font-bold">{fmtDwell(d)}</span></p>
+        <p className="text-gray-400">Containers: {payload[0]?.payload?.count ?? '—'}</p>
+        {d != null && d >= thresholdMin && (
+          <p className="text-red-500 font-medium mt-1">SLA breached</p>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700">Average Dwell Time Trend</h3>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {PERIODS.find(p => p.key === period)?.sub} · SLA threshold: {fmtDwell(thresholdMin)}
+          </p>
+        </div>
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+          {PERIODS.map(p => (
+            <button
+              key={p.key}
+              onClick={() => setPeriod(p.key)}
+              className={clsx(
+                'px-3 py-1.5 transition-colors',
+                period === p.key
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-50'
+              )}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="h-52 flex items-center justify-center text-gray-400 text-sm">Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="h-52 flex items-center justify-center text-gray-400 text-sm">No released container data for this period</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={210}>
+          <AreaChart data={rows} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+            <defs>
+              <linearGradient id="dwellGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor="#2563eb" stopOpacity={0.15} />
+                <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 11, fill: '#6b7280' }}
+              tickLine={false}
+              interval="preserveStartEnd"
+            />
+            <YAxis
+              tick={{ fontSize: 11, fill: '#6b7280' }}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={v => `${Math.floor(v / 60)}h`}
+              width={32}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <ReferenceLine
+              y={thresholdMin}
+              stroke="#ef4444"
+              strokeDasharray="4 3"
+              label={{ value: 'SLA', position: 'right', fontSize: 10, fill: '#ef4444' }}
+            />
+            <Area
+              type="monotone"
+              dataKey="avg_dwell"
+              stroke="#2563eb"
+              strokeWidth={2}
+              fill="url(#dwellGrad)"
+              dot={{ r: 3, fill: '#2563eb', strokeWidth: 0 }}
+              activeDot={{ r: 5 }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      )}
     </div>
   );
 }

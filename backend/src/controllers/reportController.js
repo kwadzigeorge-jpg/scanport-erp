@@ -557,9 +557,60 @@ async function updateSystemConfig(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Dwell Trend ─────────────────────────────────────────────────────────────
+async function dwellTrend(req, res, next) {
+  try {
+    const { period = 'daily' } = req.query;
+    const slaMin = await getSlaMinutes();
+
+    let sql;
+    if (period === 'weekly') {
+      sql = `
+        SELECT
+          TO_CHAR(DATE_TRUNC('week', time_out), 'DD Mon') AS label,
+          DATE_TRUNC('week', time_out)::date              AS period_start,
+          ROUND(AVG(dwell_minutes))::int                  AS avg_dwell,
+          COUNT(*)::int                                   AS count
+        FROM container_transactions
+        WHERE status = 'EXITED'
+          AND time_out >= CURRENT_DATE - INTERVAL '12 weeks'
+        GROUP BY DATE_TRUNC('week', time_out)
+        ORDER BY DATE_TRUNC('week', time_out)`;
+    } else if (period === 'monthly') {
+      sql = `
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', time_out), 'Mon YYYY') AS label,
+          DATE_TRUNC('month', time_out)::date                AS period_start,
+          ROUND(AVG(dwell_minutes))::int                     AS avg_dwell,
+          COUNT(*)::int                                      AS count
+        FROM container_transactions
+        WHERE status = 'EXITED'
+          AND time_out >= CURRENT_DATE - INTERVAL '12 months'
+        GROUP BY DATE_TRUNC('month', time_out)
+        ORDER BY DATE_TRUNC('month', time_out)`;
+    } else {
+      sql = `
+        SELECT
+          TO_CHAR(DATE(time_out), 'DD Mon')  AS label,
+          DATE(time_out)                     AS period_start,
+          ROUND(AVG(dwell_minutes))::int     AS avg_dwell,
+          COUNT(*)::int                      AS count
+        FROM container_transactions
+        WHERE status = 'EXITED'
+          AND time_out >= CURRENT_DATE - INTERVAL '30 days'
+        GROUP BY DATE(time_out)
+        ORDER BY DATE(time_out)`;
+    }
+
+    const { rows } = await db.query(sql);
+    return res.json({ period, sla_minutes: slaMin, rows });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   dailyReport, dwellTimeReport, agentPerformanceReport, auditTrail,
   exceptionReport, getSystemConfig, updateSystemConfig,
   operationsDashboard, dwellAnalysis, areaPerformance, slaExceptions, exportReport,
   getEmailConfig, updateEmailConfig, testEmail,
+  dwellTrend,
 };

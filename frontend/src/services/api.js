@@ -97,6 +97,7 @@ export const dashboardApi = {
 export const reportsApi = {
   // New analytics
   operationsDashboard: (p) => api.get('/reports/operations-dashboard', { params: p }),
+  dwellTrend:          (p) => api.get('/reports/dwell-trend', { params: p }),
   dwellAnalysis:       (p) => api.get('/reports/dwell-analysis', { params: p }),
   areaPerformance:     (p) => api.get('/reports/area-performance', { params: p }),
   agentPerf:           (p) => api.get('/reports/agent-performance', { params: p }),
