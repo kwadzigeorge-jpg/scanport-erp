@@ -1018,16 +1018,13 @@ function IssuePartModal({ onClose, onSuccess }) {
     part_id: '', location_id: '', qty: '1', personnel_id: '',
     work_order: '', purpose: '',
   });
-  const [partSearch, setPartSearch] = useState('');
-  const [showDropdown, setShowDropdown] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const { data: balancesData } = useQuery(
-    ['balances-issue', partSearch],
-    () => stockApi.balances({ search: partSearch || undefined, page: 1, limit: 30 }).then(r => r.data),
-    { enabled: partSearch.length > 1, keepPreviousData: true }
+    'balances-issue-all',
+    () => stockApi.balances({ page: 1, limit: 300 }).then(r => r.data),
   );
-  const parts = balancesData?.balances || [];
+  const parts = (balancesData?.balances || []).filter(p => parseFloat(p.qty_available) > 0);
   const selectedPart = parts.find(p => String(p.id) === String(form.part_id));
 
   const { data: partStockData } = useQuery(
@@ -1050,8 +1047,8 @@ function IssuePartModal({ onClose, onSuccess }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!form.part_id)     return toast.error('Select a part.');
-    if (!form.location_id) return toast.error('Select a location.');
+    if (!form.part_id)      return toast.error('Select a part.');
+    if (!form.location_id)  return toast.error('Select a location.');
     if (!form.personnel_id) return toast.error('Select a person.');
     if (!form.qty || parseFloat(form.qty) <= 0) return toast.error('Enter a valid qty.');
     mut.mutate({
@@ -1066,50 +1063,40 @@ function IssuePartModal({ onClose, onSuccess }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Part search */}
+      {/* Part dropdown */}
       <Field label="Part" required>
-        <div className="space-y-1.5">
-          <input
-            className={inp} placeholder="Type part number or description to search…"
-            value={partSearch}
-            onChange={e => {
-              setPartSearch(e.target.value);
-              set('part_id', '');
-              set('location_id', '');
-              setShowDropdown(true);
-            }}
-          />
-          {showDropdown && parts.length > 0 && !form.part_id && (
-            <div className="border border-gray-200 rounded-lg max-h-44 overflow-y-auto divide-y divide-gray-50 shadow-sm">
-              {parts.map(p => (
-                <button key={p.id} type="button"
-                  onClick={() => {
-                    set('part_id', String(p.id));
-                    setPartSearch(`${p.part_number} — ${p.description}`);
-                    set('location_id', '');
-                    setShowDropdown(false);
-                  }}
-                  className="w-full text-left px-3 py-2.5 hover:bg-blue-50 transition-colors">
-                  <p className="font-mono text-xs text-gray-500">{p.part_number}</p>
-                  <p className="text-xs text-gray-800 font-medium">{p.description}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Available: {parseFloat(p.qty_available).toFixed(2)} {p.unit_of_measure}</p>
-                </button>
+        <select className={sel} value={form.part_id}
+          onChange={e => { set('part_id', e.target.value); set('location_id', ''); }} required>
+          <option value="">— Select part —</option>
+          {parts.map(p => (
+            <option key={p.id} value={p.id}>
+              {p.part_number} — {p.description} (Avail: {parseFloat(p.qty_available).toFixed(2)} {p.unit_of_measure})
+            </option>
+          ))}
+        </select>
+        {selectedPart && (
+          <div className="mt-1.5 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
+            Available: <strong>{parseFloat(selectedPart.qty_available).toFixed(2)} {selectedPart.unit_of_measure}</strong>
+          </div>
+        )}
+      </Field>
+
+      {/* REMOVED old search/dropdown code placeholder */}
+      {false && (
+        <div>
+          {parts.map(p => (
+            <button key={p.id} type="button"
+              onClick={() => {}}
+              className="w-full text-left px-3 py-2.5 hover:bg-blue-50 transition-colors">
+              <p className="font-mono text-xs text-gray-500">{p.part_number}</p>
+              <p className="text-xs text-gray-800 font-medium">{p.description}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Available: {parseFloat(p.qty_available).toFixed(2)} {p.unit_of_measure}</p>
+            </button>
               ))}
             </div>
           )}
-          {form.part_id && selectedPart && (
-            <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-              <Package size={13} className="text-blue-500 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-blue-800 truncate">{selectedPart.description}</p>
-                <p className="text-xs text-blue-500">Available: {parseFloat(selectedPart.qty_available).toFixed(2)} {selectedPart.unit_of_measure}</p>
-              </div>
-              <button type="button" onClick={() => { set('part_id', ''); set('location_id', ''); setPartSearch(''); setShowDropdown(false); }}
-                className="text-blue-400 hover:text-blue-600 shrink-0"><X size={13} /></button>
-            </div>
-          )}
         </div>
-      </Field>
+      )}
 
       {/* Location */}
       {form.part_id && (
