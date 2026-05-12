@@ -1081,23 +1081,6 @@ function IssuePartModal({ onClose, onSuccess }) {
         )}
       </Field>
 
-      {/* REMOVED old search/dropdown code placeholder */}
-      {false && (
-        <div>
-          {parts.map(p => (
-            <button key={p.id} type="button"
-              onClick={() => {}}
-              className="w-full text-left px-3 py-2.5 hover:bg-blue-50 transition-colors">
-              <p className="font-mono text-xs text-gray-500">{p.part_number}</p>
-              <p className="text-xs text-gray-800 font-medium">{p.description}</p>
-              <p className="text-xs text-gray-400 mt-0.5">Available: {parseFloat(p.qty_available).toFixed(2)} {p.unit_of_measure}</p>
-            </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Location */}
       {form.part_id && (
         <Field label="Issue From Location" required>
