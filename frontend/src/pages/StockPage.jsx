@@ -996,184 +996,263 @@ function MovementReportTab() {
   );
 }
 
-// ─── Parts Issued Tab ─────────────────────────────────────────────────────────
-const ISSUE_STATUS = {
-  issued:   { label: 'Issued',   bg: 'bg-blue-100',  text: 'text-blue-700',  Icon: CircleDot    },
-  returned: { label: 'Returned', bg: 'bg-green-100', text: 'text-green-700', Icon: CheckCircle2 },
-  lost:     { label: 'Lost',     bg: 'bg-gray-100',  text: 'text-gray-500',  Icon: X            },
+// ─── Parts Request Workflow ───────────────────────────────────────────────────
+const STATUS_CFG = {
+  pending:  { label: 'Pending',  bg: 'bg-amber-100',  text: 'text-amber-700',  Icon: Clock        },
+  issued:   { label: 'Issued',   bg: 'bg-blue-100',   text: 'text-blue-700',   Icon: CircleDot    },
+  returned: { label: 'Returned', bg: 'bg-green-100',  text: 'text-green-700',  Icon: CheckCircle2 },
+  lost:     { label: 'Lost',     bg: 'bg-gray-100',   text: 'text-gray-500',   Icon: X            },
 };
 
-function IssueStatusBadge({ status }) {
-  const cfg = ISSUE_STATUS[status] || ISSUE_STATUS.issued;
-  const { Icon, bg, text, label } = cfg;
+function StatusBadge({ status }) {
+  const cfg = STATUS_CFG[status] || STATUS_CFG.issued;
   return (
-    <span className={clsx('inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap', bg, text)}>
-      <Icon size={10} /> {label}
+    <span className={clsx('inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap', cfg.bg, cfg.text)}>
+      <cfg.Icon size={10} /> {cfg.label}
     </span>
   );
 }
 
-function IssuePartModal({ onClose, onSuccess }) {
-  const [form, setForm] = useState({
-    part_id: '', location_id: '', qty: '1', personnel_id: '',
-    work_order: '', purpose: '',
-  });
+function UrgencyBadge({ urgency }) {
+  if (!urgency || urgency === 'normal') return null;
+  return (
+    <span className={clsx('inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap',
+      urgency === 'urgent' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500')}>
+      {urgency === 'urgent' ? '⚡ Urgent' : urgency}
+    </span>
+  );
+}
+
+// ── Request Part Modal (MDE creates the request) ──────────────────────────────
+function RequestPartModal({ onClose, onSuccess }) {
+  const [form, setForm] = useState({ part_id: '', qty: '1', requested_by_id: '', work_order: '', purpose: '', urgency: 'normal' });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const { data: balancesData } = useQuery(
-    'balances-issue-all',
-    () => stockApi.balances({ page: 1, limit: 300 }).then(r => r.data),
+  const { data: allParts = [] } = useQuery('all-parts-list',
+    () => partsApi.list({ limit: 500, status: 'ACTIVE' }).then(r => r.data?.parts || r.data || [])
   );
-  const parts = (balancesData?.balances || []).filter(p => parseFloat(p.qty_available) > 0);
-  const selectedPart = parts.find(p => String(p.id) === String(form.part_id));
-
-  const { data: partStockData } = useQuery(
-    ['partStock-issue', form.part_id],
-    () => stockApi.partStock(form.part_id).then(r => r.data),
-    { enabled: !!form.part_id }
+  const { data: mdePersonnel = [] } = useQuery('personnel-mde',
+    () => stockApi.personnel({ department: 'mde' })
   );
-  const stockedLocations = (partStockData || []).filter(s => parseFloat(s.qty_on_hand) > 0);
 
-  const { data: personnel = [] } = useQuery('storePersonnel', stockApi.personnel);
-  const activePersonnel = personnel.filter(p => p.is_active);
-
-  const mut = useMutation(
-    (d) => stockApi.createCheckout(d),
-    {
-      onSuccess: () => { toast.success('Part issued and recorded.'); onSuccess(); onClose(); },
-      onError:   (e) => toast.error(e.response?.data?.error || 'Failed to issue part.'),
-    }
-  );
+  const mut = useMutation(stockApi.createRequest, {
+    onSuccess: () => { toast.success('Part request submitted.'); onSuccess(); onClose(); },
+    onError:   (e) => toast.error(e.response?.data?.error || 'Failed to submit request.'),
+  });
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!form.part_id)      return toast.error('Select a part.');
-    if (!form.location_id)  return toast.error('Select a location.');
-    if (!form.personnel_id) return toast.error('Select a person.');
-    if (!form.qty || parseFloat(form.qty) <= 0) return toast.error('Enter a valid qty.');
+    if (!form.part_id)         return toast.error('Select a part.');
+    if (!form.requested_by_id) return toast.error('Select who is requesting.');
+    if (!form.qty || parseFloat(form.qty) <= 0) return toast.error('Enter a valid quantity.');
     mut.mutate({
-      part_id:      parseInt(form.part_id),
-      location_id:  parseInt(form.location_id),
-      qty:          parseFloat(form.qty),
-      personnel_id: parseInt(form.personnel_id),
-      work_order:   form.work_order || undefined,
-      purpose:      form.purpose   || undefined,
+      part_id:          parseInt(form.part_id),
+      qty:              parseFloat(form.qty),
+      requested_by_id:  parseInt(form.requested_by_id),
+      work_order:       form.work_order || undefined,
+      purpose:          form.purpose   || undefined,
+      urgency:          form.urgency,
     });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Part dropdown */}
-      <Field label="Part" required>
-        <select className={sel} value={form.part_id}
-          onChange={e => { set('part_id', e.target.value); set('location_id', ''); }} required>
+      <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
+        Submit a request for a part from stores. Stores staff will pick and hand it over to you.
+      </div>
+
+      <Field label="Requested By (MDE Staff)" required>
+        <select className={sel} value={form.requested_by_id} onChange={e => set('requested_by_id', e.target.value)} required>
+          <option value="">— Select your name —</option>
+          {mdePersonnel.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </Field>
+
+      <Field label="Part Required" required>
+        <select className={sel} value={form.part_id} onChange={e => set('part_id', e.target.value)} required>
           <option value="">— Select part —</option>
-          {parts.map(p => (
-            <option key={p.id} value={p.id}>
-              {p.part_number} — {p.description} (Avail: {parseFloat(p.qty_available).toFixed(2)} {p.unit_of_measure})
-            </option>
-          ))}
-        </select>
-        {selectedPart && (
-          <div className="mt-1.5 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
-            Available: <strong>{parseFloat(selectedPart.qty_available).toFixed(2)} {selectedPart.unit_of_measure}</strong>
-          </div>
-        )}
-      </Field>
-
-      {/* Location */}
-      {form.part_id && (
-        <Field label="Issue From Location" required>
-          <select className={sel} value={form.location_id} onChange={e => set('location_id', e.target.value)} required>
-            <option value="">— Select location —</option>
-            {stockedLocations.map(s => (
-              <option key={s.location_id} value={s.location_id}>
-                {s.location_code} — Available: {parseFloat(s.qty_available).toFixed(2)}
-              </option>
-            ))}
-          </select>
-        </Field>
-      )}
-
-      {/* Qty */}
-      <Field label="Quantity Issued" required>
-        <div className="flex items-center gap-2">
-          <input className={clsx(inp, 'flex-1')} type="number" min="0.001" step="any"
-            value={form.qty} onChange={e => set('qty', e.target.value)} required />
-          {selectedPart && <span className="text-sm text-gray-500 shrink-0">{selectedPart.unit_of_measure}</span>}
-        </div>
-      </Field>
-
-      {/* Person */}
-      <Field label="Issued To" required>
-        <select className={sel} value={form.personnel_id} onChange={e => set('personnel_id', e.target.value)} required>
-          <option value="">— Select person —</option>
-          {activePersonnel.map(p => (
-            <option key={p.id} value={p.id}>{p.name}{p.department ? ` (${p.department})` : ''}</option>
+          {allParts.map(p => (
+            <option key={p.id} value={p.id}>{p.part_number} — {p.description}</option>
           ))}
         </select>
       </Field>
 
-      <Field label="Work Order / Job Reference">
+      <Field label="Quantity" required>
+        <input className={inp} type="number" min="0.001" step="any"
+          value={form.qty} onChange={e => set('qty', e.target.value)} required />
+      </Field>
+
+      <Field label="Job / Work Order">
         <input className={inp} value={form.work_order} onChange={e => set('work_order', e.target.value)}
-          placeholder="e.g. WO-1234, Preventive Maintenance, Scanner #3" />
+          placeholder="e.g. WO-1234, Scanner #3 repair, Preventive Maintenance" />
       </Field>
 
-      <Field label="Purpose / Notes">
-        <textarea className={inp} rows={2} value={form.purpose}
-          onChange={e => set('purpose', e.target.value)}
-          placeholder="Brief description of what the part is for…" />
+      <Field label="Description / Notes">
+        <textarea className={inp} rows={2} value={form.purpose} onChange={e => set('purpose', e.target.value)}
+          placeholder="What is this part for?" />
+      </Field>
+
+      <Field label="Urgency">
+        <div className="flex gap-2">
+          {[['normal','Normal'],['urgent','Urgent — needed immediately']].map(([v, l]) => (
+            <label key={v} className={clsx('flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm transition-colors',
+              form.urgency === v ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium' : 'border-gray-200 text-gray-600 hover:bg-gray-50')}>
+              <input type="radio" name="urgency" value={v} checked={form.urgency === v}
+                onChange={() => set('urgency', v)} className="sr-only" />
+              {l}
+            </label>
+          ))}
+        </div>
       </Field>
 
       <div className="flex justify-end gap-2 pt-1">
         <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
         <button type="submit" disabled={mut.isLoading}
           className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg disabled:opacity-60">
-          {mut.isLoading ? 'Recording…' : 'Record Issue'}
+          {mut.isLoading ? 'Submitting…' : 'Submit Request'}
         </button>
       </div>
     </form>
   );
 }
 
-function ReturnUnusedModal({ record, onClose, onSuccess }) {
-  const [form, setForm] = useState({
-    qty_returned: parseFloat(record.qty).toFixed(2),
-    return_condition: 'good',
-    return_notes: '',
-  });
+// ── Fulfill Modal (Stores picks and hands over) ───────────────────────────────
+function FulfillModal({ record, onClose, onSuccess }) {
+  const [form, setForm] = useState({ location_id: '', fulfilled_by_id: '', qty: parseFloat(record.qty).toFixed(2), notes: '' });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const mut = useMutation(
-    (d) => stockApi.returnCheckout(record.id, d),
-    {
-      onSuccess: () => { toast.success('Unused part return recorded.'); onSuccess(); onClose(); },
-      onError:   (e) => toast.error(e.response?.data?.error || 'Failed to record return.'),
-    }
+  const { data: partStockData } = useQuery(
+    ['partStock-fulfill', record.part_id],
+    () => stockApi.partStock(record.part_id).then(r => r.data),
+  );
+  const stockedLocations = (partStockData || []).filter(s => parseFloat(s.qty_on_hand) > 0);
+
+  const { data: storesPersonnel = [] } = useQuery('personnel-stores',
+    () => stockApi.personnel({ department: 'stores' })
   );
 
+  const mut = useMutation((d) => stockApi.fulfillRequest(record.id, d), {
+    onSuccess: () => { toast.success('Part issued from stores.'); onSuccess(); onClose(); },
+    onError:   (e) => toast.error(e.response?.data?.error || 'Failed to fulfill request.'),
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!form.location_id)    return toast.error('Select a storage location.');
+    if (!form.fulfilled_by_id) return toast.error('Select who is picking the part.');
+    mut.mutate({
+      location_id:      parseInt(form.location_id),
+      fulfilled_by_id:  parseInt(form.fulfilled_by_id),
+      qty:              parseFloat(form.qty),
+      notes:            form.notes || undefined,
+    });
+  };
+
   return (
-    <form onSubmit={(e) => {
-      e.preventDefault();
-      mut.mutate({
-        qty_returned: parseFloat(form.qty_returned),
-        return_condition: form.return_condition,
-        return_notes: form.return_notes || undefined,
-      });
-    }} className="space-y-4">
-      <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
-        Use this only for parts that were <strong>not used</strong> — e.g. wrong part taken, excess quantity.
-        Parts that were used and consumed do not need to be returned.
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Request summary */}
+      <div className="bg-gray-50 rounded-xl border border-gray-200 p-4 space-y-1.5">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Request Details</p>
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Part</span>
+          <span className="font-medium text-gray-900">{record.part_description}</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Part No.</span>
+          <span className="font-mono text-xs text-gray-600">{record.part_number}</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Requested By</span>
+          <span className="font-medium text-gray-900">{record.requested_by_name || record.officer_name}</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Qty Requested</span>
+          <span className="font-medium text-gray-900">{parseFloat(record.qty)} {record.unit_of_measure}</span>
+        </div>
+        {record.work_order && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-500">Job</span>
+            <span className="text-gray-700">{record.work_order}</span>
+          </div>
+        )}
+        {record.urgency === 'urgent' && <UrgencyBadge urgency="urgent" />}
       </div>
 
-      <div className="bg-gray-50 rounded-lg p-3 text-sm">
-        <p className="font-medium text-gray-900">{record.part_description}</p>
-        <p className="font-mono text-xs text-gray-500">{record.part_number}</p>
-        <p className="text-xs text-gray-600 mt-1">
-          Issued to: <strong>{record.officer_name}</strong> ·
-          Original qty: <strong>{parseFloat(record.qty)} {record.unit_of_measure}</strong>
-        </p>
-        {record.work_order && <p className="text-xs text-gray-500 mt-0.5">Job: {record.work_order}</p>}
+      <Field label="Picked By (Stores Staff)" required>
+        <select className={sel} value={form.fulfilled_by_id} onChange={e => set('fulfilled_by_id', e.target.value)} required>
+          <option value="">— Select your name —</option>
+          {storesPersonnel.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </Field>
+
+      <Field label="Pick From Location" required>
+        {stockedLocations.length === 0
+          ? <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">No stock available for this part.</p>
+          : <select className={sel} value={form.location_id} onChange={e => set('location_id', e.target.value)} required>
+              <option value="">— Select location —</option>
+              {stockedLocations.map(s => (
+                <option key={s.location_id} value={s.location_id}>
+                  {s.location_code} — Available: {parseFloat(s.qty_available).toFixed(2)} {record.unit_of_measure}
+                </option>
+              ))}
+            </select>
+        }
+      </Field>
+
+      <Field label="Actual Qty Issued" required>
+        <div className="flex items-center gap-2">
+          <input className={clsx(inp, 'flex-1')} type="number" min="0.001" step="any"
+            value={form.qty} onChange={e => set('qty', e.target.value)} required />
+          <span className="text-sm text-gray-500 shrink-0">{record.unit_of_measure}</span>
+        </div>
+      </Field>
+
+      <Field label="Notes">
+        <input className={inp} value={form.notes} onChange={e => set('notes', e.target.value)}
+          placeholder="Any notes about this issue…" />
+      </Field>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+        <button type="submit" disabled={mut.isLoading || stockedLocations.length === 0}
+          className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg disabled:opacity-60">
+          {mut.isLoading ? 'Issuing…' : 'Confirm Issue'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ── Return Modal (wrong / excess parts) ──────────────────────────────────────
+function ReturnModal({ record, onClose, onSuccess }) {
+  const [form, setForm] = useState({ qty_returned: parseFloat(record.qty).toFixed(2), return_condition: 'good', return_notes: '' });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const mut = useMutation((d) => stockApi.returnCheckout(record.id, d), {
+    onSuccess: () => { toast.success('Part returned to stores.'); onSuccess(); onClose(); },
+    onError:   (e) => toast.error(e.response?.data?.error || 'Failed to record return.'),
+  });
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); mut.mutate({ qty_returned: parseFloat(form.qty_returned), return_condition: form.return_condition, return_notes: form.return_notes || undefined }); }}
+      className="space-y-4">
+      <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+        Only use this for parts that were <strong>not used</strong> — wrong part collected, issue resolved without the part, or excess quantity.
+      </div>
+
+      <div className="bg-gray-50 rounded-xl border border-gray-200 p-4 space-y-1.5">
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Part</span>
+          <span className="font-medium text-gray-900">{record.part_description}</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Issued To</span>
+          <span className="font-medium">{record.requested_by_name || record.officer_name}</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Qty Issued</span>
+          <span className="font-medium">{parseFloat(record.qty)} {record.unit_of_measure}</span>
+        </div>
       </div>
 
       <Field label="Qty Being Returned" required>
@@ -1188,6 +1267,7 @@ function ReturnUnusedModal({ record, onClose, onSuccess }) {
       <Field label="Reason for Return" required>
         <select className={sel} value={form.return_condition} onChange={e => set('return_condition', e.target.value)} required>
           <option value="good">Wrong part — in good condition</option>
+          <option value="partial">Issue resolved — part not needed</option>
           <option value="partial">Excess quantity — unused portion returned</option>
           <option value="damaged">Damaged — not installed, returned as defective</option>
         </select>
@@ -1195,62 +1275,107 @@ function ReturnUnusedModal({ record, onClose, onSuccess }) {
 
       <Field label="Notes">
         <textarea className={inp} rows={2} value={form.return_notes}
-          onChange={e => set('return_notes', e.target.value)}
-          placeholder="Additional details…" />
+          onChange={e => set('return_notes', e.target.value)} placeholder="Additional details…" />
       </Field>
 
       <div className="flex justify-end gap-2 pt-1">
         <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
         <button type="submit" disabled={mut.isLoading}
           className="px-4 py-2 text-sm bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg disabled:opacity-60">
-          {mut.isLoading ? 'Saving…' : 'Record Return'}
+          {mut.isLoading ? 'Saving…' : 'Return to Stores'}
         </button>
       </div>
     </form>
   );
 }
 
+// ── Main Tab ──────────────────────────────────────────────────────────────────
 function CheckoutsTab() {
   const { hasPermission } = useAuth();
   const qc = useQueryClient();
-  const [filters, setFilters] = useState({ status: 'issued', search: '', from: '', to: '' });
+  const [filters, setFilters] = useState({ status: 'all', search: '', from: '', to: '' });
   const [modal, setModal] = useState(null);
-
   const setF = (k, v) => setFilters(f => ({ ...f, [k]: v }));
 
-  const { data: stats } = useQuery('checkoutStats', stockApi.checkoutStats, { refetchInterval: 60000 });
+  const { data: stats, refetch: refetchStats } = useQuery('checkoutStats', stockApi.checkoutStats, { refetchInterval: 30000 });
   const { data, isLoading } = useQuery(
     ['checkouts', filters],
     () => stockApi.listCheckouts({ ...filters, status: filters.status !== 'all' ? filters.status : undefined, limit: 100 }),
-    { keepPreviousData: true }
+    { keepPreviousData: true, refetchInterval: 30000 }
   );
 
   const rows = data?.rows || [];
+  const pendingRows = rows.filter(r => r.status === 'pending');
+
   const onMoved = () => {
     qc.invalidateQueries('checkouts');
     qc.invalidateQueries('checkoutStats');
     qc.invalidateQueries('balances');
   };
 
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—';
+  const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }) : '';
+
   return (
-    <div className="space-y-4">
-      {/* KPI */}
+    <div className="space-y-5">
+      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <SummaryCard icon={ClipboardList} label="Total Issued"        value={stats?.total ?? '—'}                   color="bg-blue-500" />
-        <SummaryCard icon={UserCheck}     label="Still Issued"        value={stats?.issued ?? '—'}                  color="bg-amber-500" sub="not returned" />
-        <SummaryCard icon={CheckCircle2}  label="Returned (Unused)"   value={stats?.returned ?? '—'}                color="bg-green-500" />
-        <SummaryCard icon={UserCheck}     label="Issued Today"        value={stats?.today ?? '—'}                   color="bg-purple-500" />
+        <SummaryCard icon={Clock}        label="Pending Requests" value={stats?.pending   ?? '—'} color="bg-amber-500" sub="awaiting stores" />
+        <SummaryCard icon={CircleDot}    label="Issued (In Use)"  value={stats?.issued    ?? '—'} color="bg-blue-500" />
+        <SummaryCard icon={CheckCircle2} label="Returned"         value={stats?.returned  ?? '—'} color="bg-green-500" />
+        <SummaryCard icon={UserCheck}    label="Activity Today"   value={stats?.today     ?? '—'} color="bg-purple-500" />
       </div>
+
+      {/* Pending requests panel */}
+      {(stats?.pending > 0 || (isLoading && filters.status === 'all')) && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-200">
+            <Clock size={15} className="text-amber-600" />
+            <h3 className="text-sm font-semibold text-amber-800">Pending Requests — awaiting stores</h3>
+            {stats?.pending > 0 && (
+              <span className="ml-auto text-xs bg-amber-500 text-white font-bold px-2 py-0.5 rounded-full">{stats.pending}</span>
+            )}
+          </div>
+          <div className="divide-y divide-amber-100">
+            {pendingRows.length === 0 && filters.status === 'all' ? (
+              <p className="px-4 py-3 text-xs text-amber-600">Loading…</p>
+            ) : pendingRows.map(r => (
+              <div key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-xs text-gray-500">{r.ref}</span>
+                    <UrgencyBadge urgency={r.urgency} />
+                  </div>
+                  <p className="text-sm font-semibold text-gray-900 mt-0.5">{r.part_description}</p>
+                  <p className="font-mono text-xs text-gray-400">{r.part_number}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-gray-600">
+                    <span>Requested by: <strong>{r.requested_by_name || r.officer_name}</strong></span>
+                    <span>Qty: <strong>{parseFloat(r.qty)} {r.unit_of_measure}</strong></span>
+                    {r.work_order && <span>Job: {r.work_order}</span>}
+                    <span className="text-gray-400">{fmtDate(r.requested_at)} {fmtTime(r.requested_at)}</span>
+                  </div>
+                </div>
+                {hasPermission('stock.checkout') && (
+                  <button onClick={() => setModal({ type: 'fulfill', record: r })}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0">
+                    <PackageMinus size={13} /> Pick &amp; Issue
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-48">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input className={clsx(inp, 'pl-8')} placeholder="Search name, part, work order, ref…"
+          <input className={clsx(inp, 'pl-8')} placeholder="Search name, part, job, ref…"
             value={filters.search} onChange={e => setF('search', e.target.value)} />
         </div>
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          {[['issued','Issued'], ['returned','Returned'], ['all','All']].map(([v, l]) => (
+          {[['all','All'],['pending','Pending'],['issued','Issued'],['returned','Returned']].map(([v, l]) => (
             <button key={v} onClick={() => setF('status', v)}
               className={clsx('px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
                 filters.status === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
@@ -1260,12 +1385,10 @@ function CheckoutsTab() {
         </div>
         <input type="date" value={filters.from} onChange={e => setF('from', e.target.value)} className={clsx(sel, 'w-36')} />
         <input type="date" value={filters.to}   onChange={e => setF('to',   e.target.value)} className={clsx(sel, 'w-36')} />
-        {hasPermission('stock.checkout') && (
-          <button onClick={() => setModal({ type: 'issue' })}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors ml-auto">
-            <PackageMinus size={14} /> Issue Part
-          </button>
-        )}
+        <button onClick={() => setModal({ type: 'request' })}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors ml-auto whitespace-nowrap">
+          <PackagePlus size={14} /> Request Part
+        </button>
       </div>
 
       {/* Table */}
@@ -1277,12 +1400,12 @@ function CheckoutsTab() {
                 <th className="px-4 py-3 text-left">Ref</th>
                 <th className="px-4 py-3 text-left">Part</th>
                 <th className="px-4 py-3 text-right">Qty</th>
-                <th className="px-4 py-3 text-left">Issued To</th>
+                <th className="px-4 py-3 text-left">Requested By</th>
+                <th className="px-4 py-3 text-left">Picked By</th>
                 <th className="px-4 py-3 text-left">Job / Work Order</th>
-                <th className="px-4 py-3 text-left">Date Issued</th>
-                <th className="px-4 py-3 text-left">Issued By</th>
+                <th className="px-4 py-3 text-left">Date</th>
                 <th className="px-4 py-3 text-left">Status</th>
-                {hasPermission('stock.checkout') && <th className="px-4 py-3" />}
+                <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -1291,51 +1414,56 @@ function CheckoutsTab() {
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-16 text-center text-gray-400">
-                    <PackageMinus size={28} className="mx-auto mb-2 opacity-30" />
-                    <p className="text-sm">No issue records found.</p>
+                    <Package size={28} className="mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">No records found.</p>
                   </td>
                 </tr>
               ) : rows.map(r => (
-                <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+                <tr key={r.id} className={clsx('hover:bg-gray-50 transition-colors',
+                  r.status === 'pending' && 'bg-amber-50/40')}>
                   <td className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{r.ref}</td>
                   <td className="px-4 py-3">
-                    <p className="font-mono text-xs text-gray-500">{r.part_number}</p>
-                    <p className="text-xs font-medium text-gray-800 max-w-[200px] truncate" title={r.part_description}>{r.part_description}</p>
+                    <p className="font-mono text-xs text-gray-400">{r.part_number}</p>
+                    <p className="text-xs font-medium text-gray-800 max-w-[180px] truncate" title={r.part_description}>{r.part_description}</p>
                   </td>
                   <td className="px-4 py-3 text-right text-xs font-medium text-gray-700 whitespace-nowrap">
                     {parseFloat(r.qty).toFixed(2)} <span className="text-gray-400">{r.unit_of_measure}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <p className="text-xs font-medium text-gray-800">{r.officer_name}</p>
-                    {r.personnel_department && <p className="text-xs text-gray-400">{r.personnel_department}</p>}
+                    <p className="text-xs font-medium text-gray-800">{r.requested_by_name || r.officer_name || '—'}</p>
+                    {r.requested_by_dept && <p className="text-xs text-gray-400 capitalize">{r.requested_by_dept}</p>}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-600">
+                    {r.fulfilled_by_name || <span className="text-gray-300">—</span>}
                   </td>
                   <td className="px-4 py-3">
                     <p className="text-xs text-gray-700">{r.work_order || <span className="text-gray-300">—</span>}</p>
-                    {r.purpose && <p className="text-xs text-gray-400 max-w-[160px] truncate">{r.purpose}</p>}
+                    {r.purpose && <p className="text-xs text-gray-400 max-w-[140px] truncate">{r.purpose}</p>}
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-                    {new Date(r.checked_out_at).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {r.return_condition
-                      ? <span className="text-gray-400 italic">Returned ({r.return_condition})</span>
-                      : <span className="text-gray-300">—</span>}
+                    {fmtDate(r.checked_out_at || r.requested_at)}
+                    <span className="block text-gray-400">{fmtTime(r.checked_out_at || r.requested_at)}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <IssueStatusBadge status={r.status} />
+                    <div className="flex flex-col gap-1">
+                      <StatusBadge status={r.status} />
+                      {r.urgency === 'urgent' && <UrgencyBadge urgency="urgent" />}
+                    </div>
                   </td>
-                  {hasPermission('stock.checkout') && (
-                    <td className="px-4 py-3 text-right">
-                      {r.status === 'issued' && (
-                        <button
-                          onClick={() => setModal({ type: 'return', record: r })}
-                          title="Record unused part return"
-                          className="flex items-center gap-1 text-xs text-gray-500 hover:bg-gray-100 border border-gray-200 px-2 py-1 rounded-lg transition-colors ml-auto whitespace-nowrap">
-                          <RotateCcw size={11} /> Return Unused
-                        </button>
-                      )}
-                    </td>
-                  )}
+                  <td className="px-4 py-3 text-right">
+                    {r.status === 'pending' && hasPermission('stock.checkout') && (
+                      <button onClick={() => setModal({ type: 'fulfill', record: r })}
+                        className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors ml-auto whitespace-nowrap">
+                        <PackageMinus size={11} /> Issue
+                      </button>
+                    )}
+                    {r.status === 'issued' && hasPermission('stock.checkout') && (
+                      <button onClick={() => setModal({ type: 'return', record: r })}
+                        className="flex items-center gap-1 text-xs text-gray-500 hover:bg-gray-100 border border-gray-200 px-2 py-1.5 rounded-lg transition-colors ml-auto whitespace-nowrap">
+                        <RotateCcw size={11} /> Return
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1348,14 +1476,19 @@ function CheckoutsTab() {
         )}
       </div>
 
-      {modal?.type === 'issue' && (
-        <Modal title="Issue Part from Stores" onClose={() => setModal(null)} wide>
-          <IssuePartModal onClose={() => setModal(null)} onSuccess={onMoved} />
+      {modal?.type === 'request' && (
+        <Modal title="Request a Part from Stores" onClose={() => setModal(null)} wide>
+          <RequestPartModal onClose={() => setModal(null)} onSuccess={onMoved} />
+        </Modal>
+      )}
+      {modal?.type === 'fulfill' && (
+        <Modal title="Pick & Issue Part" onClose={() => setModal(null)} wide>
+          <FulfillModal record={modal.record} onClose={() => setModal(null)} onSuccess={onMoved} />
         </Modal>
       )}
       {modal?.type === 'return' && (
-        <Modal title="Return Unused Part to Stores" onClose={() => setModal(null)}>
-          <ReturnUnusedModal record={modal.record} onClose={() => setModal(null)} onSuccess={onMoved} />
+        <Modal title="Return Part to Stores" onClose={() => setModal(null)}>
+          <ReturnModal record={modal.record} onClose={() => setModal(null)} onSuccess={onMoved} />
         </Modal>
       )}
     </div>

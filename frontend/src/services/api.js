@@ -202,12 +202,13 @@ export const stockApi = {
   slowMovers:        (p)     => api.get('/stock/reports/slow-movers', { params: p }),
   movementReport:    (p)     => api.get('/stock/reports/movement', { params: p }),
   // Personnel
-  personnel:         ()      => api.get('/stock/personnel').then(r => r.data),
+  personnel:         (p)     => api.get('/stock/personnel', { params: p }).then(r => r.data),
   addPersonnel:      (d)     => api.post('/stock/personnel', d).then(r => r.data),
-  // Issues register
+  // Parts request workflow
   checkoutStats:     ()      => api.get('/stock/checkouts/stats').then(r => r.data),
   listCheckouts:     (p)     => api.get('/stock/checkouts', { params: p }).then(r => r.data),
-  createCheckout:    (d)     => api.post('/stock/checkouts', d).then(r => r.data),
+  createRequest:     (d)     => api.post('/stock/checkouts/request', d).then(r => r.data),
+  fulfillRequest:    (id, d) => api.post(`/stock/checkouts/${id}/fulfill`, d).then(r => r.data),
   returnCheckout:    (id, d) => api.post(`/stock/checkouts/${id}/return`, d).then(r => r.data),
 };
 

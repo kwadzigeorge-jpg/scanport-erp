@@ -39,9 +39,10 @@ router.get('/personnel',          requirePermission('stock.view'),     co.listPe
 router.post('/personnel',         requirePermission('stock.checkout'), co.addPersonnel);
 
 // ── Parts Issued (Checkouts) ─────────────────────────────────────────────────
-router.get('/checkouts/stats',       requirePermission('stock.view'),     co.getStats);
-router.get('/checkouts',             requirePermission('stock.view'),     co.listCheckouts);
-router.post('/checkouts',            requirePermission('stock.checkout'), co.createCheckout);
-router.post('/checkouts/:id/return', requirePermission('stock.checkout'), co.returnCheckout);
+router.get('/checkouts/stats',          requirePermission('stock.view'),     co.getStats);
+router.get('/checkouts',                requirePermission('stock.view'),     co.listCheckouts);
+router.post('/checkouts/request',       requirePermission('stock.view'),     co.createRequest);
+router.post('/checkouts/:id/fulfill',   requirePermission('stock.checkout'), co.fulfillRequest);
+router.post('/checkouts/:id/return',    requirePermission('stock.checkout'), co.returnCheckout);
 
 module.exports = router;

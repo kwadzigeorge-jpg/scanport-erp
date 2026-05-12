@@ -1,10 +1,16 @@
 const db = require('../config/database');
 
-// ─── Personnel list ───────────────────────────────────────────────────────────
+// ─── Personnel ────────────────────────────────────────────────────────────────
 async function listPersonnel(req, res, next) {
   try {
+    const { department } = req.query;
+    const params = [];
+    const cond   = ['is_active = TRUE'];
+    if (department) { params.push(department); cond.push(`department = $${params.length}`); }
     const { rows } = await db.query(
-      `SELECT id, name, department, is_active FROM stores_personnel ORDER BY name ASC`
+      `SELECT id, name, department, is_active FROM stores_personnel
+       WHERE ${cond.join(' AND ')} ORDER BY name ASC`,
+      params
     );
     return res.json(rows);
   } catch (err) { next(err); }
@@ -16,7 +22,7 @@ async function addPersonnel(req, res, next) {
     if (!name?.trim()) return res.status(400).json({ error: 'Name is required.' });
     const { rows } = await db.query(
       `INSERT INTO stores_personnel (name, department, notes) VALUES ($1,$2,$3) RETURNING *`,
-      [name.trim(), department?.trim() || null, notes?.trim() || null]
+      [name.trim(), department?.trim() || 'stores', notes?.trim() || null]
     );
     return res.status(201).json(rows[0]);
   } catch (err) { next(err); }
@@ -27,13 +33,12 @@ async function getStats(req, res, next) {
   try {
     const { rows } = await db.query(`
       SELECT
-        COUNT(*)::int                                                       AS total,
-        COUNT(*) FILTER (WHERE status = 'issued')::int                     AS issued,
-        COUNT(*) FILTER (WHERE status = 'returned')::int                   AS returned,
-        COUNT(*) FILTER (WHERE DATE(checked_out_at) = CURRENT_DATE)::int   AS today,
-        COUNT(DISTINCT personnel_id) FILTER (
-          WHERE DATE(checked_out_at) >= date_trunc('month', CURRENT_DATE)
-        )::int                                                              AS unique_staff_this_month
+        COUNT(*)::int                                                              AS total,
+        COUNT(*) FILTER (WHERE status = 'pending')::int                           AS pending,
+        COUNT(*) FILTER (WHERE status = 'issued')::int                            AS issued,
+        COUNT(*) FILTER (WHERE status = 'returned')::int                          AS returned,
+        COUNT(*) FILTER (WHERE DATE(COALESCE(checked_out_at, requested_at)) = CURRENT_DATE
+                           AND status IN ('issued','pending'))::int               AS today
       FROM parts_checkouts
     `);
     return res.json(rows[0]);
@@ -43,7 +48,7 @@ async function getStats(req, res, next) {
 // ─── List checkouts ───────────────────────────────────────────────────────────
 async function listCheckouts(req, res, next) {
   try {
-    const { status, search, personnel_id, from, to, page = 1, limit = 100 } = req.query;
+    const { status, search, from, to, page = 1, limit = 100 } = req.query;
     const p   = Math.max(1, parseInt(page));
     const l   = Math.min(200, parseInt(limit));
     const off = (p - 1) * l;
@@ -54,14 +59,18 @@ async function listCheckouts(req, res, next) {
     if (status && status !== 'all') {
       params.push(status); conditions.push(`pc.status = $${params.length}`);
     }
-    if (personnel_id) {
-      params.push(parseInt(personnel_id)); conditions.push(`pc.personnel_id = $${params.length}`);
-    }
-    if (from) { params.push(from); conditions.push(`DATE(pc.checked_out_at) >= $${params.length}`); }
-    if (to)   { params.push(to);   conditions.push(`DATE(pc.checked_out_at) <= $${params.length}`); }
+    if (from) { params.push(from); conditions.push(`DATE(COALESCE(pc.checked_out_at, pc.requested_at)) >= $${params.length}`); }
+    if (to)   { params.push(to);   conditions.push(`DATE(COALESCE(pc.checked_out_at, pc.requested_at)) <= $${params.length}`); }
     if (search) {
       params.push(`%${search}%`);
-      conditions.push(`(pc.officer_name ILIKE $${params.length} OR sp.part_number ILIKE $${params.length} OR sp.description ILIKE $${params.length} OR pc.work_order ILIKE $${params.length} OR pc.ref ILIKE $${params.length})`);
+      conditions.push(`(
+        req.name       ILIKE $${params.length} OR
+        ful.name       ILIKE $${params.length} OR
+        sp.part_number ILIKE $${params.length} OR
+        sp.description ILIKE $${params.length} OR
+        pc.work_order  ILIKE $${params.length} OR
+        pc.ref         ILIKE $${params.length}
+      )`);
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -71,13 +80,17 @@ async function listCheckouts(req, res, next) {
         pc.*,
         sp.part_number, sp.description AS part_description, sp.unit_of_measure,
         sl.code AS location_code,
-        sper.name AS personnel_name, sper.department AS personnel_department
+        req.name AS requested_by_name, req.department AS requested_by_dept,
+        ful.name AS fulfilled_by_name
       FROM parts_checkouts pc
-      JOIN spare_parts       sp   ON sp.id   = pc.part_id
-      JOIN storage_locations sl   ON sl.id   = pc.location_id
-      LEFT JOIN stores_personnel sper ON sper.id = pc.personnel_id
+      JOIN  spare_parts       sp  ON sp.id  = pc.part_id
+      LEFT JOIN storage_locations sl  ON sl.id  = pc.location_id
+      LEFT JOIN stores_personnel  req ON req.id = pc.requested_by_id
+      LEFT JOIN stores_personnel  ful ON ful.id = pc.fulfilled_by_id
       ${where}
-      ORDER BY pc.created_at DESC
+      ORDER BY
+        CASE WHEN pc.status = 'pending' THEN 0 ELSE 1 END,
+        COALESCE(pc.requested_at, pc.created_at) DESC
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `, [...params, l, off]);
 
@@ -85,6 +98,8 @@ async function listCheckouts(req, res, next) {
       `SELECT COUNT(*)::int AS n
        FROM parts_checkouts pc
        JOIN spare_parts sp ON sp.id = pc.part_id
+       LEFT JOIN stores_personnel req ON req.id = pc.requested_by_id
+       LEFT JOIN stores_personnel ful ON ful.id = pc.fulfilled_by_id
        ${where}`, params
     );
 
@@ -92,86 +107,132 @@ async function listCheckouts(req, res, next) {
   } catch (err) { next(err); }
 }
 
-// ─── Create issue (part given to personnel) ───────────────────────────────────
-async function createCheckout(req, res, next) {
+// ─── Create part request (MDE → pending) ─────────────────────────────────────
+async function createRequest(req, res, next) {
+  try {
+    const { part_id, qty, requested_by_id, work_order, purpose, urgency = 'normal' } = req.body;
+
+    if (!part_id)                      return res.status(400).json({ error: 'part_id is required.' });
+    if (!qty || parseFloat(qty) <= 0)  return res.status(400).json({ error: 'qty must be positive.' });
+    if (!requested_by_id)              return res.status(400).json({ error: 'requested_by_id is required.' });
+
+    const { rows: [person] } = await db.query(
+      `SELECT id, name, department FROM stores_personnel WHERE id = $1 AND is_active = TRUE`,
+      [requested_by_id]
+    );
+    if (!person) return res.status(404).json({ error: 'Requester not found.' });
+
+    const { rows: [part] } = await db.query(
+      `SELECT * FROM spare_parts WHERE id = $1 AND status = 'ACTIVE'`, [part_id]
+    );
+    if (!part) return res.status(404).json({ error: 'Part not found.' });
+
+    const { rows: [row] } = await db.query(
+      `INSERT INTO parts_checkouts
+         (part_id, qty, requested_by_id, personnel_id, officer_name,
+          work_order, purpose, urgency, status, requested_at, created_by)
+       VALUES ($1,$2,$3,$3,$4,$5,$6,$7,'pending',NOW(),$8)
+       RETURNING *`,
+      [part_id, parseFloat(qty), requested_by_id, person.name,
+       work_order || null, purpose || null, urgency, req.user.id]
+    );
+
+    return res.status(201).json({
+      ...row,
+      part_number:       part.part_number,
+      part_description:  part.description,
+      unit_of_measure:   part.unit_of_measure,
+      requested_by_name: person.name,
+      requested_by_dept: person.department,
+    });
+  } catch (err) { next(err); }
+}
+
+// ─── Fulfill request (Stores → issued, stock deducted) ───────────────────────
+async function fulfillRequest(req, res, next) {
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
-    const { part_id, location_id, qty, personnel_id, work_order, purpose } = req.body;
+    const { id } = req.params;
+    const { location_id, fulfilled_by_id, qty: overrideQty, notes } = req.body;
 
-    if (!part_id)                      return res.status(400).json({ error: 'part_id is required.' });
-    if (!location_id)                  return res.status(400).json({ error: 'location_id is required.' });
-    if (!qty || parseFloat(qty) <= 0)  return res.status(400).json({ error: 'qty must be positive.' });
-    if (!personnel_id)                 return res.status(400).json({ error: 'personnel_id is required.' });
+    if (!location_id)     return res.status(400).json({ error: 'location_id is required.' });
+    if (!fulfilled_by_id) return res.status(400).json({ error: 'fulfilled_by_id is required.' });
 
-    // Resolve personnel
+    const { rows: [co] } = await client.query(
+      `SELECT pc.*, sp.unit_of_measure, sp.unit_cost AS part_cost, sp.part_number, sp.description
+       FROM parts_checkouts pc JOIN spare_parts sp ON sp.id = pc.part_id
+       WHERE pc.id = $1 FOR UPDATE`, [id]
+    );
+    if (!co)                     return res.status(404).json({ error: 'Request not found.' });
+    if (co.status !== 'pending') return res.status(409).json({ error: 'Only pending requests can be fulfilled.' });
+
     const { rows: [person] } = await client.query(
-      `SELECT id, name, department FROM stores_personnel WHERE id = $1 AND is_active = TRUE`, [personnel_id]
+      `SELECT id, name FROM stores_personnel WHERE id = $1 AND is_active = TRUE`, [fulfilled_by_id]
     );
-    if (!person) return res.status(404).json({ error: 'Personnel not found.' });
+    if (!person) return res.status(404).json({ error: 'Fulfilling person not found.' });
 
-    // Validate part
-    const { rows: [part] } = await client.query(
-      `SELECT * FROM spare_parts WHERE id = $1 AND status = 'ACTIVE'`, [part_id]
-    );
-    if (!part) return res.status(404).json({ error: 'Active part not found.' });
+    const qtyNum = parseFloat(overrideQty || co.qty);
+    if (qtyNum <= 0) return res.status(400).json({ error: 'Qty must be positive.' });
 
-    // Check availability
     const { rows: [bal] } = await client.query(
       `SELECT qty_on_hand, qty_reserved, weighted_avg_cost
        FROM stock_balances WHERE part_id = $1 AND location_id = $2 FOR UPDATE`,
-      [part_id, location_id]
+      [co.part_id, location_id]
     );
     const on_hand   = parseFloat(bal?.qty_on_hand  || 0);
     const reserved  = parseFloat(bal?.qty_reserved || 0);
     const available = on_hand - reserved;
-    const qtyNum    = parseFloat(qty);
 
     if (available < qtyNum) {
+      await client.query('ROLLBACK');
       return res.status(409).json({
-        error: `Insufficient stock. Available: ${available} ${part.unit_of_measure}, requested: ${qtyNum}`,
+        error: `Insufficient stock. Available: ${available} ${co.unit_of_measure}, requested: ${qtyNum}`,
       });
     }
 
-    // Generate stock ledger ref
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const { rows: [refRow] } = await client.query(
       `SELECT COUNT(*)::int AS cnt FROM stock_ledger WHERE txn_ref LIKE $1`, [`INV-${dateStr}-%`]
     );
     const txn_ref   = `INV-${dateStr}-${String(refRow.cnt + 1).padStart(4, '0')}`;
     const qty_after = on_hand - qtyNum;
-    const unit_cost = parseFloat(bal?.weighted_avg_cost || part.unit_cost);
+    const unit_cost = parseFloat(bal?.weighted_avg_cost || co.part_cost);
 
-    // STOCK_OUT ledger entry
     await client.query(
       `INSERT INTO stock_ledger
          (part_id, location_id, txn_type, txn_ref, qty, unit_cost, qty_before, qty_after, purpose, notes, created_by)
        VALUES ($1,$2,'STOCK_OUT',$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [part_id, location_id, txn_ref, -qtyNum, unit_cost, on_hand, qty_after,
-       work_order ? `ISSUE: ${work_order}` : 'ISSUE',
-       `Issued to: ${person.name}${purpose ? ` — ${purpose}` : ''}`,
+      [co.part_id, location_id, txn_ref, -qtyNum, unit_cost, on_hand, qty_after,
+       co.work_order ? `ISSUE: ${co.work_order}` : 'ISSUE',
+       `Issued to ${co.officer_name} — picked by ${person.name}${notes ? ` (${notes})` : ''}`,
        req.user.id]
     );
 
-    // Insert issue record
-    const { rows: [checkout] } = await client.query(
-      `INSERT INTO parts_checkouts
-         (part_id, location_id, qty, officer_name, personnel_id, work_order, purpose, txn_ref, status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'issued',$9)
-       RETURNING *`,
-      [part_id, location_id, qtyNum, person.name, person.id,
-       work_order || null, purpose || null, txn_ref, req.user.id]
+    await client.query(
+      `UPDATE parts_checkouts
+       SET status='issued', location_id=$1, fulfilled_by_id=$2, qty=$3,
+           txn_ref=$4, checked_out_at=NOW(), updated_at=NOW()
+       WHERE id=$5`,
+      [location_id, fulfilled_by_id, qtyNum, txn_ref, id]
     );
 
     await client.query('COMMIT');
-    return res.status(201).json({
-      ...checkout,
-      part_number: part.part_number,
-      part_description: part.description,
-      unit_of_measure: part.unit_of_measure,
-      personnel_name: person.name,
-      personnel_department: person.department,
-    });
+
+    const { rows: [full] } = await db.query(
+      `SELECT pc.*,
+              sp.part_number, sp.description AS part_description, sp.unit_of_measure,
+              sl.code AS location_code,
+              req.name AS requested_by_name, req.department AS requested_by_dept,
+              ful.name AS fulfilled_by_name
+       FROM parts_checkouts pc
+       JOIN spare_parts sp ON sp.id = pc.part_id
+       LEFT JOIN storage_locations sl  ON sl.id  = pc.location_id
+       LEFT JOIN stores_personnel  req ON req.id = pc.requested_by_id
+       LEFT JOIN stores_personnel  ful ON ful.id = pc.fulfilled_by_id
+       WHERE pc.id = $1`, [id]
+    );
+    return res.json(full);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     next(err);
@@ -191,8 +252,8 @@ async function returnCheckout(req, res, next) {
        FROM parts_checkouts pc JOIN spare_parts sp ON sp.id = pc.part_id
        WHERE pc.id = $1 FOR UPDATE`, [id]
     );
-    if (!co)                       return res.status(404).json({ error: 'Record not found.' });
-    if (co.status === 'returned')  return res.status(409).json({ error: 'Already returned.' });
+    if (!co)                     return res.status(404).json({ error: 'Record not found.' });
+    if (co.status !== 'issued')  return res.status(409).json({ error: 'Only issued parts can be returned.' });
 
     const qtyBack = parseFloat(qty_returned ?? co.qty);
     if (qtyBack <= 0 || qtyBack > parseFloat(co.qty)) {
@@ -243,10 +304,11 @@ async function returnCheckout(req, res, next) {
     await client.query('COMMIT');
     const { rows: [updated] } = await db.query(
       `SELECT pc.*, sp.part_number, sp.description AS part_description, sp.unit_of_measure,
-              sper.name AS personnel_name
+              req.name AS requested_by_name, ful.name AS fulfilled_by_name
        FROM parts_checkouts pc
        JOIN spare_parts sp ON sp.id = pc.part_id
-       LEFT JOIN stores_personnel sper ON sper.id = pc.personnel_id
+       LEFT JOIN stores_personnel req ON req.id = pc.requested_by_id
+       LEFT JOIN stores_personnel ful ON ful.id = pc.fulfilled_by_id
        WHERE pc.id = $1`, [id]
     );
     return res.json(updated);
@@ -256,4 +318,7 @@ async function returnCheckout(req, res, next) {
   } finally { client.release(); }
 }
 
-module.exports = { listPersonnel, addPersonnel, getStats, listCheckouts, createCheckout, returnCheckout };
+module.exports = {
+  listPersonnel, addPersonnel, getStats, listCheckouts,
+  createRequest, fulfillRequest, returnCheckout,
+};
