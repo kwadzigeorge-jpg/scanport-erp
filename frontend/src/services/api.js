@@ -103,6 +103,8 @@ export const reportsApi = {
   agentPerf:           (p) => api.get('/reports/agent-performance', { params: p }),
   slaExceptions:       (p) => api.get('/reports/sla-exceptions', { params: p }),
   export:              (p) => api.get('/reports/export', { params: p, responseType: 'blob' }),
+  timestamps:          (p) => api.get('/reports/timestamps', { params: p }),
+  downloadTimestamps:  (p) => api.get('/reports/timestamps', { params: { ...p, format: 'xlsx' }, responseType: 'blob' }),
 
   // Email & alerts
   emailConfig:       ()  => api.get('/reports/email-config'),

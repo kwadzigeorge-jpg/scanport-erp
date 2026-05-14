@@ -352,10 +352,40 @@ async function exportReport(req, res, next) {
       ORDER BY ct.time_out DESC
     `, [fromDate, toDate, slaMinutes]);
 
+    // Sheet 4 — Timestamps
+    const { rows: tsRows } = await db.query(`
+      SELECT
+        ct.transaction_id                                           AS "Transaction ID",
+        ct.container_number                                         AS "Container No.",
+        ct.truck_number                                             AS "Truck No.",
+        ct.agent_name                                               AS "Agent",
+        ha.name                                                     AS "Holding Area",
+        b.bay_code                                                  AS "Bay",
+        ct.status                                                   AS "Status",
+        ct.bay_assigned_time                                        AS "Bay Assigned At",
+        ct.bay_entry_time                                           AS "Check-In At",
+        ct.time_out                                                 AS "Released At",
+        CASE WHEN ct.bay_entry_time IS NOT NULL AND ct.bay_assigned_time IS NOT NULL
+          THEN ROUND(EXTRACT(EPOCH FROM (ct.bay_entry_time - ct.bay_assigned_time))/60)::int
+        END                                                         AS "Assign→Check-In (min)",
+        CASE WHEN ct.time_out IS NOT NULL AND ct.bay_entry_time IS NOT NULL
+          THEN ROUND(EXTRACT(EPOCH FROM (ct.time_out - ct.bay_entry_time))/60)::int
+        END                                                         AS "Check-In→Release (min)",
+        CASE WHEN ct.time_out IS NOT NULL AND ct.bay_assigned_time IS NOT NULL
+          THEN ROUND(EXTRACT(EPOCH FROM (ct.time_out - ct.bay_assigned_time))/60)::int
+        END                                                         AS "Assign→Release (min)"
+      FROM container_transactions ct
+      LEFT JOIN holding_areas ha ON ha.id = ct.holding_area_id
+      LEFT JOIN bays b ON b.id = ct.bay_id
+      WHERE DATE(COALESCE(ct.bay_assigned_time, ct.created_at)) BETWEEN $1 AND $2
+      ORDER BY COALESCE(ct.bay_assigned_time, ct.created_at) DESC
+    `, [fromDate, toDate]);
+
     return toXLSX(res, `scanport-report-${fromDate}-${toDate}.xlsx`, [
       { name: 'Executive Summary', rows: summary },
       { name: 'Active Containers', rows: activeRows },
       { name: 'Released History',  rows: releasedRows },
+      { name: 'Timestamps',        rows: tsRows },
     ]);
   } catch (err) { next(err); }
 }
@@ -607,10 +637,52 @@ async function dwellTrend(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Timestamp Report ─────────────────────────────────────────────────────────
+async function timestampReport(req, res, next) {
+  try {
+    const { from, to, format = 'json' } = req.query;
+    const fromDate = from || new Date().toISOString().slice(0, 10);
+    const toDate   = to   || new Date().toISOString().slice(0, 10);
+
+    const { rows } = await db.query(`
+      SELECT
+        ct.transaction_id,
+        ct.container_number,
+        ct.truck_number,
+        ct.agent_name,
+        ct.driver_name,
+        ha.name AS holding_area,
+        b.bay_code,
+        ct.status,
+        ct.bay_assigned_time,
+        ct.bay_entry_time                                                    AS check_in_time,
+        ct.time_out                                                          AS release_time,
+        CASE WHEN ct.bay_entry_time IS NOT NULL AND ct.bay_assigned_time IS NOT NULL
+          THEN ROUND(EXTRACT(EPOCH FROM (ct.bay_entry_time - ct.bay_assigned_time))/60)::int
+        END                                                                  AS assign_to_checkin_mins,
+        CASE WHEN ct.time_out IS NOT NULL AND ct.bay_entry_time IS NOT NULL
+          THEN ROUND(EXTRACT(EPOCH FROM (ct.time_out - ct.bay_entry_time))/60)::int
+        END                                                                  AS checkin_to_release_mins,
+        CASE WHEN ct.time_out IS NOT NULL AND ct.bay_assigned_time IS NOT NULL
+          THEN ROUND(EXTRACT(EPOCH FROM (ct.time_out - ct.bay_assigned_time))/60)::int
+        END                                                                  AS assign_to_release_mins
+      FROM container_transactions ct
+      LEFT JOIN holding_areas ha ON ha.id = ct.holding_area_id
+      LEFT JOIN bays b ON b.id = ct.bay_id
+      WHERE DATE(COALESCE(ct.bay_assigned_time, ct.created_at)) BETWEEN $1 AND $2
+      ORDER BY COALESCE(ct.bay_assigned_time, ct.created_at) DESC
+    `, [fromDate, toDate]);
+
+    if (format === 'csv')  return toCSV(res,  `timestamps-${fromDate}-${toDate}.csv`,  rows);
+    if (format === 'xlsx') return toXLSX(res, `timestamps-${fromDate}-${toDate}.xlsx`, [{ name: 'Timestamps', rows }]);
+    return res.json({ from: fromDate, to: toDate, total: rows.length, rows });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   dailyReport, dwellTimeReport, agentPerformanceReport, auditTrail,
   exceptionReport, getSystemConfig, updateSystemConfig,
   operationsDashboard, dwellAnalysis, areaPerformance, slaExceptions, exportReport,
   getEmailConfig, updateEmailConfig, testEmail,
-  dwellTrend,
+  dwellTrend, timestampReport,
 };

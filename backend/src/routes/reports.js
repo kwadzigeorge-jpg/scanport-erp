@@ -5,7 +5,7 @@ const {
   dailyReport, dwellTimeReport, agentPerformanceReport,
   auditTrail, exceptionReport, getSystemConfig, updateSystemConfig,
   operationsDashboard, dwellAnalysis, areaPerformance, slaExceptions, exportReport,
-  getEmailConfig, updateEmailConfig, testEmail, dwellTrend,
+  getEmailConfig, updateEmailConfig, testEmail, dwellTrend, timestampReport,
 } = require('../controllers/reportController');
 
 router.use(authenticate);
@@ -16,6 +16,7 @@ router.get('/dwell-trend',          requirePermission('report.view'), dwellTrend
 router.get('/dwell-analysis',       requirePermission('report.view'), dwellAnalysis);
 router.get('/area-performance',     requirePermission('report.view'), areaPerformance);
 router.get('/sla-exceptions',       requirePermission('report.view'), slaExceptions);
+router.get('/timestamps',           requirePermission('report.view'), timestampReport);
 router.get('/export',               requirePermission('report.export'), exportReport);
 
 // ── Legacy endpoints (kept for compatibility) ────────────────────────────────

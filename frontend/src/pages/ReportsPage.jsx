@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import {
   LayoutDashboard, Clock, MapPin, Users, AlertTriangle,
-  Download, X, RefreshCw, ChevronRight, Shield,
+  Download, X, RefreshCw, ChevronRight, Shield, Timer,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -19,12 +19,13 @@ const today   = new Date().toISOString().slice(0, 10);
 const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
 
 const TABS = [
-  { key: 'dashboard',  label: 'Operations Control', icon: LayoutDashboard },
-  { key: 'dwell',      label: 'Dwell Time',         icon: Clock },
-  { key: 'areas',      label: 'Area Performance',   icon: MapPin },
-  { key: 'agents',     label: 'Agent Performance',  icon: Users },
-  { key: 'exceptions', label: 'SLA Exceptions',     icon: AlertTriangle },
-  { key: 'audit',      label: 'Audit Trail',        icon: Shield },
+  { key: 'dashboard',   label: 'Operations Control', icon: LayoutDashboard },
+  { key: 'dwell',       label: 'Dwell Time',         icon: Clock },
+  { key: 'areas',       label: 'Area Performance',   icon: MapPin },
+  { key: 'agents',      label: 'Agent Performance',  icon: Users },
+  { key: 'exceptions',  label: 'SLA Exceptions',     icon: AlertTriangle },
+  { key: 'timestamps',  label: 'Timestamps',         icon: Timer },
+  { key: 'audit',       label: 'Audit Trail',        icon: Shield },
 ];
 
 // ─── SLA helpers ──────────────────────────────────────────────────────────────
@@ -793,6 +794,125 @@ function AuditTab({ filters }) {
   );
 }
 
+// ─── Page 7: Timestamps ───────────────────────────────────────────────────────
+function fmtTs(v) {
+  if (!v) return '—';
+  return format(new Date(v), 'dd MMM yyyy HH:mm');
+}
+function fmtMins(m) {
+  if (m == null) return '—';
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function TimestampsTab({ filters }) {
+  const [exporting, setExporting] = useState(false);
+  const { data, isLoading } = useQuery(
+    ['timestamps', filters.from, filters.to],
+    () => reportsApi.timestamps({ from: filters.from, to: filters.to }).then(r => r.data),
+    { keepPreviousData: true }
+  );
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await reportsApi.downloadTimestamps({ from: filters.from, to: filters.to });
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url; a.download = `timestamps-${filters.from}-${filters.to}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Timestamps exported');
+    } catch { toast.error('Export failed'); } finally { setExporting(false); }
+  };
+
+  const rows = data?.rows || [];
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label: 'Total Records', value: data?.total ?? '—' },
+          { label: 'Avg Assign→Check-In', value: rows.length ? fmtMins(Math.round(rows.filter(r => r.assign_to_checkin_mins != null).reduce((s, r) => s + r.assign_to_checkin_mins, 0) / (rows.filter(r => r.assign_to_checkin_mins != null).length || 1))) : '—' },
+          { label: 'Avg Check-In→Release', value: rows.length ? fmtMins(Math.round(rows.filter(r => r.checkin_to_release_mins != null).reduce((s, r) => s + r.checkin_to_release_mins, 0) / (rows.filter(r => r.checkin_to_release_mins != null).length || 1))) : '—' },
+          { label: 'Avg Bay→Release', value: rows.length ? fmtMins(Math.round(rows.filter(r => r.assign_to_release_mins != null).reduce((s, r) => s + r.assign_to_release_mins, 0) / (rows.filter(r => r.assign_to_release_mins != null).length || 1))) : '—' },
+        ].map(c => (
+          <div key={c.label} className="bg-white rounded-xl border border-gray-200 p-4">
+            <p className="text-xs text-gray-500 font-medium">{c.label}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{c.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Export button */}
+      <div className="flex justify-end">
+        <button onClick={handleExport} disabled={exporting || !rows.length}
+          className="btn-secondary flex items-center gap-2 text-sm py-1.5 disabled:opacity-40">
+          <Download size={14} /> {exporting ? 'Exporting…' : 'Export XLSX'}
+        </button>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-100">
+              {[
+                'Txn ID', 'Container', 'Truck', 'Agent', 'Bay', 'Status',
+                'Bay Assigned', 'Check-In', 'Released',
+                'Assign→Check-In', 'Check-In→Release', 'Bay→Release',
+              ].map(h => (
+                <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading && (
+              <tr><td colSpan={12} className="text-center py-10 text-gray-400">Loading…</td></tr>
+            )}
+            {!isLoading && rows.length === 0 && (
+              <tr><td colSpan={12} className="text-center py-10 text-gray-400">No records for this period.</td></tr>
+            )}
+            {rows.map((r, i) => (
+              <tr key={r.transaction_id} className={clsx('border-b border-gray-50 hover:bg-gray-50', i % 2 === 0 ? '' : 'bg-gray-50/30')}>
+                <td className="px-3 py-2.5 font-mono text-xs text-gray-600">{r.transaction_id}</td>
+                <td className="px-3 py-2.5 font-semibold">{r.container_number}</td>
+                <td className="px-3 py-2.5 text-gray-700">{r.truck_number || '—'}</td>
+                <td className="px-3 py-2.5 text-gray-700 max-w-[140px] truncate">{r.agent_name}</td>
+                <td className="px-3 py-2.5 font-mono text-xs">{r.bay_code || '—'}</td>
+                <td className="px-3 py-2.5">
+                  <span className={clsx('px-2 py-0.5 rounded-full text-xs font-semibold',
+                    r.status === 'EXITED'  ? 'bg-green-100 text-green-700' :
+                    r.status === 'IN_BAY'  ? 'bg-blue-100 text-blue-700' :
+                    'bg-gray-100 text-gray-600')}>{r.status}</span>
+                </td>
+                <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{fmtTs(r.bay_assigned_time)}</td>
+                <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{fmtTs(r.check_in_time)}</td>
+                <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{fmtTs(r.release_time)}</td>
+                <td className="px-3 py-2.5 text-center">
+                  {r.assign_to_checkin_mins != null
+                    ? <span className="font-semibold text-indigo-700">{fmtMins(r.assign_to_checkin_mins)}</span>
+                    : <span className="text-gray-400">—</span>}
+                </td>
+                <td className="px-3 py-2.5 text-center">
+                  {r.checkin_to_release_mins != null
+                    ? <span className="font-semibold text-emerald-700">{fmtMins(r.checkin_to_release_mins)}</span>
+                    : <span className="text-gray-400">—</span>}
+                </td>
+                <td className="px-3 py-2.5 text-center">
+                  {r.assign_to_release_mins != null
+                    ? <span className="font-semibold text-blue-700">{fmtMins(r.assign_to_release_mins)}</span>
+                    : <span className="text-gray-400">—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ReportsPage ─────────────────────────────────────────────────────────
 export default function ReportsPage() {
   const [tab, setTab]     = useState('dashboard');
@@ -835,12 +955,13 @@ export default function ReportsPage() {
 
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
-        {tab === 'dashboard'  && <DashboardTab  filters={filters} onSelectContainer={setSelectedId} />}
-        {tab === 'dwell'      && <DwellTab      filters={filters} onSelectContainer={setSelectedId} />}
-        {tab === 'areas'      && <AreasTab      filters={filters} />}
-        {tab === 'agents'     && <AgentsTab     filters={filters} />}
-        {tab === 'exceptions' && <ExceptionsTab filters={filters} onSelectContainer={setSelectedId} />}
-        {tab === 'audit'      && <AuditTab      filters={filters} />}
+        {tab === 'dashboard'   && <DashboardTab   filters={filters} onSelectContainer={setSelectedId} />}
+        {tab === 'dwell'       && <DwellTab       filters={filters} onSelectContainer={setSelectedId} />}
+        {tab === 'areas'       && <AreasTab       filters={filters} />}
+        {tab === 'agents'      && <AgentsTab      filters={filters} />}
+        {tab === 'exceptions'  && <ExceptionsTab  filters={filters} onSelectContainer={setSelectedId} />}
+        {tab === 'timestamps'  && <TimestampsTab  filters={filters} />}
+        {tab === 'audit'       && <AuditTab       filters={filters} />}
       </div>
 
       {/* Container drawer */}
