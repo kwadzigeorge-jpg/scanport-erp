@@ -451,26 +451,15 @@ async function submitRequest(req, res, next) {
       }
     }
 
-    const status    = clashWith ? 'Rejected' : 'Approved';
-    const approvedAt  = clashWith ? null : new Date();
-    const rejectedAt  = clashWith ? new Date() : null;
-    const rejReason   = clashWith
-      ? `Leave clash: ${clashWith} from the same team already have approved leave overlapping these dates.`
-      : null;
-
     const { rows: [rec] } = await client.query(
       `INSERT INTO lms_leave_requests
          (staff_id, leave_type, start_date, end_date, working_days, year, entitlement_year,
-          is_gift_leave, status, auto_decision, clash_with, notes, submitted_by,
-          approved_at, approved_by, rejected_at, rejected_by, rejection_reason)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10,$11,$12,$13,$14,$15,$16,$17)
+          is_gift_leave, status, auto_decision, clash_with, notes, submitted_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Pending',FALSE,$9,$10,$11)
        RETURNING *`,
       [staffId, leaveType, startDate, endDate, workingDays, parseInt(year), entYear,
-       isGift, status, clashWith || null, notes || null,
-       req.user.fullName || req.user.username,
-       approvedAt, approvedAt ? (req.user.fullName || req.user.username) : null,
-       rejectedAt, rejectedAt ? 'system' : null,
-       rejReason]
+       isGift, clashWith || null, notes || null,
+       req.user.fullName || req.user.username]
     );
 
     await client.query('COMMIT');
@@ -479,8 +468,6 @@ async function submitRequest(req, res, next) {
       ...rec,
       staff_name: staff.name,
       team_name: staff.team_name,
-      decision: status,
-      clash_reason: rejReason,
     });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

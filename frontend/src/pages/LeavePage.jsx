@@ -314,19 +314,15 @@ function SubmitTab() {
   const mutation = useMutation(d => leaveApi.submit(d), {
     onSuccess: res => {
       setResult(res.data);
-      if (res.data.decision === 'Approved') {
-        toast.success('Leave approved — no clash detected.');
-        setForm({ staffId: '', leaveType: 'Annual Leave', entitlementYear: currentYear, startDate: todayStr, numDays: '', endDate: '', notes: '' });
-      } else {
-        toast.error('Leave rejected — team clash detected.');
-      }
+      toast.success('Leave request submitted — awaiting approval.');
+      setForm({ staffId: '', leaveType: 'Annual Leave', entitlementYear: currentYear, startDate: todayStr, numDays: '', endDate: '', notes: '' });
       qc.invalidateQueries('leave-overview');
       qc.invalidateQueries('lms-requests');
       qc.invalidateQueries('lms-balances');
       qc.invalidateQueries('lms-staff-balance');
     },
     onError: err => {
-      setResult({ decision: 'Error', clash_reason: err.response?.data?.error || 'Submission failed.' });
+      setResult({ error: err.response?.data?.error || 'Submission failed.' });
     },
   });
 
@@ -367,27 +363,29 @@ function SubmitTab() {
     <div className="p-6 max-w-lg">
       <h2 className="text-base font-semibold text-gray-900 mb-1">Submit Leave Request</h2>
       <p className="text-xs text-gray-500 mb-4">
-        Requests are auto-approved unless a team member has overlapping leave.
+        All submitted requests require manual approval by an admin.
       </p>
 
-      {/* Decision banner */}
-      {result && (
-        <div className={`mb-4 p-4 rounded-xl border text-sm ${
-          result.decision === 'Approved'
-            ? 'bg-green-50 border-green-200 text-green-800'
-            : 'bg-red-50 border-red-200 text-red-800'
-        }`}>
+      {/* Submission confirmation banner */}
+      {result && !result.error && (
+        <div className="mb-4 p-4 rounded-xl border text-sm bg-blue-50 border-blue-200 text-blue-800">
           <div className="flex items-center gap-2 font-semibold mb-1">
-            {result.decision === 'Approved'
-              ? <><CheckCircle size={15} /> Leave Approved</>
-              : <><XCircle size={15} /> Leave Rejected</>}
+            <Clock size={15} /> Request Submitted — Pending Approval
           </div>
-          {result.clash_reason && <p className="text-xs mt-1">{result.clash_reason}</p>}
-          {result.decision === 'Approved' && (
-            <p className="text-xs mt-1">
-              {result.staff_name} · {result.leave_type} · {fmtDate(result.start_date)} – {fmtDate(result.end_date)} · {result.working_days} working days
+          <p className="text-xs mt-1">
+            {result.staff_name} · {result.leave_type} · {fmtDate(result.start_date)} – {fmtDate(result.end_date)} · {result.working_days} working days
+          </p>
+          {result.clash_with && (
+            <p className="text-xs mt-1 text-amber-700">
+              Note: team overlap with {result.clash_with} — reviewer should be aware.
             </p>
           )}
+        </div>
+      )}
+      {result?.error && (
+        <div className="mb-4 p-4 rounded-xl border text-sm bg-red-50 border-red-200 text-red-800">
+          <div className="flex items-center gap-2 font-semibold"><XCircle size={15} /> Submission Failed</div>
+          <p className="text-xs mt-1">{result.error}</p>
         </div>
       )}
 
@@ -497,7 +495,7 @@ function SubmitTab() {
                     {r.staff_name}: {fmtShort(r.start_date)} – {fmtShort(r.end_date)} ({r.leave_type.replace(' Leave', '')})
                   </p>
                 ))}
-                <p className="text-amber-600 mt-1 font-medium">This request will be auto-rejected unless an admin overrides it.</p>
+                <p className="text-amber-600 mt-1 font-medium">The reviewer will see this overlap when approving or rejecting.</p>
               </div>
             )}
           </div>
@@ -682,7 +680,6 @@ function RecordsTab({ isAdmin }) {
                       <td className="px-3 py-2 font-medium text-center">{r.working_days}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         <StatusBadge status={r.status} />
-                        {r.auto_decision && <span className="ml-1 text-xs text-gray-400">auto</span>}
                       </td>
                       <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap">
                         {r.status === 'Approved' ? (r.approved_by || '—') : (r.rejected_by || '—')}
