@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { authApi } from '../../services/api';
+import toast from 'react-hot-toast';
 import {
   LayoutDashboard, ClipboardList,
   BarChart3, Settings, LogOut, Menu, X, Bell, LayoutGrid,
   FlaskConical, MapPin, CalendarDays, Package, Boxes, ShieldCheck, Scale,
-  Sun, Moon, MessageSquare,
+  Sun, Moon, MessageSquare, KeyRound, Eye, EyeOff,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -26,11 +28,103 @@ const navItems = [
   { to: '/leave',        icon: CalendarDays,    label: 'Leave Mgmt',    roles: ['admin', 'supervisor'] },
 ];
 
+// ─── Change Password Modal ────────────────────────────────────────────────────
+function ChangePasswordModal({ onClose }) {
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [show, setShow] = useState({ current: false, new: false, confirm: false });
+  const [loading, setLoading] = useState(false);
+
+  const set = (field, value) => setForm(f => ({ ...f, [field]: value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (form.newPassword.length < 8) {
+      toast.error('New password must be at least 8 characters.');
+      return;
+    }
+    if (form.newPassword !== form.confirmPassword) {
+      toast.error('New passwords do not match.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await authApi.changePassword({ currentPassword: form.currentPassword, newPassword: form.newPassword });
+      toast.success('Password changed successfully.');
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to change password.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-slate-700">
+          <div className="flex items-center gap-2">
+            <KeyRound size={16} className="text-blue-600" />
+            <h2 className="font-semibold text-gray-900 dark:text-slate-100 text-sm">Change Password</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {[
+            { field: 'currentPassword', label: 'Current Password',  key: 'current' },
+            { field: 'newPassword',     label: 'New Password',      key: 'new' },
+            { field: 'confirmPassword', label: 'Confirm New Password', key: 'confirm' },
+          ].map(({ field, label, key }) => (
+            <div key={field}>
+              <label className="label">{label}</label>
+              <div className="relative">
+                <input
+                  type={show[key] ? 'text' : 'password'}
+                  className="input pr-10"
+                  value={form[field]}
+                  onChange={e => set(field, e.target.value)}
+                  required
+                  autoComplete={field === 'currentPassword' ? 'current-password' : 'new-password'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShow(s => ({ ...s, [key]: !s[key] }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  tabIndex={-1}
+                >
+                  {show[key] ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <p className="text-xs text-gray-400 dark:text-slate-500">Minimum 8 characters.</p>
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1 justify-center text-sm py-2">
+              Cancel
+            </button>
+            <button type="submit" disabled={loading} className="btn-primary flex-1 justify-center text-sm py-2">
+              {loading ? (
+                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : 'Update Password'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Layout ───────────────────────────────────────────────────────────────────
 export default function Layout() {
   const { user, logout, hasPermission, hasRole } = useAuth();
   const { dark, toggle: toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showChangePw, setShowChangePw] = useState(false);
 
   const handleLogout = async () => {
     await logout();
@@ -57,6 +151,9 @@ export default function Layout() {
       {sidebarOpen && (
         <div className="fixed inset-0 z-20 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
+
+      {/* Change Password Modal */}
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
 
       {/* Sidebar */}
       <aside className={clsx(
@@ -98,7 +195,7 @@ export default function Layout() {
         {/* User footer */}
         <div className="border-t border-gray-100 dark:border-slate-700 px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
+            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">
               {user?.fullName?.[0]?.toUpperCase() || user?.username?.[0]?.toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
@@ -107,6 +204,13 @@ export default function Layout() {
                 {user?.role?.replace('_', ' ')}
               </span>
             </div>
+            <button
+              onClick={() => setShowChangePw(true)}
+              title="Change password"
+              className="text-gray-400 dark:text-slate-500 hover:text-blue-500 transition-colors"
+            >
+              <KeyRound size={15} />
+            </button>
             <button onClick={handleLogout} title="Logout" className="text-gray-400 dark:text-slate-500 hover:text-red-500 transition-colors">
               <LogOut size={16} />
             </button>
