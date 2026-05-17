@@ -23,13 +23,13 @@ function StatTile({ label, value, icon: Icon, color, sub }) {
     gray:   'bg-gray-50 text-gray-500 border-gray-200',
   };
   return (
-    <div className={clsx('rounded-2xl border p-4 flex flex-col gap-2', style[color] || style.gray)}>
+    <div className={clsx('rounded-2xl border p-4 flex flex-col gap-2 shadow-sm hover:shadow-md transition-shadow', style[color] || style.gray)}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</span>
-        <Icon size={18} className="opacity-60" />
+        <span className="text-xs font-semibold uppercase tracking-wide opacity-70 leading-none">{label}</span>
+        <Icon size={17} className="opacity-50" />
       </div>
-      <p className="text-3xl font-bold">{value ?? '—'}</p>
-      {sub && <p className="text-xs opacity-60">{sub}</p>}
+      <p className="text-3xl font-bold tracking-tight">{value ?? '—'}</p>
+      {sub && <p className="text-xs opacity-60 leading-snug">{sub}</p>}
     </div>
   );
 }
