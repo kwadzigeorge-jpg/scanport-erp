@@ -980,10 +980,90 @@ function MaintenanceModal({ scanners, onClose, record }) {
   );
 }
 
+const MAINT_TYPE_STYLE = {
+  pmi_l1: 'bg-blue-50 text-blue-700',
+  pmi_l2: 'bg-blue-50 text-blue-700',
+  pmi_l3: 'bg-blue-50 text-blue-700',
+  corrective_l2: 'bg-orange-50 text-orange-700',
+  corrective_l3: 'bg-orange-50 text-orange-700',
+};
+
+const MAINT_STATUS_STYLE = {
+  completed:   'bg-green-100 text-green-700',
+  in_progress: 'bg-blue-100 text-blue-700',
+  scheduled:   'bg-purple-100 text-purple-700',
+  cancelled:   'bg-red-100 text-red-600',
+};
+
+const MAINT_STATUS_LABEL = {
+  completed: 'Completed', in_progress: 'In Progress',
+  scheduled: 'Scheduled', cancelled: 'Cancelled',
+};
+
+function MaintenanceRow({ r, onEdit }) {
+  const [expanded, setExpanded] = useState(false);
+  const isOverdue = r.next_scheduled_maintenance && new Date(r.next_scheduled_maintenance) < new Date() && r.status !== 'cancelled';
+
+  return (
+    <>
+      <tr
+        className={clsx('hover:bg-gray-50 cursor-pointer', expanded && 'bg-blue-50/30')}
+        onClick={() => setExpanded(x => !x)}
+      >
+        <td className="px-4 py-2.5 whitespace-nowrap text-gray-700">{fmtDate(r.maintenance_date)}</td>
+        <td className="px-4 py-2.5 font-mono text-xs font-semibold">{r.scanner_serial}</td>
+        <td className="px-4 py-2.5">
+          <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', MAINT_TYPE_STYLE[r.maintenance_type] || 'bg-gray-100 text-gray-500')}>
+            {MAINT_TYPE_LABELS[r.maintenance_type] || r.maintenance_type?.replace(/_/g,' ')}
+          </span>
+        </td>
+        <td className="px-4 py-2.5 text-gray-700">{r.performed_by_name}</td>
+        <td className="px-4 py-2.5 text-gray-600">{r.downtime_hours ? `${r.downtime_hours}h` : '—'}</td>
+        <td className="px-4 py-2.5 text-gray-600">{r.cost ? Number(r.cost).toLocaleString() : '—'}</td>
+        <td className="px-4 py-2.5">
+          <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', MAINT_STATUS_STYLE[r.status] || 'bg-gray-100 text-gray-500')}>
+            {MAINT_STATUS_LABEL[r.status] || r.status}
+          </span>
+        </td>
+        <td className={clsx('px-4 py-2.5 whitespace-nowrap text-sm', isOverdue ? 'text-red-600 font-medium' : 'text-gray-600')}>
+          {r.next_scheduled_maintenance ? fmtDate(r.next_scheduled_maintenance) : '—'}
+          {isOverdue && <span className="ml-1 text-xs text-red-500">(overdue)</span>}
+        </td>
+        <td className="px-4 py-2.5" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={() => onEdit(r)}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            title="Edit record"
+          >
+            <Pencil size={14} />
+          </button>
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="bg-blue-50/20">
+          <td colSpan={9} className="px-6 py-3 border-b border-blue-100">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm">
+              <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Description</span><span className="text-gray-700">{r.description || '—'}</span></div>
+              <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Technician</span><span className="text-gray-700">{r.technician_name || '—'}</span></div>
+              <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Work Order</span><span className="text-gray-700 font-mono text-xs">{r.work_order_id || '—'}</span></div>
+              <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Performed By</span><span className="text-gray-700 capitalize">{r.performed_by_type?.replace(/_/g,' ') || '—'}</span></div>
+              {(r.downtime_start || r.downtime_end) && (
+                <div className="col-span-2"><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Downtime Window</span><span className="text-gray-700">{r.downtime_start ? new Date(r.downtime_start).toLocaleString() : '—'} → {r.downtime_end ? new Date(r.downtime_end).toLocaleString() : '—'}</span></div>
+              )}
+              {r.notes && <div className="col-span-2"><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Notes</span><span className="text-gray-700">{r.notes}</span></div>}
+              <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Logged</span><span className="text-gray-500 text-xs">{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</span></div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 function MaintenanceTab() {
   const [showModal, setShowModal] = useState(false);
   const [editRecord, setEditRecord] = useState(null);
-  const [filters, setFilters] = useState({ from: '', to: '', scanner_id: '', type: '' });
+  const [filters, setFilters] = useState({ from: '', to: '', scanner_id: '', type: '', status: '' });
 
   const openEdit = (r) => { setEditRecord(r); setShowModal(true); };
   const closeModal = () => { setShowModal(false); setEditRecord(null); };
@@ -995,16 +1075,21 @@ function MaintenanceTab() {
   const { data: scanners } = useQuery('compliance-scanners-all',
     () => complianceApi.listScanners({ limit: 200 }).then(r => r.data?.rows || []));
 
+  const filterSel = 'border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500';
+
   return (
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-center">
-        <input type="date" className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        <input type="date" className={filterSel}
           value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} />
-        <input type="date" className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        <input type="date" className={filterSel}
           value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} />
-        <select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          value={filters.type} onChange={e => setFilters(f => ({ ...f, type: e.target.value }))}>
+        <select className={filterSel} value={filters.scanner_id} onChange={e => setFilters(f => ({ ...f, scanner_id: e.target.value }))}>
+          <option value="">All scanners</option>
+          {(scanners || []).map(s => <option key={s.id} value={s.id}>{s.scanner_serial} — {s.location}</option>)}
+        </select>
+        <select className={filterSel} value={filters.type} onChange={e => setFilters(f => ({ ...f, type: e.target.value }))}>
           <option value="">All types</option>
           <optgroup label="Preventive (PMI)">
             <option value="pmi_l1">PMI — Level 1</option>
@@ -1015,6 +1100,13 @@ function MaintenanceTab() {
             <option value="corrective_l2">Corrective — Level 2</option>
             <option value="corrective_l3">Corrective — Level 3</option>
           </optgroup>
+        </select>
+        <select className={filterSel} value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}>
+          <option value="">All statuses</option>
+          <option value="completed">Completed</option>
+          <option value="in_progress">In Progress</option>
+          <option value="scheduled">Scheduled</option>
+          <option value="cancelled">Cancelled</option>
         </select>
         <button onClick={() => { setEditRecord(null); setShowModal(true); }} className="btn-primary flex items-center gap-2 text-sm py-2 px-4 ml-auto">
           <Plus size={15} /> Log Maintenance
@@ -1040,39 +1132,16 @@ function MaintenanceTab() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-gray-100">
               {!data?.rows?.length
-                ? <tr><td colSpan={8} className="text-center py-12 text-gray-400">No maintenance records</td></tr>
-                : data.rows.map(r => (
-                  <tr key={r.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5 whitespace-nowrap">{fmtDate(r.maintenance_date)}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs font-semibold">{r.scanner_serial}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{MAINT_TYPE_LABELS[r.maintenance_type] || r.maintenance_type?.replace(/_/g,' ')}</td>
-                    <td className="px-4 py-2.5">{r.performed_by_name}</td>
-                    <td className="px-4 py-2.5">{r.downtime_hours ? `${r.downtime_hours}h` : '—'}</td>
-                    <td className="px-4 py-2.5">{r.cost ? Number(r.cost).toLocaleString() : '—'}</td>
-                    <td className="px-4 py-2.5">
-                      <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full',
-                        r.status === 'completed' ? 'bg-green-100 text-green-700' :
-                        r.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
-                        'bg-gray-100 text-gray-500')}>
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">{fmtDate(r.next_scheduled_maintenance)}</td>
-                    <td className="px-4 py-2.5">
-                      <button
-                        onClick={() => openEdit(r)}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                        title="Edit record"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                ? <tr><td colSpan={9} className="text-center py-12 text-gray-400">No maintenance records</td></tr>
+                : data.rows.map(r => <MaintenanceRow key={r.id} r={r} onEdit={openEdit} />)
+              }
             </tbody>
           </table>
+          {!!data?.rows?.length && (
+            <p className="text-xs text-gray-400 px-4 py-2 border-t border-gray-100">Click any row to expand details</p>
+          )}
         </div>
       )}
 
