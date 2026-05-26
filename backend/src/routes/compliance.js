@@ -34,6 +34,7 @@ router.post('/survey-meters/calibrations',  requirePermission('calibration.log')
 // ── Maintenance ───────────────────────────────────────────────────────────────
 router.get('/maintenance',                  requirePermission('maintenance.view'),         cc.listMaintenance);
 router.post('/maintenance',                 requirePermission('maintenance.log'),          cc.logMaintenance);
+router.put('/maintenance/:id',              requirePermission('maintenance.log'),          cc.updateMaintenance);
 
 // ── Breakdowns ────────────────────────────────────────────────────────────────
 router.get('/breakdowns',                   requirePermission('compliance.view'),          cc.listBreakdowns);

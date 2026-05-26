@@ -8,7 +8,7 @@ import {
   ShieldCheck, AlertTriangle, Clock, Wrench, Zap, FileText,
   Plus, X, Upload, Download, RefreshCw, ChevronRight,
   CheckCircle, XCircle, AlertCircle, Activity, Calendar,
-  Search, Filter, BarChart3, Send, Bell,
+  Search, Filter, BarChart3, Send, Bell, Pencil,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -825,23 +825,41 @@ function SurveyMetersTab() {
 }
 
 // ─── Maintenance Modal ────────────────────────────────────────────────────────
-function MaintenanceModal({ scanners, onClose }) {
+function MaintenanceModal({ scanners, onClose, record }) {
   const qc = useQueryClient();
+  const isEdit = !!record;
   const [form, setForm] = useState({
-    scanner_id: '', maintenance_date: today, maintenance_type: 'level_2_preventive',
-    description: '', performed_by_type: 'oem_vendor', performed_by_name: '',
-    technician_name: '', downtime_start: '', downtime_end: '',
-    scanner_returned_to_service: false, return_to_service_date: '',
-    next_scheduled_maintenance: '', cost: '', currency: 'GHS',
-    notes: '', status: 'completed',
+    scanner_id:                 record?.scanner_id          || '',
+    maintenance_date:           record?.maintenance_date?.slice(0,10) || today,
+    maintenance_type:           record?.maintenance_type    || 'level_2_preventive',
+    description:                record?.description         || '',
+    performed_by_type:          record?.performed_by_type   || 'oem_vendor',
+    performed_by_name:          record?.performed_by_name   || '',
+    technician_name:            record?.technician_name     || '',
+    downtime_start:             record?.downtime_start      ? record.downtime_start.slice(0,16) : '',
+    downtime_end:               record?.downtime_end        ? record.downtime_end.slice(0,16)   : '',
+    scanner_returned_to_service: record?.scanner_returned_to_service || false,
+    return_to_service_date:     record?.return_to_service_date?.slice(0,10) || '',
+    next_scheduled_maintenance: record?.next_scheduled_maintenance?.slice(0,10) || '',
+    cost:                       record?.cost                || '',
+    currency:                   record?.currency            || 'GHS',
+    notes:                      record?.notes               || '',
+    status:                     record?.status              || 'completed',
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const mut = useMutation(complianceApi.logMaintenance, {
-    onSuccess: () => { toast.success('Maintenance logged.'); qc.invalidateQueries('compliance-maintenance'); onClose(); },
-    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
-  });
+  const mut = useMutation(
+    (data) => isEdit ? complianceApi.updateMaintenance(record.id, data) : complianceApi.logMaintenance(data),
+    {
+      onSuccess: () => {
+        toast.success(isEdit ? 'Maintenance record updated.' : 'Maintenance logged.');
+        qc.invalidateQueries('compliance-maintenance');
+        onClose();
+      },
+      onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+    }
+  );
   return (
-    <Modal title="Log Maintenance Activity" onClose={onClose} wide>
+    <Modal title={isEdit ? 'Edit Maintenance Record' : 'Log Maintenance Activity'} onClose={onClose} wide>
       <form onSubmit={e => { e.preventDefault(); mut.mutate({ ...form, cost: form.cost || undefined }); }} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Scanner" required>
@@ -912,7 +930,7 @@ function MaintenanceModal({ scanners, onClose }) {
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" onClick={onClose} className="btn-secondary text-sm py-2 px-4">Cancel</button>
           <button type="submit" disabled={mut.isLoading} className="btn-primary text-sm py-2 px-4">
-            {mut.isLoading ? 'Saving…' : 'Log Maintenance'}
+            {mut.isLoading ? 'Saving…' : isEdit ? 'Save Changes' : 'Log Maintenance'}
           </button>
         </div>
       </form>
@@ -922,7 +940,11 @@ function MaintenanceModal({ scanners, onClose }) {
 
 function MaintenanceTab() {
   const [showModal, setShowModal] = useState(false);
+  const [editRecord, setEditRecord] = useState(null);
   const [filters, setFilters] = useState({ from: '', to: '', scanner_id: '', type: '' });
+
+  const openEdit = (r) => { setEditRecord(r); setShowModal(true); };
+  const closeModal = () => { setShowModal(false); setEditRecord(null); };
 
   const { data, isLoading } = useQuery(
     ['compliance-maintenance', filters],
@@ -948,7 +970,7 @@ function MaintenanceTab() {
           <option value="software_update">Software Update</option>
           <option value="hardware_inspection">Hardware Inspection</option>
         </select>
-        <button onClick={() => setShowModal(true)} className="btn-primary flex items-center gap-2 text-sm py-2 px-4 ml-auto">
+        <button onClick={() => { setEditRecord(null); setShowModal(true); }} className="btn-primary flex items-center gap-2 text-sm py-2 px-4 ml-auto">
           <Plus size={15} /> Log Maintenance
         </button>
       </div>
@@ -967,7 +989,7 @@ function MaintenanceTab() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                {['Date', 'Scanner', 'Type', 'Vendor / Team', 'Downtime', 'Cost (GHS)', 'Status', 'Next Scheduled'].map(h => (
+                {['Date', 'Scanner', 'Type', 'Vendor / Team', 'Downtime', 'Cost (GHS)', 'Status', 'Next Scheduled', ''].map(h => (
                   <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -992,6 +1014,15 @@ function MaintenanceTab() {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap">{fmtDate(r.next_scheduled_maintenance)}</td>
+                    <td className="px-4 py-2.5">
+                      <button
+                        onClick={() => openEdit(r)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                        title="Edit record"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
             </tbody>
@@ -999,7 +1030,7 @@ function MaintenanceTab() {
         </div>
       )}
 
-      {showModal && <MaintenanceModal scanners={scanners || []} onClose={() => setShowModal(false)} />}
+      {showModal && <MaintenanceModal scanners={scanners || []} onClose={closeModal} record={editRecord} />}
     </div>
   );
 }

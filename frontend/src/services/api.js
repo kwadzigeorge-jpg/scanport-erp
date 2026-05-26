@@ -243,6 +243,7 @@ export const complianceApi = {
   // Maintenance
   listMaintenance:        (p)       => api.get('/compliance/maintenance', { params: p }),
   logMaintenance:         (d)       => api.post('/compliance/maintenance', d),
+  updateMaintenance:      (id, d)   => api.put(`/compliance/maintenance/${id}`, d),
 
   // Breakdowns
   listBreakdowns:         (p)       => api.get('/compliance/breakdowns', { params: p }),

@@ -326,6 +326,36 @@ async function logMaintenance(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function updateMaintenance(req, res, next) {
+  try {
+    const { id } = req.params;
+    const {
+      scanner_id, work_order_id, maintenance_date, maintenance_end_date, maintenance_type,
+      description, performed_by_type, performed_by_name, technician_name,
+      downtime_start, downtime_end, scanner_returned_to_service, return_to_service_date,
+      next_scheduled_maintenance, cost, currency, procurement_ref, notes, status,
+    } = req.body;
+    const { rows } = await db.query(`
+      UPDATE compliance_maintenance SET
+        scanner_id=$1, work_order_id=$2, maintenance_date=$3, maintenance_end_date=$4,
+        maintenance_type=$5, description=$6, performed_by_type=$7, performed_by_name=$8,
+        technician_name=$9, downtime_start=$10, downtime_end=$11,
+        scanner_returned_to_service=$12, return_to_service_date=$13,
+        next_scheduled_maintenance=$14, cost=$15, currency=$16,
+        procurement_ref=$17, notes=$18, status=$19, updated_at=NOW()
+      WHERE id=$20
+      RETURNING *
+    `, [scanner_id, work_order_id||null, maintenance_date, maintenance_end_date||null, maintenance_type,
+        description, performed_by_type, performed_by_name, technician_name||null,
+        downtime_start||null, downtime_end||null, scanner_returned_to_service||false, return_to_service_date||null,
+        next_scheduled_maintenance||null, cost||null, currency||'GHS', procurement_ref||null, notes||null,
+        status||'completed', id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Record not found.' });
+    await logAudit(req, 'compliance:maintenance_updated', 'compliance_maintenance', id, req.body);
+    return res.json(rows[0]);
+  } catch (err) { next(err); }
+}
+
 // ─── Breakdowns ───────────────────────────────────────────────────────────────
 async function listBreakdowns(req, res, next) {
   try {
@@ -744,7 +774,7 @@ module.exports = {
   listScanners, getScanner, createScanner, updateScanner,
   listCertificates, createCertificate, updateCertificate, uploadCertificateDoc,
   listSurveyMeters, createSurveyMeter, updateSurveyMeter, logCalibration,
-  listMaintenance, logMaintenance,
+  listMaintenance, logMaintenance, updateMaintenance,
   listBreakdowns, logBreakdown, updateBreakdown,
   logRepair,
   getDashboard,
