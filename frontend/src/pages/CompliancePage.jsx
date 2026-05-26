@@ -14,6 +14,22 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const today = new Date().toISOString().slice(0, 10);
 
+const MAINT_TYPE_LABELS = {
+  corrective_l2:        'Corrective — Level 2',
+  corrective_l3:        'Corrective — Level 3',
+  pmi_l1:               'PMI — Level 1',
+  pmi_l2:               'PMI — Level 2',
+  pmi_l3:               'PMI — Level 3',
+  level_1_routine:      'Level 1 — Routine',
+  level_2_preventive:   'Level 2 — Preventive',
+  level_3_major_overhaul: 'Level 3 — Major Overhaul',
+  calibration:          'Calibration',
+  software_update:      'Software Update',
+  hardware_inspection:  'Hardware Inspection',
+};
+const PMI_VENDOR_MAP = { pmi_l1: 'Scanport', pmi_l2: 'MDE', pmi_l3: 'Smiths Detection' };
+const CORRECTIVE_VENDORS = ['MDE', 'Smiths Detection', 'Siemens'];
+
 const CERT_STATUS = {
   issued:               'bg-green-100 text-green-700',
   pending:              'bg-yellow-100 text-yellow-700',
@@ -831,7 +847,7 @@ function MaintenanceModal({ scanners, onClose, record }) {
   const [form, setForm] = useState({
     scanner_id:                 record?.scanner_id          || '',
     maintenance_date:           record?.maintenance_date?.slice(0,10) || today,
-    maintenance_type:           record?.maintenance_type    || 'level_2_preventive',
+    maintenance_type:           record?.maintenance_type    || 'pmi_l1',
     description:                record?.description         || '',
     performed_by_type:          record?.performed_by_type   || 'oem_vendor',
     performed_by_name:          record?.performed_by_name   || '',
@@ -847,6 +863,14 @@ function MaintenanceModal({ scanners, onClose, record }) {
     status:                     record?.status              || 'completed',
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    const pmiVendor = PMI_VENDOR_MAP[form.maintenance_type];
+    if (pmiVendor) {
+      setForm(f => ({ ...f, performed_by_name: pmiVendor, performed_by_type: f.performed_by_type === 'internal_technician' ? 'internal_technician' : 'oem_vendor' }));
+    }
+  }, [form.maintenance_type]);
+
   const mut = useMutation(
     (data) => isEdit ? complianceApi.updateMaintenance(record.id, data) : complianceApi.logMaintenance(data),
     {
@@ -873,12 +897,15 @@ function MaintenanceModal({ scanners, onClose, record }) {
           </Field>
           <Field label="Maintenance Type" required>
             <select className={sel} value={form.maintenance_type} onChange={e => set('maintenance_type', e.target.value)}>
-              <option value="level_1_routine">Level 1 — Routine</option>
-              <option value="level_2_preventive">Level 2 — Preventive</option>
-              <option value="level_3_major_overhaul">Level 3 — Major Overhaul</option>
-              <option value="calibration">Calibration</option>
-              <option value="software_update">Software Update</option>
-              <option value="hardware_inspection">Hardware Inspection</option>
+              <optgroup label="Preventive Maintenance (PMI)">
+                <option value="pmi_l1">PMI — Level 1 (Scanport)</option>
+                <option value="pmi_l2">PMI — Level 2 (MDE)</option>
+                <option value="pmi_l3">PMI — Level 3 (Smiths Detection)</option>
+              </optgroup>
+              <optgroup label="Corrective Maintenance">
+                <option value="corrective_l2">Corrective — Level 2</option>
+                <option value="corrective_l3">Corrective — Level 3</option>
+              </optgroup>
             </select>
           </Field>
           <Field label="Status">
@@ -897,10 +924,19 @@ function MaintenanceModal({ scanners, onClose, record }) {
             </select>
           </Field>
           <Field label="Vendor / Team Name" required>
-            <input className={inp} list="vendors" value={form.performed_by_name} onChange={e => set('performed_by_name', e.target.value)} required />
-            <datalist id="vendors">
-              {['Smiths Detection','Siemens','MDE','Internal Team'].map(v => <option key={v} value={v} />)}
-            </datalist>
+            {PMI_VENDOR_MAP[form.maintenance_type] ? (
+              <input
+                className={clsx(inp, 'bg-gray-50 cursor-not-allowed')}
+                value={form.performed_by_name}
+                readOnly
+                title="Auto-filled based on PMI level"
+              />
+            ) : (
+              <select className={sel} value={form.performed_by_name} onChange={e => set('performed_by_name', e.target.value)} required>
+                <option value="">— Select vendor —</option>
+                {CORRECTIVE_VENDORS.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            )}
           </Field>
           <Field label="Technician Name">
             <input className={inp} value={form.technician_name} onChange={e => set('technician_name', e.target.value)} />
@@ -964,11 +1000,15 @@ function MaintenanceTab() {
         <select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           value={filters.type} onChange={e => setFilters(f => ({ ...f, type: e.target.value }))}>
           <option value="">All types</option>
-          <option value="level_1_routine">Level 1 — Routine</option>
-          <option value="level_2_preventive">Level 2 — Preventive</option>
-          <option value="level_3_major_overhaul">Level 3 — Major Overhaul</option>
-          <option value="software_update">Software Update</option>
-          <option value="hardware_inspection">Hardware Inspection</option>
+          <optgroup label="Preventive (PMI)">
+            <option value="pmi_l1">PMI — Level 1</option>
+            <option value="pmi_l2">PMI — Level 2</option>
+            <option value="pmi_l3">PMI — Level 3</option>
+          </optgroup>
+          <optgroup label="Corrective">
+            <option value="corrective_l2">Corrective — Level 2</option>
+            <option value="corrective_l3">Corrective — Level 3</option>
+          </optgroup>
         </select>
         <button onClick={() => { setEditRecord(null); setShowModal(true); }} className="btn-primary flex items-center gap-2 text-sm py-2 px-4 ml-auto">
           <Plus size={15} /> Log Maintenance
@@ -1001,7 +1041,7 @@ function MaintenanceTab() {
                   <tr key={r.id} className="hover:bg-gray-50">
                     <td className="px-4 py-2.5 whitespace-nowrap">{fmtDate(r.maintenance_date)}</td>
                     <td className="px-4 py-2.5 font-mono text-xs font-semibold">{r.scanner_serial}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{r.maintenance_type?.replace(/_/g,' ')}</td>
+                    <td className="px-4 py-2.5 text-gray-600">{MAINT_TYPE_LABELS[r.maintenance_type] || r.maintenance_type?.replace(/_/g,' ')}</td>
                     <td className="px-4 py-2.5">{r.performed_by_name}</td>
                     <td className="px-4 py-2.5">{r.downtime_hours ? `${r.downtime_hours}h` : '—'}</td>
                     <td className="px-4 py-2.5">{r.cost ? Number(r.cost).toLocaleString() : '—'}</td>
@@ -1370,7 +1410,7 @@ function AnnualReportTab() {
                       <tr key={i}>
                         <td className="px-4 py-2.5 font-mono text-xs font-semibold">{r.scanner_serial}</td>
                         <td className="px-4 py-2.5 whitespace-nowrap">{fmtDate(r.maintenance_date)}</td>
-                        <td className="px-4 py-2.5 text-gray-600">{r.maintenance_type?.replace(/_/g,' ')}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{MAINT_TYPE_LABELS[r.maintenance_type] || r.maintenance_type?.replace(/_/g,' ')}</td>
                         <td className="px-4 py-2.5">{r.performed_by_name}</td>
                         <td className="px-4 py-2.5">{r.downtime_hours ? `${r.downtime_hours}h` : '—'}</td>
                         <td className="px-4 py-2.5">{r.cost ? Number(r.cost).toLocaleString() : '—'}</td>
