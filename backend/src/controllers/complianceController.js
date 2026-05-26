@@ -120,11 +120,12 @@ async function updateScanner(req, res, next) {
 // ─── Certification ────────────────────────────────────────────────────────────
 async function listCertificates(req, res, next) {
   try {
-    const { scanner_id, status, expiring_days } = req.query;
+    const { scanner_id, status, expiring_days, all } = req.query;
     const conditions = []; const params = [];
     if (scanner_id)    { params.push(scanner_id);  conditions.push(`c.scanner_id=$${params.length}`); }
     if (status)        { params.push(status);       conditions.push(`c.certification_status=$${params.length}`); }
     if (expiring_days) { params.push(parseInt(expiring_days)); conditions.push(`c.certificate_expiry_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + ($${params.length} || ' days')::INTERVAL)`); }
+    if (!all || all === 'false') conditions.push(`c.is_current = TRUE`);
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
     const { rows } = await db.query(`
       SELECT c.*, s.scanner_serial, s.location, s.manufacturer, s.model
@@ -146,6 +147,11 @@ async function createCertificate(req, res, next) {
       application_submitted_date, application_reference, notes,
     } = req.body;
 
+    const isCurrent = is_current === true || is_current === 'true';
+    if (isCurrent) {
+      await db.query(`UPDATE compliance_certificates SET is_current=FALSE WHERE scanner_id=$1`, [scanner_id]);
+    }
+
     const { rows } = await db.query(`
       INSERT INTO compliance_certificates
         (scanner_id, certificate_number, certificate_type, certification_status,
@@ -156,7 +162,7 @@ async function createCertificate(req, res, next) {
       RETURNING *
     `, [scanner_id, certificate_number, certificate_type || 'renewal', certification_status || 'pending',
         last_inspection_date, inspector_name, inspector_organisation,
-        certificate_issue_date, certificate_expiry_date, is_current || false,
+        certificate_issue_date, certificate_expiry_date, isCurrent,
         application_submitted_date, application_reference, notes, req.user.id]);
 
     await logAudit(req, 'compliance:certificate_created', 'compliance_certificate', rows[0].id, req.body);
@@ -167,6 +173,14 @@ async function createCertificate(req, res, next) {
 async function updateCertificate(req, res, next) {
   try {
     const { id } = req.params;
+
+    if (req.body.is_current === true || req.body.is_current === 'true') {
+      const { rows: existing } = await db.query(`SELECT scanner_id FROM compliance_certificates WHERE id=$1`, [id]);
+      if (existing[0]) {
+        await db.query(`UPDATE compliance_certificates SET is_current=FALSE WHERE scanner_id=$1 AND id<>$2`, [existing[0].scanner_id, id]);
+      }
+    }
+
     const fields = ['certificate_number','certificate_type','certification_status',
                     'last_inspection_date','inspector_name','inspector_organisation',
                     'certificate_issue_date','certificate_expiry_date','is_current',

@@ -538,15 +538,17 @@ function CertificatesTab() {
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('');
   const [expiringFilter, setExpiringFilter] = useState('');
+  const [showAll, setShowAll] = useState(false);
   const [modal, setModal] = useState(null);
   const [uploadId, setUploadId] = useState(null);
   const [uploading, setUploading] = useState(false);
 
   const { data, isLoading } = useQuery(
-    ['compliance-certs', statusFilter, expiringFilter],
+    ['compliance-certs', statusFilter, expiringFilter, showAll],
     () => complianceApi.listCertificates({
       status: statusFilter || undefined,
       expiring_days: expiringFilter || undefined,
+      all: showAll ? 'true' : 'false',
     }).then(r => r.data)
   );
 
@@ -589,7 +591,11 @@ function CertificatesTab() {
           <option value="60">Expiring ≤ 60 days</option>
           <option value="90">Expiring ≤ 90 days</option>
         </select>
-        <button onClick={() => setModal('new')} className="btn-primary flex items-center gap-2 text-sm py-2 px-4 ml-auto">
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none ml-auto">
+          <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} className="rounded" />
+          Show history
+        </label>
+        <button onClick={() => setModal('new')} className="btn-primary flex items-center gap-2 text-sm py-2 px-4">
           <Plus size={15} /> New Certificate
         </button>
       </div>
