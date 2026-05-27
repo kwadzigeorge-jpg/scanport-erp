@@ -370,6 +370,95 @@ async function updateMaintenance(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Maintenance — Parts ──────────────────────────────────────────────────────
+async function listMaintenanceParts(req, res, next) {
+  try {
+    const { rows } = await db.query(
+      `SELECT * FROM compliance_maintenance_parts WHERE maintenance_id=$1 ORDER BY added_at`,
+      [req.params.id]
+    );
+    return res.json(rows);
+  } catch (err) { next(err); }
+}
+
+async function addMaintenancePart(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { part_id, part_number, part_description, quantity, unit_cost } = req.body;
+    if (!part_description) return res.status(400).json({ error: 'part_description is required.' });
+    const { rows } = await db.query(
+      `INSERT INTO compliance_maintenance_parts
+         (maintenance_id, part_id, part_number, part_description, quantity, unit_cost, added_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [id, part_id||null, part_number||null, part_description, quantity||1, unit_cost||null, req.user.id]
+    );
+    return res.status(201).json(rows[0]);
+  } catch (err) { next(err); }
+}
+
+async function removeMaintenancePart(req, res, next) {
+  try {
+    await db.query(
+      `DELETE FROM compliance_maintenance_parts WHERE id=$1 AND maintenance_id=$2`,
+      [req.params.partId, req.params.id]
+    );
+    return res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+// ─── Maintenance — Attachment ─────────────────────────────────────────────────
+async function uploadMaintenanceDoc(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+    const { rows } = await db.query(
+      `UPDATE compliance_maintenance SET
+         document_path=$1, document_original_name=$2,
+         document_uploaded_at=NOW(), document_uploaded_by=$3, updated_at=NOW()
+       WHERE id=$4 RETURNING *`,
+      [req.file.path, req.file.originalname, req.user.id, id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Record not found.' });
+    await logAudit(req, 'compliance:maintenance_doc_uploaded', 'compliance_maintenance', id, { file: req.file.originalname });
+    return res.json(rows[0]);
+  } catch (err) { next(err); }
+}
+
+// ─── Maintenance — Sign-off ───────────────────────────────────────────────────
+async function signOffMaintenance(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { signed_off_by, completion_notes } = req.body;
+    if (!signed_off_by) return res.status(400).json({ error: 'signed_off_by is required.' });
+    const { rows } = await db.query(
+      `UPDATE compliance_maintenance SET
+         signed_off_by=$1, signed_off_at=NOW(), completion_notes=$2,
+         status='completed', updated_at=NOW()
+       WHERE id=$3 RETURNING *`,
+      [signed_off_by, completion_notes||null, id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Record not found.' });
+    await logAudit(req, 'compliance:maintenance_signed_off', 'compliance_maintenance', id, { signed_off_by });
+    return res.json(rows[0]);
+  } catch (err) { next(err); }
+}
+
+// ─── Maintenance — Scanner history ────────────────────────────────────────────
+async function getScannerMaintenanceHistory(req, res, next) {
+  try {
+    const { scannerId } = req.params;
+    const { rows } = await db.query(
+      `SELECT m.*, s.scanner_serial, s.location
+       FROM compliance_maintenance m
+       JOIN compliance_scanners s ON s.id = m.scanner_id
+       WHERE m.scanner_id=$1
+       ORDER BY m.maintenance_date DESC`,
+      [scannerId]
+    );
+    return res.json(rows);
+  } catch (err) { next(err); }
+}
+
 // ─── Breakdowns ───────────────────────────────────────────────────────────────
 async function listBreakdowns(req, res, next) {
   try {
@@ -789,6 +878,8 @@ module.exports = {
   listCertificates, createCertificate, updateCertificate, uploadCertificateDoc,
   listSurveyMeters, createSurveyMeter, updateSurveyMeter, logCalibration,
   listMaintenance, logMaintenance, updateMaintenance,
+  listMaintenanceParts, addMaintenancePart, removeMaintenancePart,
+  uploadMaintenanceDoc, signOffMaintenance, getScannerMaintenanceHistory,
   listBreakdowns, logBreakdown, updateBreakdown,
   logRepair,
   getDashboard,

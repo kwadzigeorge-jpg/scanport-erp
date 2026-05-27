@@ -244,6 +244,12 @@ export const complianceApi = {
   listMaintenance:        (p)       => api.get('/compliance/maintenance', { params: p }),
   logMaintenance:         (d)       => api.post('/compliance/maintenance', d),
   updateMaintenance:      (id, d)   => api.put(`/compliance/maintenance/${id}`, d),
+  signOffMaintenance:     (id, d)   => api.post(`/compliance/maintenance/${id}/sign-off`, d),
+  uploadMaintenanceDoc:   (id, f)   => api.post(`/compliance/maintenance/${id}/upload`, f, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  listMaintenanceParts:   (id)      => api.get(`/compliance/maintenance/${id}/parts`),
+  addMaintenancePart:     (id, d)   => api.post(`/compliance/maintenance/${id}/parts`, d),
+  removeMaintenancePart:  (id, pid) => api.delete(`/compliance/maintenance/${id}/parts/${pid}`),
+  scannerHistory:         (scannerId) => api.get(`/compliance/maintenance/scanner/${scannerId}/history`),
 
   // Breakdowns
   listBreakdowns:         (p)       => api.get('/compliance/breakdowns', { params: p }),

@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { authenticate }      = require('../middleware/auth');
 const { requirePermission }  = require('../middleware/rbac');
 const cc = require('../controllers/complianceController');
+const upload = require('../middleware/upload');
 
 router.use(authenticate);
 
@@ -32,9 +33,15 @@ router.put('/survey-meters/:id',            requirePermission('compliance.edit')
 router.post('/survey-meters/calibrations',  requirePermission('calibration.log'),          cc.logCalibration);
 
 // ── Maintenance ───────────────────────────────────────────────────────────────
-router.get('/maintenance',                  requirePermission('maintenance.view'),         cc.listMaintenance);
-router.post('/maintenance',                 requirePermission('maintenance.log'),          cc.logMaintenance);
-router.put('/maintenance/:id',              requirePermission('maintenance.log'),          cc.updateMaintenance);
+router.get('/maintenance',                        requirePermission('maintenance.view'),  cc.listMaintenance);
+router.post('/maintenance',                       requirePermission('maintenance.log'),   cc.logMaintenance);
+router.put('/maintenance/:id',                    requirePermission('maintenance.log'),   cc.updateMaintenance);
+router.post('/maintenance/:id/sign-off',          requirePermission('maintenance.log'),   cc.signOffMaintenance);
+router.post('/maintenance/:id/upload',            requirePermission('maintenance.log'),   upload.single('file'), cc.uploadMaintenanceDoc);
+router.get('/maintenance/:id/parts',              requirePermission('maintenance.view'),  cc.listMaintenanceParts);
+router.post('/maintenance/:id/parts',             requirePermission('maintenance.log'),   cc.addMaintenancePart);
+router.delete('/maintenance/:id/parts/:partId',   requirePermission('maintenance.log'),   cc.removeMaintenancePart);
+router.get('/maintenance/scanner/:scannerId/history', requirePermission('maintenance.view'), cc.getScannerMaintenanceHistory);
 
 // ── Breakdowns ────────────────────────────────────────────────────────────────
 router.get('/breakdowns',                   requirePermission('compliance.view'),          cc.listBreakdowns);

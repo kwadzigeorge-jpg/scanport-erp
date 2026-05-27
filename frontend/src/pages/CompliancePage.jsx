@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { complianceApi } from '../services/api';
+import { complianceApi, partsApi } from '../services/api';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
@@ -851,22 +851,25 @@ function MaintenanceModal({ scanners, onClose, record }) {
   const qc = useQueryClient();
   const isEdit = !!record;
   const [form, setForm] = useState({
-    scanner_id:                 record?.scanner_id          || '',
-    maintenance_date:           record?.maintenance_date?.slice(0,10) || today,
-    maintenance_type:           record?.maintenance_type    || 'pmi_l1',
-    description:                record?.description         || '',
-    performed_by_type:          record?.performed_by_type   || 'oem_vendor',
-    performed_by_name:          record?.performed_by_name   || '',
-    technician_name:            record?.technician_name     || '',
-    downtime_start:             record?.downtime_start      ? record.downtime_start.slice(0,16) : '',
-    downtime_end:               record?.downtime_end        ? record.downtime_end.slice(0,16)   : '',
+    scanner_id:                  record?.scanner_id          || '',
+    maintenance_date:            record?.maintenance_date?.slice(0,10) || today,
+    maintenance_end_date:        record?.maintenance_end_date?.slice(0,10) || '',
+    maintenance_type:            record?.maintenance_type    || 'pmi_l1',
+    description:                 record?.description         || '',
+    performed_by_type:           record?.performed_by_type   || 'oem_vendor',
+    performed_by_name:           record?.performed_by_name   || '',
+    technician_name:             record?.technician_name     || '',
+    signed_off_by:               record?.signed_off_by       || '',
+    completion_notes:            record?.completion_notes    || '',
+    downtime_start:              record?.downtime_start      ? record.downtime_start.slice(0,16) : '',
+    downtime_end:                record?.downtime_end        ? record.downtime_end.slice(0,16)   : '',
     scanner_returned_to_service: record?.scanner_returned_to_service || false,
-    return_to_service_date:     record?.return_to_service_date?.slice(0,10) || '',
-    next_scheduled_maintenance: record?.next_scheduled_maintenance?.slice(0,10) || '',
-    cost:                       record?.cost                || '',
-    currency:                   record?.currency            || 'GHS',
-    notes:                      record?.notes               || '',
-    status:                     record?.status              || 'completed',
+    return_to_service_date:      record?.return_to_service_date?.slice(0,10) || '',
+    next_scheduled_maintenance:  record?.next_scheduled_maintenance?.slice(0,10) || '',
+    cost:                        record?.cost                || '',
+    currency:                    record?.currency            || 'GHS',
+    notes:                       record?.notes               || '',
+    status:                      record?.status              || 'completed',
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -876,6 +879,9 @@ function MaintenanceModal({ scanners, onClose, record }) {
       setForm(f => ({ ...f, performed_by_name: pmiVendor, performed_by_type: f.performed_by_type === 'internal_technician' ? 'internal_technician' : 'oem_vendor' }));
     }
   }, [form.maintenance_type]);
+
+  const isCompleting = form.status === 'completed';
+  const missingCompletion = isCompleting && (!form.maintenance_end_date || !form.signed_off_by);
 
   const mut = useMutation(
     (data) => isEdit ? complianceApi.updateMaintenance(record.id, data) : complianceApi.logMaintenance(data),
@@ -888,9 +894,19 @@ function MaintenanceModal({ scanners, onClose, record }) {
       onError: e => toast.error(e.response?.data?.error || 'Failed.'),
     }
   );
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (missingCompletion) {
+      toast.error('Please enter a completion date and sign-off name before marking as Completed.');
+      return;
+    }
+    mut.mutate({ ...form, cost: form.cost || undefined });
+  };
+
   return (
     <Modal title={isEdit ? 'Edit Maintenance Record' : 'Log Maintenance Activity'} onClose={onClose} wide>
-      <form onSubmit={e => { e.preventDefault(); mut.mutate({ ...form, cost: form.cost || undefined }); }} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Scanner" required>
             <select className={sel} value={form.scanner_id} onChange={e => set('scanner_id', e.target.value)} required>
@@ -916,9 +932,9 @@ function MaintenanceModal({ scanners, onClose, record }) {
           </Field>
           <Field label="Status">
             <select className={sel} value={form.status} onChange={e => set('status', e.target.value)}>
-              <option value="completed">Completed</option>
               <option value="scheduled">Scheduled</option>
               <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
           </Field>
@@ -931,12 +947,7 @@ function MaintenanceModal({ scanners, onClose, record }) {
           </Field>
           <Field label="Vendor / Team Name" required>
             {PMI_VENDOR_MAP[form.maintenance_type] ? (
-              <input
-                className={clsx(inp, 'bg-gray-50 cursor-not-allowed')}
-                value={form.performed_by_name}
-                readOnly
-                title="Auto-filled based on PMI level"
-              />
+              <input className={clsx(inp, 'bg-gray-50 cursor-not-allowed')} value={form.performed_by_name} readOnly title="Auto-filled based on PMI level" />
             ) : (
               <select className={sel} value={form.performed_by_name} onChange={e => set('performed_by_name', e.target.value)} required>
                 <option value="">— Select vendor —</option>
@@ -963,12 +974,36 @@ function MaintenanceModal({ scanners, onClose, record }) {
             <input type="date" className={inp} value={form.return_to_service_date} onChange={e => set('return_to_service_date', e.target.value)} />
           </Field>
         </div>
+
         <Field label="Description" required>
           <textarea className={inp} rows={3} value={form.description} onChange={e => set('description', e.target.value)} required />
         </Field>
         <Field label="Notes">
           <textarea className={inp} rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} />
         </Field>
+
+        {/* Completion sign-off — shown when status = completed */}
+        {isCompleting && (
+          <div className={clsx('rounded-xl border p-4 space-y-3', missingCompletion ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50')}>
+            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Completion Sign-off</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Actual Completion Date" required>
+                <input type="date" className={clsx(inp, !form.maintenance_end_date && 'border-amber-400')}
+                  value={form.maintenance_end_date} onChange={e => set('maintenance_end_date', e.target.value)} />
+              </Field>
+              <Field label="Signed Off By" required>
+                <input className={clsx(inp, !form.signed_off_by && 'border-amber-400')}
+                  placeholder="Full name of approver"
+                  value={form.signed_off_by} onChange={e => set('signed_off_by', e.target.value)} />
+              </Field>
+            </div>
+            <Field label="Completion Notes">
+              <textarea className={inp} rows={2} placeholder="Summary of work done, parts replaced, outcome…"
+                value={form.completion_notes} onChange={e => set('completion_notes', e.target.value)} />
+            </Field>
+          </div>
+        )}
+
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" onClick={onClose} className="btn-secondary text-sm py-2 px-4">Cancel</button>
           <button type="submit" disabled={mut.isLoading} className="btn-primary text-sm py-2 px-4">
@@ -1000,9 +1035,159 @@ const MAINT_STATUS_LABEL = {
   scheduled: 'Scheduled', cancelled: 'Cancelled',
 };
 
+function MaintenancePartsPanel({ recordId }) {
+  const qc = useQueryClient();
+  const [partSearch, setPartSearch] = useState('');
+  const [newPart, setNewPart] = useState({ part_description: '', quantity: 1, unit_cost: '' });
+
+  const { data: parts = [], isLoading } = useQuery(
+    ['maintenance-parts', recordId],
+    () => complianceApi.listMaintenanceParts(recordId).then(r => r.data),
+    { enabled: !!recordId }
+  );
+  const { data: catalogue } = useQuery(
+    ['parts-search', partSearch],
+    () => partsApi.list({ search: partSearch, limit: 10 }).then(r => r.data?.rows || []),
+    { enabled: partSearch.length >= 2 }
+  );
+
+  const addMut = useMutation(
+    (d) => complianceApi.addMaintenancePart(recordId, d),
+    { onSuccess: () => { qc.invalidateQueries(['maintenance-parts', recordId]); setNewPart({ part_description: '', quantity: 1, unit_cost: '' }); setPartSearch(''); }, onError: e => toast.error(e.response?.data?.error || 'Failed.') }
+  );
+  const removeMut = useMutation(
+    (pid) => complianceApi.removeMaintenancePart(recordId, pid),
+    { onSuccess: () => qc.invalidateQueries(['maintenance-parts', recordId]) }
+  );
+
+  const selectCataloguePart = (p) => {
+    setNewPart(f => ({ ...f, part_description: p.description, part_number: p.part_number, part_id: p.id }));
+    setPartSearch('');
+  };
+
+  const totalCost = parts.reduce((s, p) => s + (parseFloat(p.total_cost) || 0), 0);
+
+  return (
+    <div className="mt-3 border border-gray-200 rounded-lg overflow-hidden">
+      <div className="bg-gray-50 px-3 py-2 flex items-center justify-between border-b border-gray-200">
+        <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Parts / Materials Used</span>
+        {totalCost > 0 && <span className="text-xs text-gray-500">Total: <span className="font-semibold text-gray-700">GHS {totalCost.toLocaleString()}</span></span>}
+      </div>
+      {isLoading ? <p className="text-xs text-gray-400 px-3 py-2">Loading…</p> : (
+        <>
+          {parts.length > 0 && (
+            <table className="w-full text-xs">
+              <tbody>
+                {parts.map(p => (
+                  <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="px-3 py-1.5 font-mono text-gray-500">{p.part_number || '—'}</td>
+                    <td className="px-3 py-1.5 text-gray-700 flex-1">{p.part_description}</td>
+                    <td className="px-3 py-1.5 text-gray-500">×{p.quantity}</td>
+                    <td className="px-3 py-1.5 text-gray-600">{p.unit_cost ? `GHS ${Number(p.unit_cost).toLocaleString()}` : '—'}</td>
+                    <td className="px-3 py-1.5 font-medium text-gray-700">{p.total_cost ? `GHS ${Number(p.total_cost).toLocaleString()}` : '—'}</td>
+                    <td className="px-3 py-1.5">
+                      <button onClick={() => removeMut.mutate(p.id)} className="text-red-400 hover:text-red-600"><X size={12} /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="px-3 py-2 space-y-2 bg-white">
+            <div className="relative">
+              <input className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                placeholder="Search parts catalogue…" value={partSearch} onChange={e => setPartSearch(e.target.value)} />
+              {catalogue?.length > 0 && (
+                <div className="absolute z-10 top-full left-0 right-0 bg-white border border-gray-200 rounded shadow-md max-h-36 overflow-y-auto">
+                  {catalogue.map(p => (
+                    <button key={p.id} onClick={() => selectCataloguePart(p)}
+                      className="w-full text-left px-2 py-1.5 text-xs hover:bg-blue-50 flex gap-2">
+                      <span className="font-mono text-gray-400">{p.part_number}</span>
+                      <span className="text-gray-700">{p.description}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <input className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                placeholder="Part description *" value={newPart.part_description}
+                onChange={e => setNewPart(f => ({ ...f, part_description: e.target.value }))} />
+              <input type="number" min={1} className="w-16 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                placeholder="Qty" value={newPart.quantity}
+                onChange={e => setNewPart(f => ({ ...f, quantity: e.target.value }))} />
+              <input type="number" min={0} step="0.01" className="w-24 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                placeholder="Unit cost" value={newPart.unit_cost}
+                onChange={e => setNewPart(f => ({ ...f, unit_cost: e.target.value }))} />
+              <button onClick={() => addMut.mutate(newPart)} disabled={!newPart.part_description || addMut.isLoading}
+                className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-40 shrink-0">
+                Add
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ScannerHistoryModal({ scanner, onClose }) {
+  const { data: rows = [], isLoading } = useQuery(
+    ['scanner-history', scanner.id],
+    () => complianceApi.scannerHistory(scanner.id).then(r => r.data),
+  );
+
+  return (
+    <Modal title={`Maintenance History — ${scanner.scanner_serial}`} onClose={onClose} wide>
+      {isLoading ? <Spinner /> : (
+        <div className="space-y-2">
+          {!rows.length ? <EmptyState message="No maintenance history for this scanner." /> : rows.map(r => (
+            <div key={r.id} className="flex gap-4 items-start border-l-2 border-blue-200 pl-4 py-2 hover:border-blue-400 transition-colors">
+              <div className="shrink-0 w-24 text-xs text-gray-500">{fmtDate(r.maintenance_date)}</div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', MAINT_TYPE_STYLE[r.maintenance_type] || 'bg-gray-100 text-gray-500')}>
+                    {MAINT_TYPE_LABELS[r.maintenance_type] || r.maintenance_type?.replace(/_/g,' ')}
+                  </span>
+                  <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', MAINT_STATUS_STYLE[r.status] || 'bg-gray-100 text-gray-500')}>
+                    {MAINT_STATUS_LABEL[r.status] || r.status}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-700 mt-1">{r.description}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{r.performed_by_name}{r.technician_name ? ` · ${r.technician_name}` : ''}{r.downtime_hours ? ` · ${r.downtime_hours}h downtime` : ''}{r.cost ? ` · GHS ${Number(r.cost).toLocaleString()}` : ''}</p>
+                {r.completion_notes && <p className="text-xs text-green-700 mt-0.5 italic">"{r.completion_notes}"</p>}
+                {r.signed_off_by && <p className="text-xs text-gray-400 mt-0.5">Signed off by {r.signed_off_by}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function MaintenanceRow({ r, onEdit }) {
   const [expanded, setExpanded] = useState(false);
-  const isOverdue = r.next_scheduled_maintenance && new Date(r.next_scheduled_maintenance) < new Date() && r.status !== 'cancelled';
+  const [historyScanner, setHistoryScanner] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+  const qc = useQueryClient();
+
+  const isOverdue = r.next_scheduled_maintenance && new Date(r.next_scheduled_maintenance) < new Date() && r.status !== 'cancelled' && r.status !== 'completed';
+  const isSignedOff = !!r.signed_off_by;
+
+  const handleUpload = async (file) => {
+    if (!file) return;
+    setUploading(true);
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      await complianceApi.uploadMaintenanceDoc(r.id, fd);
+      toast.success('Document uploaded.');
+      qc.invalidateQueries('compliance-maintenance');
+    } catch (e) { toast.error(e.response?.data?.error || 'Upload failed.'); }
+    finally { setUploading(false); }
+  };
 
   return (
     <>
@@ -1021,41 +1206,70 @@ function MaintenanceRow({ r, onEdit }) {
         <td className="px-4 py-2.5 text-gray-600">{r.downtime_hours ? `${r.downtime_hours}h` : '—'}</td>
         <td className="px-4 py-2.5 text-gray-600">{r.cost ? Number(r.cost).toLocaleString() : '—'}</td>
         <td className="px-4 py-2.5">
-          <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', MAINT_STATUS_STYLE[r.status] || 'bg-gray-100 text-gray-500')}>
-            {MAINT_STATUS_LABEL[r.status] || r.status}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', MAINT_STATUS_STYLE[r.status] || 'bg-gray-100 text-gray-500')}>
+              {MAINT_STATUS_LABEL[r.status] || r.status}
+            </span>
+            {isSignedOff && <CheckCircle size={12} className="text-green-500 shrink-0" title={`Signed off by ${r.signed_off_by}`} />}
+          </div>
         </td>
         <td className={clsx('px-4 py-2.5 whitespace-nowrap text-sm', isOverdue ? 'text-red-600 font-medium' : 'text-gray-600')}>
           {r.next_scheduled_maintenance ? fmtDate(r.next_scheduled_maintenance) : '—'}
           {isOverdue && <span className="ml-1 text-xs text-red-500">(overdue)</span>}
         </td>
         <td className="px-4 py-2.5" onClick={e => e.stopPropagation()}>
-          <button
-            onClick={() => onEdit(r)}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-            title="Edit record"
-          >
+          <button onClick={() => onEdit(r)} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Edit record">
             <Pencil size={14} />
           </button>
         </td>
       </tr>
       {expanded && (
-        <tr className="bg-blue-50/20">
-          <td colSpan={9} className="px-6 py-3 border-b border-blue-100">
-            <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm">
+        <tr className="bg-slate-50/60">
+          <td colSpan={9} className="px-6 py-4 border-b border-gray-100">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm mb-3">
               <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Description</span><span className="text-gray-700">{r.description || '—'}</span></div>
               <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Technician</span><span className="text-gray-700">{r.technician_name || '—'}</span></div>
-              <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Work Order</span><span className="text-gray-700 font-mono text-xs">{r.work_order_id || '—'}</span></div>
               <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Performed By</span><span className="text-gray-700 capitalize">{r.performed_by_type?.replace(/_/g,' ') || '—'}</span></div>
+              <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Completed</span><span className="text-gray-700">{r.maintenance_end_date ? fmtDate(r.maintenance_end_date) : '—'}</span></div>
               {(r.downtime_start || r.downtime_end) && (
                 <div className="col-span-2"><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Downtime Window</span><span className="text-gray-700">{r.downtime_start ? new Date(r.downtime_start).toLocaleString() : '—'} → {r.downtime_end ? new Date(r.downtime_end).toLocaleString() : '—'}</span></div>
               )}
+              {r.completion_notes && <div className="col-span-2"><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Completion Notes</span><span className="text-gray-700">{r.completion_notes}</span></div>}
+              {r.signed_off_by && <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Signed Off By</span><span className="text-gray-700">{r.signed_off_by} {r.signed_off_at ? `(${new Date(r.signed_off_at).toLocaleDateString()})` : ''}</span></div>}
               {r.notes && <div className="col-span-2"><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Notes</span><span className="text-gray-700">{r.notes}</span></div>}
-              <div><span className="text-gray-400 text-xs uppercase font-semibold mr-2">Logged</span><span className="text-gray-500 text-xs">{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</span></div>
+            </div>
+
+            {/* Parts panel */}
+            <MaintenancePartsPanel recordId={r.id} />
+
+            {/* Footer actions */}
+            <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100">
+              {/* Document */}
+              {r.document_original_name ? (
+                <span className="flex items-center gap-1.5 text-xs text-blue-600">
+                  <FileText size={13} /> {r.document_original_name}
+                </span>
+              ) : (
+                <>
+                  <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xlsx" className="hidden"
+                    onChange={e => handleUpload(e.target.files[0])} />
+                  <button onClick={() => fileRef.current?.click()} disabled={uploading}
+                    className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 transition-colors">
+                    <Upload size={13} /> {uploading ? 'Uploading…' : 'Attach service report'}
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => setHistoryScanner({ id: r.scanner_id, scanner_serial: r.scanner_serial })}
+                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-blue-600 transition-colors ml-auto"
+              >
+                <Calendar size={13} /> View scanner history
+              </button>
             </div>
           </td>
         </tr>
       )}
+      {historyScanner && <ScannerHistoryModal scanner={historyScanner} onClose={() => setHistoryScanner(null)} />}
     </>
   );
 }
