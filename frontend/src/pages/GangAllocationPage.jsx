@@ -128,19 +128,34 @@ function NewRequestModal({ onClose }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
     agent_name: '', agent_phone: '', agency: '',
-    bay_number: '', container_number: '', cargo_type: '',
+    bay_number: '', container_number: '', container_number_2: '', cargo_type: '',
     priority: 'normal', notes: '',
   });
+  const [dualContainer, setDualContainer] = useState(false);
   const set = (k,v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleToggleDual = () => {
+    setDualContainer(d => {
+      if (d) set('container_number_2', '');
+      return !d;
+    });
+  };
 
   const mut = useMutation(gangApi.createRequest, {
     onSuccess: () => { toast.success('Request logged successfully.'); qc.invalidateQueries('gang-requests'); qc.invalidateQueries('gang-dashboard'); onClose(); },
     onError: e => toast.error(e.response?.data?.error || 'Failed to log request.'),
   });
 
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const payload = { ...form };
+    if (!dualContainer) delete payload.container_number_2;
+    mut.mutate(payload);
+  };
+
   return (
     <Modal title="Log Agent Request" onClose={onClose} wide>
-      <form onSubmit={e => { e.preventDefault(); mut.mutate(form); }} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Agent Name" required>
             <input className={inp} value={form.agent_name} onChange={e => set('agent_name', e.target.value)} required />
@@ -149,7 +164,7 @@ function NewRequestModal({ onClose }) {
             <input className={inp} value={form.agent_phone} onChange={e => set('agent_phone', e.target.value)} />
           </Field>
           <Field label="Agency / Company" required>
-            <input className={inp} value={form.agency} onChange={e => set('agency', e.target.value)} />
+            <input className={inp} value={form.agency} onChange={e => set('agency', e.target.value)} required />
           </Field>
           <Field label="Priority">
             <select className={sel} value={form.priority} onChange={e => set('priority', e.target.value)}>
@@ -160,13 +175,30 @@ function NewRequestModal({ onClose }) {
           <Field label="Bay Number" required>
             <input className={inp} value={form.bay_number} onChange={e => set('bay_number', e.target.value)} required />
           </Field>
-          <Field label="Container Number" required hint="Format: 4 letters + 7 digits (e.g. MSCU1234567)">
+          <Field label="Container 1" required hint="4 letters + 7 digits (e.g. MSCU1234567)">
             <input className={inp} value={form.container_number} onChange={e => set('container_number', e.target.value.toUpperCase())} required placeholder="MSCU1234567" />
           </Field>
           <Field label="Cargo Type">
             <input className={inp} value={form.cargo_type} onChange={e => set('cargo_type', e.target.value)} placeholder="e.g. Electronics, Vehicles…" />
           </Field>
+          <div className="flex items-end pb-0.5">
+            <button type="button" onClick={handleToggleDual}
+              className={clsx('w-full flex items-center justify-center gap-2 text-xs font-medium border rounded-lg px-3 py-2 transition-colors',
+                dualContainer
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'border-dashed border-gray-300 text-gray-500 hover:border-blue-300 hover:text-blue-600')}>
+              {dualContainer ? <><X size={12}/> Remove 2nd container</> : <><Plus size={12}/> Add 2nd container (2×20ft truck)</>}
+            </button>
+          </div>
         </div>
+
+        {dualContainer && (
+          <Field label="Container 2" required hint="4 letters + 7 digits — must differ from Container 1">
+            <input className={inp} value={form.container_number_2} onChange={e => set('container_number_2', e.target.value.toUpperCase())}
+              required={dualContainer} placeholder="MSCU1234568" />
+          </Field>
+        )}
+
         <Field label="Notes">
           <textarea className={inp} rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} />
         </Field>
@@ -240,7 +272,11 @@ function AllocateModal({ request, onClose }) {
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
           <div className="grid grid-cols-3 gap-3 text-sm">
             <div><span className="text-gray-400 text-xs block">Bay</span><span className="font-semibold text-gray-800">{request.bay_number}</span></div>
-            <div><span className="text-gray-400 text-xs block">Container</span><span className="font-mono font-semibold text-gray-800">{request.container_number}</span></div>
+            <div>
+              <span className="text-gray-400 text-xs block">Container{request.container_number_2 ? 's (2×20ft)' : ''}</span>
+              <span className="font-mono font-semibold text-gray-800 block">{request.container_number}</span>
+              {request.container_number_2 && <span className="font-mono font-semibold text-gray-600 text-xs block">{request.container_number_2}</span>}
+            </div>
             <div><span className="text-gray-400 text-xs block">Priority</span><Badge map={PRIORITY_STYLE} value={request.priority} /></div>
             <div><span className="text-gray-400 text-xs block">Agent</span><span className="text-gray-700">{request.agent_name}</span></div>
             <div><span className="text-gray-400 text-xs block">Agency</span><span className="text-gray-700">{request.agency || '—'}</span></div>
@@ -478,7 +514,7 @@ function CompleteJobModal({ allocation, onClose }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="bg-green-50 border border-green-200 rounded-xl p-3">
           <p className="text-sm font-semibold text-gray-700">{allocation.gang_code} — Bay {allocation.bay_number}</p>
-          <p className="text-xs text-gray-500 font-mono">{allocation.container_number}</p>
+          <p className="text-xs text-gray-500 font-mono">{allocation.container_number}{allocation.container_number_2 ? ` · ${allocation.container_number_2}` : ''}</p>
           <p className="text-xs text-gray-500 mt-1">Work started: {fmtTime(allocation.work_started_at)} · Elapsed: {elapsed(allocation.work_started_at)}</p>
         </div>
         <Field label="Supervisor Comments">
@@ -560,7 +596,10 @@ function DashboardTab() {
                   <tr key={j.id} className={clsx('hover:bg-gray-50', j.overdue_minutes > 0 && 'bg-red-50')}>
                     <td className="px-4 py-2.5 font-semibold">{j.gang_code}</td>
                     <td className="px-4 py-2.5">{j.bay_number}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{j.container_number}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="font-mono text-xs block">{j.container_number}</span>
+                      {j.container_number_2 && <span className="font-mono text-xs text-gray-400 block">{j.container_number_2}</span>}
+                    </td>
                     <td className="px-4 py-2.5"><Badge map={PRIORITY_STYLE} value={j.priority} /></td>
                     <td className="px-4 py-2.5"><Badge map={ALLOC_STATUS} value={j.status} label={ALLOC_STATUS_LABEL[j.status]} /></td>
                     <td className="px-4 py-2.5 text-gray-600">{Math.round(j.elapsed_minutes)}m</td>
@@ -597,7 +636,10 @@ function DashboardTab() {
                     <td className="px-4 py-2.5">{r.agent_name}</td>
                     <td className="px-4 py-2.5 text-gray-600">{r.agency || '—'}</td>
                     <td className="px-4 py-2.5 font-semibold">{r.bay_number}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{r.container_number}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="font-mono text-xs block">{r.container_number}</span>
+                      {r.container_number_2 && <span className="font-mono text-xs text-gray-400 block">{r.container_number_2}</span>}
+                    </td>
                     <td className="px-4 py-2.5"><Badge map={PRIORITY_STYLE} value={r.priority} /></td>
                     <td className="px-4 py-2.5 text-gray-600">{elapsed(r.created_at)}</td>
                   </tr>
@@ -693,7 +735,11 @@ function RequestsTab() {
                     <p className="text-xs text-gray-500">{r.agency || '—'}</p>
                   </td>
                   <td className="px-4 py-2.5 font-semibold">{r.bay_number}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs font-semibold">{r.container_number}</td>
+                  <td className="px-4 py-2.5">
+                    <span className="font-mono text-xs font-semibold block">{r.container_number}</span>
+                    {r.container_number_2 && <span className="font-mono text-xs text-gray-500 block">{r.container_number_2}</span>}
+                    {r.is_dual_container && <span className="text-xs text-blue-500">2×20ft</span>}
+                  </td>
                   <td className="px-4 py-2.5 text-gray-600 text-xs">{r.cargo_type || '—'}</td>
                   <td className="px-4 py-2.5"><Badge map={PRIORITY_STYLE} value={r.priority} /></td>
                   <td className="px-4 py-2.5"><Badge map={{ pending:'bg-yellow-100 text-yellow-700', allocated:'bg-purple-100 text-purple-700', in_progress:'bg-blue-100 text-blue-700', completed:'bg-green-100 text-green-700', cancelled:'bg-gray-100 text-gray-500' }} value={r.status} /></td>
@@ -869,7 +915,11 @@ function ActiveJobsTab() {
                   </div>
                   <div className="grid grid-cols-3 gap-3 text-sm mb-3">
                     <div><span className="text-gray-400 text-xs block">Bay</span><span className="font-semibold">{a.bay_number}</span></div>
-                    <div><span className="text-gray-400 text-xs block">Container</span><span className="font-mono text-xs font-semibold">{a.container_number}</span></div>
+                    <div>
+                      <span className="text-gray-400 text-xs block">Container{a.container_number_2 ? 's (2×20ft)' : ''}</span>
+                      <span className="font-mono text-xs font-semibold block">{a.container_number}</span>
+                      {a.container_number_2 && <span className="font-mono text-xs text-gray-500 block">{a.container_number_2}</span>}
+                    </div>
                     <div><span className="text-gray-400 text-xs block">Agent</span><span>{a.agent_name}</span></div>
                     <div><span className="text-gray-400 text-xs block">Allocated</span><span className="text-xs">{fmtTime(a.allocated_at)}</span></div>
                     <div><span className="text-gray-400 text-xs block">Arrived</span><span className="text-xs">{a.gang_arrived_at ? fmtTime(a.gang_arrived_at) : '—'}</span></div>
@@ -1102,7 +1152,10 @@ function AuditTab() {
                   <td className="px-4 py-2.5 font-mono text-xs font-semibold">{r.request_ref}</td>
                   <td className="px-4 py-2.5 font-semibold">{r.gang_code}</td>
                   <td className="px-4 py-2.5">{r.bay_number}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{r.container_number}</td>
+                  <td className="px-4 py-2.5">
+                    <span className="font-mono text-xs block">{r.container_number}</span>
+                    {r.container_number_2 && <span className="font-mono text-xs text-gray-400 block">{r.container_number_2}</span>}
+                  </td>
                   <td className="px-4 py-2.5"><Badge map={PRIORITY_STYLE} value={r.priority} /></td>
                   <td className="px-4 py-2.5 text-gray-600">{r.allocated_by_name}</td>
                   <td className="px-4 py-2.5">

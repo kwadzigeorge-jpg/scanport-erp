@@ -284,32 +284,51 @@ async function listRequests(req, res, next) {
 
 async function createRequest(req, res, next) {
   try {
-    const { agent_name, agent_phone, agency, bay_number, container_number, cargo_type, priority, notes } = req.body;
+    const { agent_name, agent_phone, agency, bay_number, container_number, container_number_2, cargo_type, priority, notes } = req.body;
     if (!agent_name || !bay_number || !container_number) {
       return res.status(400).json({ error: 'agent_name, bay_number, container_number are required.' });
     }
-    const cnum = container_number.toUpperCase().replace(/\s/g,'');
     const cnumRegex = /^[A-Z]{4}\d{7}$/;
+    const cnum = container_number.toUpperCase().replace(/\s/g,'');
     if (!cnumRegex.test(cnum)) {
       return res.status(400).json({ error: 'Invalid container number format. Expected: 4 letters + 7 digits (e.g. MSCU1234567).' });
     }
-    // Check for duplicate active request
+
+    let cnum2 = null;
+    if (container_number_2 && container_number_2.trim()) {
+      cnum2 = container_number_2.toUpperCase().replace(/\s/g,'');
+      if (!cnumRegex.test(cnum2)) {
+        return res.status(400).json({ error: 'Invalid second container number format. Expected: 4 letters + 7 digits.' });
+      }
+      if (cnum2 === cnum) {
+        return res.status(400).json({ error: 'Second container number must differ from the first.' });
+      }
+      // Check duplicate on second container
+      const { rows: dup2 } = await db.query(
+        `SELECT id FROM gang_requests WHERE (container_number=$1 OR container_number_2=$1) AND status IN ('pending','allocated','in_progress')`,
+        [cnum2]
+      );
+      if (dup2.length) return res.status(409).json({ error: 'An active request for the second container already exists.' });
+    }
+
+    // Check for duplicate active request on first container
     const { rows: dup } = await db.query(
-      `SELECT id FROM gang_requests WHERE container_number=$1 AND status IN ('pending','allocated','in_progress')`,
+      `SELECT id FROM gang_requests WHERE (container_number=$1 OR container_number_2=$1) AND status IN ('pending','allocated','in_progress')`,
       [cnum]
     );
     if (dup.length) return res.status(409).json({ error: 'An active request for this container already exists.' });
 
     const ref = genRef();
+    const isDual = !!cnum2;
     const { rows } = await db.query(`
       INSERT INTO gang_requests
         (request_ref, agent_name, agent_phone, agency, bay_number, container_number,
-         cargo_type, priority, notes, received_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *
+         container_number_2, is_dual_container, cargo_type, priority, notes, received_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *
     `, [ref, agent_name, agent_phone||null, agency||null, bay_number, cnum,
-        cargo_type||null, priority||'normal', notes||null, req.user.id]);
+        cnum2, isDual, cargo_type||null, priority||'normal', notes||null, req.user.id]);
 
-    await logAudit(req, 'gang:request_created', 'gang_requests', rows[0].id, { ref, container_number: cnum });
+    await logAudit(req, 'gang:request_created', 'gang_requests', rows[0].id, { ref, container_number: cnum, container_number_2: cnum2 });
     return res.status(201).json(rows[0]);
   } catch (err) { next(err); }
 }
