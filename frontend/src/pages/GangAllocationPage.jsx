@@ -398,7 +398,7 @@ function MemberModal({ gangId, member, onClose }) {
   const qc = useQueryClient();
   const isEdit = !!member;
   const [form, setForm] = useState({
-    role: member?.role || 'docker', full_name: member?.full_name || '',
+    role: member?.role || 'head_man', full_name: member?.full_name || '',
     employee_id: member?.employee_id || '', phone: member?.phone || '',
     joined_date: member?.joined_date?.slice(0,10) || '',
   });
@@ -417,6 +417,7 @@ function MemberModal({ gangId, member, onClose }) {
       <form onSubmit={e => { e.preventDefault(); mut.mutate(form); }} className="space-y-4">
         <Field label="Role" required>
           <select className={sel} value={form.role} onChange={e => set('role', e.target.value)} disabled={isEdit}>
+            <option value="head_man">Head Man (Gang Supervisor)</option>
             <option value="docker">Docker</option>
             <option value="cutter">Cutter</option>
           </select>
@@ -806,7 +807,11 @@ function GangsTab() {
                     {g.specialization && <span className="text-xs text-gray-500">{g.specialization}</span>}
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {g.cutter_count} cutter · {g.docker_count}/4 dockers · {g.jobs_today} job(s) today · {g.total_jobs_completed} total
+                    {g.headman_count}/1 head man · {g.docker_count}/3 dockers · {g.cutter_count}/1 cutter
+                    <span className="mx-1.5 text-gray-300">·</span>
+                    {g.total_members || 0}/5 members
+                    <span className="mx-1.5 text-gray-300">·</span>
+                    {g.jobs_today} job(s) today
                   </p>
                 </div>
                 <div className="text-right mr-4">
@@ -831,22 +836,35 @@ function GangsTab() {
                     <p className="text-xs text-gray-400">No members yet.</p>
                   ) : (
                     <div className="grid grid-cols-2 gap-2">
-                      {members.filter(m => m.is_active).map(m => (
-                        <div key={m.id} className={clsx('flex items-center gap-3 rounded-lg p-2.5 border', m.role === 'cutter' ? 'bg-orange-50 border-orange-100' : 'bg-gray-50 border-gray-100')}>
-                          <div className={clsx('w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0', m.role === 'cutter' ? 'bg-orange-500' : 'bg-blue-600')}>
-                            {m.full_name[0]}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-800 truncate">{m.full_name}</p>
-                            <p className="text-xs text-gray-500">{m.employee_id} · {m.role === 'cutter' ? '✂ Cutter' : '🪝 Docker'}</p>
-                            {m.phone && <p className="text-xs text-gray-400 flex items-center gap-1"><Phone size={10} />{m.phone}</p>}
-                          </div>
-                          <div className="flex gap-1">
-                            <button onClick={() => setMemberModal({ gangId: g.id, member: m })} className="p-1 text-gray-400 hover:text-blue-600 rounded"><Pencil size={12} /></button>
-                            <button onClick={() => removeMut.mutate({ gid: g.id, mid: m.id })} className="p-1 text-gray-400 hover:text-red-500 rounded"><X size={12} /></button>
-                          </div>
-                        </div>
-                      ))}
+                      {/* Head Man first, then dockers, then cutter */}
+                      {['head_man','docker','cutter'].flatMap(role =>
+                        members.filter(m => m.is_active && m.role === role).map(m => {
+                          const isHeadMan = m.role === 'head_man';
+                          const isCutter  = m.role === 'cutter';
+                          const cardClass = isHeadMan ? 'bg-amber-50 border-amber-200' : isCutter ? 'bg-orange-50 border-orange-100' : 'bg-gray-50 border-gray-100';
+                          const avatarClass = isHeadMan ? 'bg-amber-500' : isCutter ? 'bg-orange-500' : 'bg-blue-600';
+                          const roleLabel  = isHeadMan ? '⭐ Head Man' : isCutter ? '✂ Cutter' : '🪝 Docker';
+                          return (
+                            <div key={m.id} className={clsx('flex items-center gap-3 rounded-lg p-2.5 border', cardClass)}>
+                              <div className={clsx('w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0', avatarClass)}>
+                                {m.full_name[0]}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-sm font-medium text-gray-800 truncate">{m.full_name}</p>
+                                  {isHeadMan && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-semibold shrink-0">Gang Leader</span>}
+                                </div>
+                                <p className="text-xs text-gray-500">{m.employee_id} · {roleLabel}</p>
+                                {m.phone && <p className="text-xs text-gray-400 flex items-center gap-1"><Phone size={10} />{m.phone}</p>}
+                              </div>
+                              <div className="flex gap-1">
+                                <button onClick={() => setMemberModal({ gangId: g.id, member: m })} className="p-1 text-gray-400 hover:text-blue-600 rounded"><Pencil size={12} /></button>
+                                <button onClick={() => removeMut.mutate({ gid: g.id, mid: m.id })} className="p-1 text-gray-400 hover:text-red-500 rounded"><X size={12} /></button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
                   )}
                 </div>
