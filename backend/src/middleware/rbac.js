@@ -7,6 +7,8 @@ function requirePermission(...permissions) {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required.' });
     }
+    // Admin role bypasses all permission checks
+    if (req.user.role === 'admin') return next();
     const has = permissions.every(p => req.user.permissions.includes(p));
     if (!has) {
       return res.status(403).json({
