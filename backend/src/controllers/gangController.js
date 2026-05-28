@@ -117,7 +117,6 @@ async function listGangs(req, res, next) {
       SELECT g.*,
         (SELECT COUNT(*) FROM gang_members WHERE gang_id = g.id AND is_active = TRUE AND role = 'head_man') AS headman_count,
         (SELECT COUNT(*) FROM gang_members WHERE gang_id = g.id AND is_active = TRUE AND role = 'docker') AS docker_count,
-        (SELECT COUNT(*) FROM gang_members WHERE gang_id = g.id AND is_active = TRUE AND role = 'cutter') AS cutter_count,
         (SELECT COUNT(*) FROM gang_members WHERE gang_id = g.id AND is_active = TRUE) AS total_members,
         (SELECT COUNT(*) FROM gang_allocations WHERE gang_id = g.id AND DATE(allocated_at) = CURRENT_DATE) AS jobs_today,
         (SELECT MAX(work_completed_at) FROM gang_allocations WHERE gang_id = g.id AND status = 'completed') AS last_job_completed
@@ -207,20 +206,14 @@ async function addMember(req, res, next) {
     const { role, full_name, employee_id, phone, joined_date } = req.body;
     if (!role || !full_name || !employee_id) return res.status(400).json({ error: 'role, full_name, employee_id required.' });
 
-    const validRoles = ['head_man', 'docker', 'cutter'];
-    if (!validRoles.includes(role)) return res.status(400).json({ error: 'role must be head_man, docker, or cutter.' });
+    const validRoles = ['head_man', 'docker'];
+    if (!validRoles.includes(role)) return res.status(400).json({ error: 'role must be head_man or docker.' });
 
     const { rows: existing } = await db.query(
       `SELECT COUNT(*) FROM gang_members WHERE gang_id=$1 AND role='docker' AND is_active=TRUE`, [gang_id]
     );
-    if (role === 'docker' && parseInt(existing[0].count) >= 3) {
-      return res.status(400).json({ error: 'A gang can have at most 3 dockers.' });
-    }
-    const { rows: cutter } = await db.query(
-      `SELECT COUNT(*) FROM gang_members WHERE gang_id=$1 AND role='cutter' AND is_active=TRUE`, [gang_id]
-    );
-    if (role === 'cutter' && parseInt(cutter[0].count) >= 1) {
-      return res.status(400).json({ error: 'A gang can have only 1 cutter.' });
+    if (role === 'docker' && parseInt(existing[0].count) >= 4) {
+      return res.status(400).json({ error: 'A gang can have at most 4 dockers.' });
     }
     const { rows: headman } = await db.query(
       `SELECT COUNT(*) FROM gang_members WHERE gang_id=$1 AND role='head_man' AND is_active=TRUE`, [gang_id]

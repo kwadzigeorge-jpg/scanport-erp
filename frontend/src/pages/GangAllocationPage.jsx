@@ -419,7 +419,6 @@ function MemberModal({ gangId, member, onClose }) {
           <select className={sel} value={form.role} onChange={e => set('role', e.target.value)} disabled={isEdit}>
             <option value="head_man">Head Man (Gang Supervisor)</option>
             <option value="docker">Docker</option>
-            <option value="cutter">Cutter</option>
           </select>
         </Field>
         <Field label="Full Name" required>
@@ -807,7 +806,7 @@ function GangsTab() {
                     {g.specialization && <span className="text-xs text-gray-500">{g.specialization}</span>}
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {g.headman_count}/1 head man · {g.docker_count}/3 dockers · {g.cutter_count}/1 cutter
+                    {g.headman_count}/1 head man · {g.docker_count}/4 dockers
                     <span className="mx-1.5 text-gray-300">·</span>
                     {g.total_members || 0}/5 members
                     <span className="mx-1.5 text-gray-300">·</span>
@@ -836,14 +835,13 @@ function GangsTab() {
                     <p className="text-xs text-gray-400">No members yet.</p>
                   ) : (
                     <div className="grid grid-cols-2 gap-2">
-                      {/* Head Man first, then dockers, then cutter */}
-                      {['head_man','docker','cutter'].flatMap(role =>
+                      {/* Head Man first, then dockers */}
+                      {['head_man','docker'].flatMap(role =>
                         members.filter(m => m.is_active && m.role === role).map(m => {
                           const isHeadMan = m.role === 'head_man';
-                          const isCutter  = m.role === 'cutter';
-                          const cardClass = isHeadMan ? 'bg-amber-50 border-amber-200' : isCutter ? 'bg-orange-50 border-orange-100' : 'bg-gray-50 border-gray-100';
-                          const avatarClass = isHeadMan ? 'bg-amber-500' : isCutter ? 'bg-orange-500' : 'bg-blue-600';
-                          const roleLabel  = isHeadMan ? '⭐ Head Man' : isCutter ? '✂ Cutter' : '🪝 Docker';
+                          const cardClass = isHeadMan ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-100';
+                          const avatarClass = isHeadMan ? 'bg-amber-500' : 'bg-blue-600';
+                          const roleLabel  = isHeadMan ? '⭐ Head Man' : '🪝 Docker';
                           return (
                             <div key={m.id} className={clsx('flex items-center gap-3 rounded-lg p-2.5 border', cardClass)}>
                               <div className={clsx('w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0', avatarClass)}>
