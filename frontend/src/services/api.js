@@ -276,6 +276,50 @@ export const complianceApi = {
   triggerReminders:       ()        => api.post('/compliance/notifications/run-reminders'),
 };
 
+// ─── Gang Allocation ──────────────────────────────────────────────────────────
+export const gangApi = {
+  // Dashboard
+  dashboard:          ()        => api.get('/gangs/dashboard'),
+
+  // Gangs
+  listGangs:          (p)       => api.get('/gangs', { params: p }),
+  getGang:            (id)      => api.get(`/gangs/${id}`),
+  createGang:         (d)       => api.post('/gangs', d),
+  updateGang:         (id, d)   => api.put(`/gangs/${id}`, d),
+  setStatus:          (id, s)   => api.patch(`/gangs/${id}/status`, { status: s }),
+
+  // Members
+  listMembers:        (id)      => api.get(`/gangs/${id}/members`),
+  addMember:          (id, d)   => api.post(`/gangs/${id}/members`, d),
+  updateMember:       (id, mid, d) => api.put(`/gangs/${id}/members/${mid}`, d),
+  removeMember:       (id, mid) => api.delete(`/gangs/${id}/members/${mid}`),
+
+  // Requests
+  listRequests:       (p)       => api.get('/gangs/requests/list', { params: p }),
+  createRequest:      (d)       => api.post('/gangs/requests', d),
+  cancelRequest:      (id)      => api.patch(`/gangs/requests/${id}/cancel`),
+
+  // Allocation engine
+  recommend:          ()        => api.get('/gangs/engine/recommend'),
+  createAllocation:   (d)       => api.post('/gangs/allocations', d),
+  listAllocations:    (p)       => api.get('/gangs/allocations/list', { params: p }),
+
+  // Job execution
+  logTimestamp:       (id, ev)  => api.post(`/gangs/allocations/${id}/timestamp`, { event: ev }),
+  completeJob:        (id, d)   => api.post(`/gangs/allocations/${id}/complete`, d),
+  logDelay:           (id, d)   => api.post(`/gangs/allocations/${id}/delay`, d),
+  getDelays:          (id)      => api.get(`/gangs/allocations/${id}/delays`),
+  submitFeedback:     (id, d)   => api.post(`/gangs/allocations/${id}/feedback`, d),
+
+  // Analytics
+  getPerformance:     (p)       => api.get('/gangs/analytics/performance', { params: p }),
+  getAudit:           (p)       => api.get('/gangs/analytics/audit', { params: p }),
+
+  // Notifications
+  getNotifications:   ()        => api.get('/gangs/notifications/list'),
+  markRead:           (id)      => api.patch(`/gangs/notifications/${id}/read`),
+};
+
 // ─── Service Feedback ─────────────────────────────────────────────────────────
 export const feedbackApi = {
   submit:       (d)        => api.post('/feedback', d).then(r => r.data),

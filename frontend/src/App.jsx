@@ -20,6 +20,7 @@ import CompliancePage   from './pages/CompliancePage';
 import GrievancePage         from './pages/GrievancePage';
 import ServiceFeedbackPage   from './pages/ServiceFeedbackPage';
 import FeedbackFormPage      from './pages/FeedbackFormPage';
+import GangAllocationPage    from './pages/GangAllocationPage';
 import NotFoundPage          from './pages/NotFoundPage';
 
 function ProtectedRoute({ children, roles, permission }) {
@@ -55,6 +56,7 @@ function AppRoutes() {
         <Route path="compliance"   element={<ProtectedRoute><CompliancePage /></ProtectedRoute>} />
         <Route path="grievances"        element={<ProtectedRoute><GrievancePage /></ProtectedRoute>} />
         <Route path="service-feedback" element={<ProtectedRoute permission="feedback.view"><ServiceFeedbackPage /></ProtectedRoute>} />
+        <Route path="gang-allocation"  element={<ProtectedRoute permission="gang.view"><GangAllocationPage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

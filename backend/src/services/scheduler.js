@@ -448,7 +448,15 @@ function startScheduler() {
     catch (err) { console.error('[scheduler] Stale truck release error:', err.message); }
   });
 
-  console.log('[scheduler] Started — SLA checks every 5 min, daily report on schedule, compliance reminders at 07:00 UTC, truck reset at midnight');
+  // Gang allocation alerts every 10 minutes
+  cron.schedule('*/10 * * * *', async () => {
+    try {
+      const { runGangAlerts } = require('../controllers/gangController');
+      await runGangAlerts();
+    } catch (err) { console.error('[scheduler] Gang alerts error:', err.message); }
+  });
+
+  console.log('[scheduler] Started — SLA checks every 5 min, daily report on schedule, compliance reminders at 07:00 UTC, truck reset at midnight, gang alerts every 10 min');
 }
 
 module.exports = { startScheduler, sendDailyReport, checkSlaBreaches, runComplianceReminders };

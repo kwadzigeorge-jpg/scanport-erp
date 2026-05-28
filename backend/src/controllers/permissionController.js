@@ -169,6 +169,9 @@ const PERMISSION_GROUPS = {
     'report.compliance_view','report.generate','report.submit',
     'settings.compliance_manage',
   ],
+  'Gang Allocation': [
+    'gang.view','gang.manage','gang.allocate','gang.log',
+  ],
   'Grievance Management': [
     'grievance.view','grievance.create','grievance.manage','grievance.export',
   ],
