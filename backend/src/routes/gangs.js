@@ -18,8 +18,9 @@ router.patch('/:id/status',              requirePermission('gang.manage'),   gc.
 // ── Gang Members ──────────────────────────────────────────────────────────────
 router.get('/:id/members',                requirePermission('gang.view'),     gc.listMembers);
 router.post('/:id/members',               requirePermission('gang.manage'),   gc.addMember);
-router.put('/:id/members/:memberId',      requirePermission('gang.manage'),   gc.updateMember);
-router.delete('/:id/members/:memberId',   requirePermission('gang.manage'),   gc.removeMember);
+router.put('/:id/members/:memberId',           requirePermission('gang.manage'),   gc.updateMember);
+router.patch('/:id/members/:memberId/status',  requirePermission('gang.manage'),   gc.setMemberStatus);
+router.delete('/:id/members/:memberId',        requirePermission('gang.manage'),   gc.removeMember);
 
 // ── Agent Requests ────────────────────────────────────────────────────────────
 router.get('/requests/list',              requirePermission('gang.view'),     gc.listRequests);

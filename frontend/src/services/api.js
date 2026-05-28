@@ -291,8 +291,9 @@ export const gangApi = {
   // Members
   listMembers:        (id)      => api.get(`/gangs/${id}/members`),
   addMember:          (id, d)   => api.post(`/gangs/${id}/members`, d),
-  updateMember:       (id, mid, d) => api.put(`/gangs/${id}/members/${mid}`, d),
-  removeMember:       (id, mid) => api.delete(`/gangs/${id}/members/${mid}`),
+  updateMember:       (id, mid, d)   => api.put(`/gangs/${id}/members/${mid}`, d),
+  setMemberStatus:    (id, mid, d)   => api.patch(`/gangs/${id}/members/${mid}/status`, d),
+  removeMember:       (id, mid)      => api.delete(`/gangs/${id}/members/${mid}`),
 
   // Requests
   listRequests:       (p)       => api.get('/gangs/requests/list', { params: p }),

@@ -353,11 +353,11 @@ function AllocateModal({ request, onClose }) {
 function GangModal({ gang, onClose }) {
   const qc = useQueryClient();
   const isEdit = !!gang;
-  const [form, setForm] = useState({ gang_code: gang?.gang_code || '', specialization: gang?.specialization || '', notes: gang?.notes || '', status: gang?.status || 'available' });
+  const [form, setForm] = useState({ gang_code: gang?.gang_code || '', specialization: gang?.specialization || '', notes: gang?.notes || '' });
   const set = (k,v) => setForm(f => ({ ...f, [k]: v }));
 
   const mut = useMutation(d => isEdit ? gangApi.updateGang(gang.id, d) : gangApi.createGang(d), {
-    onSuccess: () => { toast.success(isEdit ? 'Gang updated.' : 'Gang registered.'); qc.invalidateQueries('gang-list'); onClose(); },
+    onSuccess: () => { toast.success(isEdit ? 'Gang updated.' : 'Gang registered. Now add members from the roster card.'); qc.invalidateQueries('gang-list'); onClose(); },
     onError: e => toast.error(e.response?.data?.error || 'Failed.'),
   });
 
@@ -370,22 +370,13 @@ function GangModal({ gang, onClose }) {
         <Field label="Specialization">
           <input className={inp} value={form.specialization} onChange={e => set('specialization', e.target.value)} placeholder="e.g. Heavy cargo, Hazmat…" />
         </Field>
-        {isEdit && (
-          <Field label="Status">
-            <select className={sel} value={form.status} onChange={e => set('status', e.target.value)}>
-              <option value="available">Available</option>
-              <option value="on_break">On Break</option>
-              <option value="off_duty">Off Duty</option>
-            </select>
-          </Field>
-        )}
         <Field label="Notes">
           <textarea className={inp} rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} />
         </Field>
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" onClick={onClose} className="btn-secondary text-sm py-2 px-4">Cancel</button>
           <button type="submit" disabled={mut.isLoading} className="btn-primary text-sm py-2 px-4">
-            {mut.isLoading ? 'Saving…' : isEdit ? 'Update' : 'Register'}
+            {mut.isLoading ? 'Saving…' : isEdit ? 'Update' : 'Register Gang'}
           </button>
         </div>
       </form>
@@ -407,13 +398,17 @@ function MemberModal({ gangId, member, onClose }) {
   const mut = useMutation(
     d => isEdit ? gangApi.updateMember(gangId, member.id, d) : gangApi.addMember(gangId, d),
     {
-      onSuccess: () => { toast.success(isEdit ? 'Member updated.' : 'Member added.'); qc.invalidateQueries(['gang-members', gangId]); qc.invalidateQueries('gang-list'); onClose(); },
+      onSuccess: () => {
+        toast.success(isEdit ? 'Member updated.' : 'Member added to roster.');
+        qc.invalidateQueries('gang-list');
+        onClose();
+      },
       onError: e => toast.error(e.response?.data?.error || 'Failed.'),
     }
   );
 
   return (
-    <Modal title={isEdit ? 'Edit Member' : 'Add Gang Member'} onClose={onClose}>
+    <Modal title={isEdit ? 'Edit Member' : 'Add Member to Roster'} onClose={onClose}>
       <form onSubmit={e => { e.preventDefault(); mut.mutate(form); }} className="space-y-4">
         <Field label="Role" required>
           <select className={sel} value={form.role} onChange={e => set('role', e.target.value)} disabled={isEdit}>
@@ -438,11 +433,181 @@ function MemberModal({ gangId, member, onClose }) {
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" onClick={onClose} className="btn-secondary text-sm py-2 px-4">Cancel</button>
           <button type="submit" disabled={mut.isLoading} className="btn-primary text-sm py-2 px-4">
-            {mut.isLoading ? 'Saving…' : isEdit ? 'Update' : 'Add Member'}
+            {mut.isLoading ? 'Saving…' : isEdit ? 'Update' : 'Add to Roster'}
           </button>
         </div>
       </form>
     </Modal>
+  );
+}
+
+// ── Member Status Selector ────────────────────────────────────────────────────
+const MEMBER_STATUS_OPTIONS = [
+  { value: 'available',  label: 'Available',  dot: 'bg-green-500' },
+  { value: 'on_break',   label: 'On Break',   dot: 'bg-yellow-400' },
+  { value: 'off_duty',   label: 'Off Duty',   dot: 'bg-gray-400' },
+  { value: 'sick',       label: 'Sick',       dot: 'bg-red-500' },
+  { value: 'on_leave',   label: 'On Leave',   dot: 'bg-blue-400' },
+];
+
+function StatusDot({ status }) {
+  const opt = MEMBER_STATUS_OPTIONS.find(o => o.value === status) || MEMBER_STATUS_OPTIONS[0];
+  return <span className={clsx('w-2.5 h-2.5 rounded-full shrink-0', opt.dot)} title={opt.label} />;
+}
+
+function MemberStatusSelect({ gangId, member, onDone }) {
+  const qc = useQueryClient();
+  const mut = useMutation(
+    (status) => gangApi.setMemberStatus(gangId, member.id, { status }),
+    {
+      onSuccess: () => { qc.invalidateQueries('gang-list'); onDone?.(); },
+      onError: e => toast.error(e.response?.data?.error || 'Failed to update status.'),
+    }
+  );
+
+  return (
+    <select
+      value={member.status || 'available'}
+      onChange={e => mut.mutate(e.target.value)}
+      disabled={mut.isLoading}
+      onClick={e => e.stopPropagation()}
+      className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+    >
+      {MEMBER_STATUS_OPTIONS.map(o => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+    </select>
+  );
+}
+
+// ── Gang Roster Card ──────────────────────────────────────────────────────────
+function GangRosterCard({ gang, onEdit, onAddMember }) {
+  const qc = useQueryClient();
+  const members = gang.members || [];
+  const headMan = members.find(m => m.role === 'head_man');
+  const dockers  = members.filter(m => m.role === 'docker');
+  const availCount = parseInt(gang.available_count) || 0;
+  const totalCount = parseInt(gang.total_members) || 0;
+
+  const headManAvail = headMan?.status === 'available';
+  const readiness = totalCount === 0 ? 'empty'
+    : !headMan            ? 'no_headman'
+    : !headManAvail       ? 'headman_out'
+    : availCount === 5    ? 'full'
+    : 'partial';
+
+  const readinessBadge = {
+    full:       { label: 'Fully Available',        cls: 'bg-green-100 text-green-700 border-green-200' },
+    partial:    { label: `${availCount}/5 Available`, cls: 'bg-amber-100 text-amber-700 border-amber-200' },
+    headman_out:{ label: 'Head Man Unavailable',   cls: 'bg-red-100 text-red-600 border-red-200' },
+    no_headman: { label: 'No Head Man Assigned',   cls: 'bg-red-100 text-red-600 border-red-200' },
+    empty:      { label: 'Roster Empty',           cls: 'bg-gray-100 text-gray-500 border-gray-200' },
+  }[readiness];
+
+  const removeMut = useMutation(({ mid }) => gangApi.removeMember(gang.id, mid), {
+    onSuccess: () => { toast.success('Member removed.'); qc.invalidateQueries('gang-list'); },
+  });
+
+  const slots = [
+    { role: 'head_man', label: 'Head Man',   count: 1 },
+    { role: 'docker',   label: 'Docker',     count: 4 },
+  ];
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {/* Gang header */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 border-b border-gray-100">
+        <div className="w-9 h-9 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0">
+          {gang.gang_code?.replace(/[^0-9]/g,'') || gang.gang_code?.[0] || 'G'}
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-bold text-gray-900">{gang.gang_code}</span>
+            <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full border', readinessBadge.cls)}>
+              {readinessBadge.label}
+            </span>
+            {gang.specialization && <span className="text-xs text-gray-400">{gang.specialization}</span>}
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {totalCount}/5 members · {gang.jobs_today || 0} job(s) today · Perf: {parseFloat(gang.performance_score || 0).toFixed(1)}
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={() => onAddMember(gang.id, 'head_man')}
+            className="text-xs text-blue-600 border border-blue-200 rounded-lg px-2.5 py-1.5 hover:bg-blue-50 flex items-center gap-1">
+            <Plus size={11} /> Add Member
+          </button>
+          <button onClick={() => onEdit(gang)}
+            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg">
+            <Pencil size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Roster */}
+      <div className="divide-y divide-gray-50">
+        {slots.map(({ role, label, count }) => {
+          const roleMembers = role === 'head_man' ? (headMan ? [headMan] : []) : dockers;
+          const emptySlots = count - roleMembers.length;
+
+          return (
+            <React.Fragment key={role}>
+              {/* Role section header */}
+              <div className="px-4 py-1.5 bg-gray-50/60">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                  {label}{count > 1 ? ` (${roleMembers.length}/${count})` : ''}
+                </span>
+              </div>
+
+              {/* Filled slots */}
+              {roleMembers.map(m => (
+                <div key={m.id} className={clsx(
+                  'flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors',
+                  m.role === 'head_man' && 'bg-amber-50/40'
+                )}>
+                  <StatusDot status={m.status} />
+                  <div className={clsx(
+                    'w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0',
+                    m.role === 'head_man' ? 'bg-amber-500' : 'bg-blue-600'
+                  )}>
+                    {m.full_name?.[0]?.toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-medium text-gray-800">{m.full_name}</span>
+                      {m.role === 'head_man' && (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">Gang Leader</span>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-400">{m.employee_id}{m.phone ? ` · ${m.phone}` : ''}</span>
+                  </div>
+                  <MemberStatusSelect gangId={gang.id} member={m} />
+                  <button onClick={() => removeMut.mutate({ mid: m.id })}
+                    className="p-1 text-gray-300 hover:text-red-500 rounded ml-1 shrink-0">
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+
+              {/* Empty slots */}
+              {Array.from({ length: emptySlots }).map((_, i) => (
+                <div key={`empty-${role}-${i}`}
+                  onClick={() => onAddMember(gang.id, role)}
+                  className="flex items-center gap-3 px-4 py-2.5 border-dashed cursor-pointer hover:bg-blue-50/40 transition-colors group">
+                  <div className="w-2.5 h-2.5 rounded-full border-2 border-dashed border-gray-300 shrink-0" />
+                  <div className="w-8 h-8 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300 group-hover:border-blue-300 group-hover:text-blue-400">
+                    <Plus size={14} />
+                  </div>
+                  <span className="text-sm text-gray-300 group-hover:text-blue-400">
+                    Click to assign {label.toLowerCase()}
+                  </span>
+                </div>
+              ))}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -769,111 +934,64 @@ function RequestsTab() {
 
 // ── Gangs Tab ─────────────────────────────────────────────────────────────────
 function GangsTab() {
-  const [showModal, setShowModal] = useState(false);
-  const [editGang, setEditGang] = useState(null);
-  const [expanded, setExpanded] = useState(null);
-  const [memberModal, setMemberModal] = useState(null); // { gangId, member? }
+  const [showGangModal, setShowGangModal] = useState(false);
+  const [editGang, setEditGang]           = useState(null);
+  const [memberModal, setMemberModal]     = useState(null); // { gangId, role? }
 
-  const { data: gangs = [], isLoading } = useQuery('gang-list', () => gangApi.listGangs().then(r => r.data));
-  const { data: members = [] } = useQuery(['gang-members', expanded], () => gangApi.listMembers(expanded).then(r => r.data), { enabled: !!expanded });
-
-  const qc = useQueryClient();
-  const removeMut = useMutation(({ gid, mid }) => gangApi.removeMember(gid, mid), {
-    onSuccess: (_, v) => { toast.success('Member removed.'); qc.invalidateQueries(['gang-members', v.gid]); },
-  });
+  const { data: gangs = [], isLoading } = useQuery(
+    'gang-list',
+    () => gangApi.listGangs().then(r => r.data),
+    { refetchInterval: 15000 }
+  );
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <button onClick={() => { setEditGang(null); setShowModal(true); }} className="btn-primary flex items-center gap-2 text-sm py-2 px-4">
+      {/* Header bar */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">
+          Gang roster — status updates automatically drive allocation recommendations.
+        </p>
+        <button onClick={() => { setEditGang(null); setShowGangModal(true); }}
+          className="btn-primary flex items-center gap-2 text-sm py-2 px-4 shrink-0">
           <Plus size={15} /> Register Gang
         </button>
       </div>
 
-      {isLoading ? <Spinner /> : !gangs.length ? <EmptyState message="No gangs registered." /> : (
-        <div className="space-y-3">
-          {gangs.map(g => (
-            <div key={g.id} className="bg-white rounded-xl border border-gray-200">
-              <div className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-gray-50 rounded-xl"
-                onClick={() => setExpanded(expanded === g.id ? null : g.id)}>
-                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0">
-                  {g.gang_code.split('-')[1] || g.gang_code[0]}
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-gray-800">{g.gang_code}</p>
-                    <Badge map={GANG_STATUS} value={g.status} label={GANG_STATUS_LABEL[g.status]} />
-                    {g.specialization && <span className="text-xs text-gray-500">{g.specialization}</span>}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {g.headman_count}/1 head man · {g.docker_count}/4 dockers
-                    <span className="mx-1.5 text-gray-300">·</span>
-                    {g.total_members || 0}/5 members
-                    <span className="mx-1.5 text-gray-300">·</span>
-                    {g.jobs_today} job(s) today
-                  </p>
-                </div>
-                <div className="text-right mr-4">
-                  <p className="text-xs text-gray-400">Performance</p>
-                  <ScoreBar score={parseFloat(g.performance_score)} />
-                </div>
-                <button onClick={e => { e.stopPropagation(); setEditGang(g); setShowModal(true); }} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg">
-                  <Pencil size={14} />
-                </button>
-                {expanded === g.id ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
-              </div>
+      {/* Status legend */}
+      <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
+        {MEMBER_STATUS_OPTIONS.map(o => (
+          <span key={o.value} className="flex items-center gap-1.5">
+            <span className={clsx('w-2.5 h-2.5 rounded-full', o.dot)} />
+            {o.label}
+          </span>
+        ))}
+      </div>
 
-              {expanded === g.id && (
-                <div className="border-t border-gray-100 px-4 py-3">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-semibold text-gray-500 uppercase">Team Members</p>
-                    <button onClick={() => setMemberModal({ gangId: g.id })} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                      <Plus size={12} /> Add Member
-                    </button>
-                  </div>
-                  {members.filter(m => m.is_active).length === 0 ? (
-                    <p className="text-xs text-gray-400">No members yet.</p>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2">
-                      {/* Head Man first, then dockers */}
-                      {['head_man','docker'].flatMap(role =>
-                        members.filter(m => m.is_active && m.role === role).map(m => {
-                          const isHeadMan = m.role === 'head_man';
-                          const cardClass = isHeadMan ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-100';
-                          const avatarClass = isHeadMan ? 'bg-amber-500' : 'bg-blue-600';
-                          const roleLabel  = isHeadMan ? '⭐ Head Man' : '🪝 Docker';
-                          return (
-                            <div key={m.id} className={clsx('flex items-center gap-3 rounded-lg p-2.5 border', cardClass)}>
-                              <div className={clsx('w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0', avatarClass)}>
-                                {m.full_name[0]}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <p className="text-sm font-medium text-gray-800 truncate">{m.full_name}</p>
-                                  {isHeadMan && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-semibold shrink-0">Gang Leader</span>}
-                                </div>
-                                <p className="text-xs text-gray-500">{m.employee_id} · {roleLabel}</p>
-                                {m.phone && <p className="text-xs text-gray-400 flex items-center gap-1"><Phone size={10} />{m.phone}</p>}
-                              </div>
-                              <div className="flex gap-1">
-                                <button onClick={() => setMemberModal({ gangId: g.id, member: m })} className="p-1 text-gray-400 hover:text-blue-600 rounded"><Pencil size={12} /></button>
-                                <button onClick={() => removeMut.mutate({ gid: g.id, mid: m.id })} className="p-1 text-gray-400 hover:text-red-500 rounded"><X size={12} /></button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+      {isLoading ? <Spinner /> : !gangs.length ? (
+        <EmptyState message="No gangs registered yet. Register a gang to begin building rosters." />
+      ) : (
+        <div className="space-y-4">
+          {gangs.map(g => (
+            <GangRosterCard
+              key={g.id}
+              gang={g}
+              onEdit={(gang) => { setEditGang(gang); setShowGangModal(true); }}
+              onAddMember={(gangId, role) => setMemberModal({ gangId, role })}
+            />
           ))}
         </div>
       )}
 
-      {showModal && <GangModal gang={editGang} onClose={() => { setShowModal(false); setEditGang(null); }} />}
-      {memberModal && <MemberModal gangId={memberModal.gangId} member={memberModal.member} onClose={() => { setMemberModal(null); qc.invalidateQueries(['gang-members', memberModal.gangId]); }} />}
+      {showGangModal && (
+        <GangModal gang={editGang} onClose={() => { setShowGangModal(false); setEditGang(null); }} />
+      )}
+      {memberModal && (
+        <MemberModal
+          gangId={memberModal.gangId}
+          member={null}
+          onClose={() => setMemberModal(null)}
+        />
+      )}
     </div>
   );
 }

@@ -8,11 +8,13 @@ function genRef() {
 }
 
 function computeAllocationScore(gang, jobsToday, hoursSinceLastJob) {
-  const availability = gang.status === 'available' ? 40
-    : gang.status === 'on_break' ? 15 : 0;
+  const headmanAvail = parseInt(gang.headman_available) > 0;
+  const dockersAvail = Math.min(parseInt(gang.dockers_available) || 0, 4);
+  // Availability (0–40): head man must be present; each available docker adds points
+  const availability = !headmanAvail ? 0 : Math.round(10 + dockersAvail * 7.5);
   const workload = Math.max(0, 25 - jobsToday * 5);
   const performance = (parseFloat(gang.performance_score) / 100) * 25;
-  const idle = Math.min(hoursSinceLastJob * 2.5, 10);
+  const idle = Math.min((hoursSinceLastJob || 0) * 2.5, 10);
   return Math.round((availability + workload + performance + idle) * 10) / 10;
 }
 
@@ -115,13 +117,26 @@ async function listGangs(req, res, next) {
 
     const { rows } = await db.query(`
       SELECT g.*,
-        (SELECT COUNT(*) FROM gang_members WHERE gang_id = g.id AND is_active = TRUE AND role = 'head_man') AS headman_count,
-        (SELECT COUNT(*) FROM gang_members WHERE gang_id = g.id AND is_active = TRUE AND role = 'docker') AS docker_count,
-        (SELECT COUNT(*) FROM gang_members WHERE gang_id = g.id AND is_active = TRUE) AS total_members,
-        (SELECT COUNT(*) FROM gang_allocations WHERE gang_id = g.id AND DATE(allocated_at) = CURRENT_DATE) AS jobs_today,
-        (SELECT MAX(work_completed_at) FROM gang_allocations WHERE gang_id = g.id AND status = 'completed') AS last_job_completed
+        COUNT(m.id) FILTER (WHERE m.role = 'head_man') AS headman_count,
+        COUNT(m.id) FILTER (WHERE m.role = 'docker')   AS docker_count,
+        COUNT(m.id)                                     AS total_members,
+        COUNT(m.id) FILTER (WHERE m.status = 'available' AND m.role = 'head_man') AS headman_available,
+        COUNT(m.id) FILTER (WHERE m.status = 'available' AND m.role = 'docker')   AS dockers_available,
+        COUNT(m.id) FILTER (WHERE m.status = 'available') AS available_count,
+        COALESCE(json_agg(
+          json_build_object(
+            'id', m.id, 'full_name', m.full_name, 'role', m.role,
+            'employee_id', m.employee_id, 'phone', m.phone, 'status', m.status
+          ) ORDER BY CASE m.role WHEN 'head_man' THEN 1 ELSE 2 END, m.full_name
+        ) FILTER (WHERE m.id IS NOT NULL), '[]') AS members,
+        (SELECT COUNT(*) FROM gang_allocations
+         WHERE gang_id = g.id AND DATE(allocated_at) = CURRENT_DATE) AS jobs_today,
+        (SELECT MAX(work_completed_at) FROM gang_allocations
+         WHERE gang_id = g.id AND status = 'completed') AS last_job_completed
       FROM gangs g
-      ${where}
+      LEFT JOIN gang_members m ON m.gang_id = g.id AND m.is_active = TRUE
+      ${where ? where.replace('g.status', 'g.status') : ''}
+      GROUP BY g.id
       ORDER BY g.performance_score DESC, g.gang_code
     `, params);
     return res.json(rows);
@@ -258,6 +273,22 @@ async function removeMember(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function setMemberStatus(req, res, next) {
+  try {
+    const { id: gangId, memberId } = req.params;
+    const { status } = req.body;
+    const valid = ['available', 'on_break', 'off_duty', 'sick', 'on_leave'];
+    if (!valid.includes(status)) return res.status(400).json({ error: 'Invalid status.' });
+    const { rows } = await db.query(
+      `UPDATE gang_members SET status=$1 WHERE id=$2 AND gang_id=$3 AND is_active=TRUE RETURNING *`,
+      [status, memberId, gangId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Member not found.' });
+    await logAudit(req, 'gang:member_status_changed', 'gang_members', memberId, { status, gang_id: gangId });
+    return res.json(rows[0]);
+  } catch (err) { next(err); }
+}
+
 // ─── Agent Requests ───────────────────────────────────────────────────────────
 async function listRequests(req, res, next) {
   try {
@@ -354,24 +385,31 @@ async function recommendGangs(req, res, next) {
   try {
     const { rows: gangs } = await db.query(`
       SELECT g.*,
+        COUNT(m.id) FILTER (WHERE m.is_active AND m.status='available' AND m.role='head_man') AS headman_available,
+        COUNT(m.id) FILTER (WHERE m.is_active AND m.status='available' AND m.role='docker')   AS dockers_available,
+        COUNT(m.id) FILTER (WHERE m.is_active)                                                AS total_members,
         (SELECT COUNT(*) FROM gang_allocations
          WHERE gang_id=g.id AND DATE(allocated_at)=CURRENT_DATE
            AND status NOT IN ('cancelled')) AS jobs_today,
         (SELECT EXTRACT(EPOCH FROM (NOW() - MAX(work_completed_at)))/3600
          FROM gang_allocations WHERE gang_id=g.id AND status='completed') AS hours_since_last_job
       FROM gangs g
-      WHERE g.status != 'off_duty'
+      LEFT JOIN gang_members m ON m.gang_id = g.id
+      WHERE g.status != 'busy'
+      GROUP BY g.id
     `);
 
     const scored = gangs.map(g => {
-      const score = computeAllocationScore(g, parseInt(g.jobs_today)||0, parseFloat(g.hours_since_last_job)||999);
+      const score = computeAllocationScore(g, parseInt(g.jobs_today)||0, parseFloat(g.hours_since_last_job)||0);
+      const headAvail = parseInt(g.headman_available) > 0;
+      const dockAvail = parseInt(g.dockers_available) || 0;
+      const total     = parseInt(g.total_members) || 0;
       const reasons = [];
-      if (g.status === 'available')  reasons.push('Available (+40)');
-      if (g.status === 'on_break')   reasons.push('On break (+15)');
-      if (g.status === 'busy')       reasons.push('Currently busy (+0)');
+      if (!headAvail) reasons.push('Head man unavailable');
+      else reasons.push(`Head man available`);
+      reasons.push(`${dockAvail}/4 dockers available`);
       reasons.push(`${g.jobs_today} job(s) today`);
-      reasons.push(`Performance: ${g.performance_score}%`);
-      if (parseFloat(g.hours_since_last_job) < 999) reasons.push(`Idle ${Math.round(parseFloat(g.hours_since_last_job)*60)}min`);
+      reasons.push(`Perf: ${g.performance_score}`);
       return { ...g, allocation_score: score, score_reasons: reasons };
     });
 
@@ -776,7 +814,7 @@ async function runGangAlerts() {
 module.exports = {
   getDashboard,
   listGangs, getGang, createGang, updateGang, setGangStatus,
-  listMembers, addMember, updateMember, removeMember,
+  listMembers, addMember, updateMember, removeMember, setMemberStatus,
   listRequests, createRequest, cancelRequest,
   recommendGangs, createAllocation, listAllocations,
   logTimestamp, completeJob, logDelay, getDelays, submitFeedback,
