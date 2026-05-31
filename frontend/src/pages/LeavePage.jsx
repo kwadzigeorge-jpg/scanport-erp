@@ -1564,6 +1564,506 @@ function CalendarTab() {
   );
 }
 
+// ─── Absence Management Tab ───────────────────────────────────────────────────
+const ABSENCE_REASONS = [
+  { value: 'sick',             label: 'Sickness',            color: 'red' },
+  { value: 'family_emergency', label: 'Family Emergency',    color: 'amber' },
+  { value: 'no_reason',        label: 'No Reason Given',     color: 'gray' },
+  { value: 'unauthorized',     label: 'Unauthorized Absence',color: 'red' },
+  { value: 'transport',        label: 'Transportation Issue', color: 'blue' },
+  { value: 'bereavement',      label: 'Bereavement',         color: 'purple' },
+  { value: 'personal',         label: 'Personal Reason',     color: 'teal' },
+  { value: 'other',            label: 'Other',               color: 'gray' },
+];
+const ABSENCE_STATUS = [
+  { value: 'recorded',      label: 'Recorded',            color: 'gray' },
+  { value: 'acknowledged',  label: 'Acknowledged',        color: 'blue' },
+  { value: 'excused',       label: 'Excused',             color: 'green' },
+  { value: 'disciplinary',  label: 'Disciplinary Action', color: 'red' },
+];
+const reasonMeta  = v => ABSENCE_REASONS.find(r => r.value === v) || { label: v, color: 'gray' };
+const statusMeta  = v => ABSENCE_STATUS.find(s => s.value === v)  || { label: v, color: 'gray' };
+const DOW_LABELS_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function AbsenceLogModal({ onClose }) {
+  const qc = useQueryClient();
+  const { data: allStaff = [] } = useQuery('lms-staff', () => leaveApi.staff().then(r => r.data));
+  const [form, setForm] = useState({
+    staffId: '', startDate: todayStr, endDate: todayStr,
+    reason: 'sick', notes: '', shiftMissed: '',
+  });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const days = useMemo(() => {
+    if (!form.startDate || !form.endDate) return 1;
+    const s = new Date(form.startDate+'T00:00:00');
+    const e = new Date(form.endDate+'T00:00:00');
+    return Math.max(1, Math.round((e - s) / 86400000) + 1);
+  }, [form.startDate, form.endDate]);
+
+  const grouped = useMemo(() => {
+    const m = {};
+    allStaff.forEach(s => {
+      const k = `${s.dept_name||'Other'} › ${s.team_name||'Unassigned'}`;
+      if (!m[k]) m[k] = [];
+      m[k].push(s);
+    });
+    return m;
+  }, [allStaff]);
+
+  const mut = useMutation(d => leaveApi.logAbsence(d), {
+    onSuccess: () => {
+      toast.success('Absence recorded.');
+      qc.invalidateQueries('lms-absences');
+      qc.invalidateQueries('lms-absence-analytics');
+      onClose();
+    },
+    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+  });
+
+  const sl = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300';
+
+  const handleSubmit = e => {
+    e.preventDefault();
+    if (!form.staffId) return toast.error('Select a staff member.');
+    mut.mutate({ ...form, days, staffId: parseInt(form.staffId) });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-900">Record Absence</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {/* Staff */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Staff Member <span className="text-red-500">*</span></label>
+            <select className={sl} value={form.staffId} onChange={e => set('staffId', e.target.value)} required>
+              <option value="">— Select staff member —</option>
+              {Object.entries(grouped).map(([group, members]) => (
+                <optgroup key={group} label={group}>
+                  {members.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+
+          {/* Date range */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Start Date <span className="text-red-500">*</span></label>
+              <input type="date" className={sl} value={form.startDate}
+                onChange={e => { set('startDate', e.target.value); if (e.target.value > form.endDate) set('endDate', e.target.value); }} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">End Date</label>
+              <input type="date" className={sl} value={form.endDate} min={form.startDate}
+                onChange={e => set('endDate', e.target.value)} />
+            </div>
+          </div>
+          {days > 1 && (
+            <p className="text-xs text-blue-600 font-medium -mt-2 px-1">{days} calendar day{days!==1?'s':''} recorded</p>
+          )}
+
+          {/* Reason */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Reason <span className="text-red-500">*</span></label>
+            <div className="grid grid-cols-2 gap-2">
+              {ABSENCE_REASONS.map(r => (
+                <button type="button" key={r.value}
+                  onClick={() => set('reason', r.value)}
+                  className={`text-left text-xs px-3 py-2 rounded-xl border-2 transition-all font-medium ${
+                    form.reason === r.value
+                      ? `border-${r.color}-400 bg-${r.color}-50 text-${r.color}-700`
+                      : 'border-gray-100 text-gray-600 hover:border-gray-200'
+                  }`}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Shift missed */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Shift Missed (optional)</label>
+            <select className={sl} value={form.shiftMissed} onChange={e => set('shiftMissed', e.target.value)}>
+              <option value="">— Not specified —</option>
+              <option value="days">Day Shift</option>
+              <option value="nights">Night Shift</option>
+              <option value="flexi">FLEXI</option>
+            </select>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+            <textarea className={sl} rows={2} value={form.notes}
+              onChange={e => set('notes', e.target.value)}
+              placeholder="Any additional details…" />
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 border border-gray-200 text-gray-600 text-sm py-2.5 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={mut.isLoading}
+              className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg">
+              {mut.isLoading ? 'Saving…' : 'Record Absence'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function UpdateAbsenceModal({ absence, onClose }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({ status: absence.status, notes: absence.notes || '' });
+  const set = (k,v) => setForm(f => ({...f,[k]:v}));
+  const sl = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300';
+
+  const mut = useMutation(d => leaveApi.updateAbsence(absence.id, d), {
+    onSuccess: () => { toast.success('Record updated.'); qc.invalidateQueries('lms-absences'); onClose(); },
+    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-900">Update Absence — {absence.staff_name}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Status</label>
+            <div className="space-y-2">
+              {ABSENCE_STATUS.map(s => (
+                <button key={s.value} type="button" onClick={() => set('status', s.value)}
+                  className={`w-full text-left text-sm px-3 py-2 rounded-xl border-2 transition-all ${
+                    form.status === s.value ? `border-${s.color}-400 bg-${s.color}-50` : 'border-gray-100 hover:border-gray-200'}`}>
+                  <Badge color={s.color}>{s.label}</Badge>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+            <textarea className={sl} rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} />
+          </div>
+          <div className="flex gap-3">
+            <button onClick={onClose} className="flex-1 border border-gray-200 text-gray-600 text-sm py-2.5 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button onClick={() => mut.mutate(form)} disabled={mut.isLoading}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg">
+              {mut.isLoading ? 'Saving…' : 'Update'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AbsencesTab() {
+  const qc = useQueryClient();
+  const [showLog, setShowLog]     = useState(false);
+  const [editAbsence, setEdit]    = useState(null);
+  const [activeView, setView]     = useState('records'); // 'records' | 'trends'
+  const [filters, setFilters]     = useState({ from: '', to: '', reason: '', status: '', team: '' });
+  const flt = (k,v) => setFilters(f => ({...f,[k]:v}));
+  const fSel = 'border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300';
+
+  const { data: depts = [] }    = useQuery('lms-departments', () => leaveApi.departments().then(r => r.data));
+  const { data: allStaff = [] } = useQuery('lms-staff',       () => leaveApi.staff().then(r => r.data));
+  const teams = useMemo(() => [...new Set(allStaff.map(s => s.team_name).filter(Boolean))].sort(), [allStaff]);
+
+  // Records
+  const { data: rows = [], isLoading } = useQuery(
+    ['lms-absences', filters],
+    () => leaveApi.absences({ ...filters }).then(r => r.data)
+  );
+
+  // Analytics (last 12 months by default)
+  const fromDate12m = new Date(Date.now()-365*24*60*60*1000).toISOString().slice(0,10);
+  const { data: analytics } = useQuery(
+    ['lms-absence-analytics', filters.team],
+    () => leaveApi.absenceAnalytics({ from: fromDate12m, to: todayStr, teamId: filters.team||undefined }).then(r => r.data)
+  );
+
+  const delMut = useMutation(id => leaveApi.deleteAbsence(id), {
+    onSuccess: () => { toast.success('Record deleted.'); qc.invalidateQueries('lms-absences'); qc.invalidateQueries('lms-absence-analytics'); },
+    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+  });
+
+  const totalDays   = rows.reduce((s, r) => s + r.days, 0);
+  const maxBradford = analytics?.staffStats?.[0]?.bradford_factor || 1;
+
+  // Bradford Factor band colour
+  const bfColor = bf => bf >= 400 ? 'text-red-600 font-bold' : bf >= 200 ? 'text-orange-600 font-bold' : bf >= 100 ? 'text-amber-600' : 'text-gray-600';
+
+  return (
+    <div className="p-4 md:p-6 space-y-4">
+      {showLog    && <AbsenceLogModal onClose={() => setShowLog(false)} />}
+      {editAbsence && <UpdateAbsenceModal absence={editAbsence} onClose={() => setEdit(null)} />}
+
+      {/* Header */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          <button onClick={() => setView('records')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeView==='records' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            Records
+          </button>
+          <button onClick={() => setView('trends')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeView==='trends' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            Trends & Analysis
+          </button>
+        </div>
+        <button onClick={() => setShowLog(true)}
+          className="ml-auto flex items-center gap-1.5 text-sm text-white bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg">
+          <Plus size={14} /> Record Absence
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <input type="date" className={fSel} value={filters.from} onChange={e => flt('from', e.target.value)} placeholder="From" />
+        <span className="text-gray-300 text-xs">→</span>
+        <input type="date" className={fSel} value={filters.to} onChange={e => flt('to', e.target.value)} placeholder="To" />
+        <select className={fSel} value={filters.team} onChange={e => flt('team', e.target.value)}>
+          <option value="">All teams</option>
+          {teams.map(t => <option key={t}>{t}</option>)}
+        </select>
+        <select className={fSel} value={filters.reason} onChange={e => flt('reason', e.target.value)}>
+          <option value="">All reasons</option>
+          {ABSENCE_REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+        </select>
+        <select className={fSel} value={filters.status} onChange={e => flt('status', e.target.value)}>
+          <option value="">All statuses</option>
+          {ABSENCE_STATUS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+        </select>
+        {(filters.from||filters.to||filters.team||filters.reason||filters.status) && (
+          <button onClick={() => setFilters({ from:'',to:'',reason:'',status:'',team:'' })}
+            className="text-xs text-gray-400 hover:text-red-500 px-2 py-1.5">Clear filters</button>
+        )}
+        {rows.length > 0 && (
+          <span className="text-xs text-gray-400 ml-auto">{rows.length} record{rows.length!==1?'s':''} · {totalDays} day{totalDays!==1?'s':''} total</span>
+        )}
+      </div>
+
+      {/* ── RECORDS VIEW ── */}
+      {activeView === 'records' && (
+        isLoading ? <Spinner /> : !rows.length
+          ? <div className="text-center py-12 text-gray-400 text-sm">No absence records found for the selected filters.</div>
+          : (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    {['Staff','Team','Date(s)','Days','Reason','Shift','Status','Logged By','Actions'].map(h => (
+                      <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {rows.map(r => {
+                    const rm = reasonMeta(r.reason);
+                    const sm = statusMeta(r.status);
+                    return (
+                      <tr key={r.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-2.5 font-medium text-gray-900 whitespace-nowrap">{r.staff_name}</td>
+                        <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">{r.team_name||'—'}</td>
+                        <td className="px-3 py-2.5 text-xs text-gray-600 whitespace-nowrap">
+                          {fmtDate(r.start_date)}{r.end_date !== r.start_date ? ` – ${fmtDate(r.end_date)}` : ''}
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-semibold text-xs">{r.days}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap"><Badge color={rm.color}>{rm.label}</Badge></td>
+                        <td className="px-3 py-2.5 text-xs text-gray-500 capitalize">{r.shift_missed?.replace('_',' ') || '—'}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap"><Badge color={sm.color}>{sm.label}</Badge></td>
+                        <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">{r.logged_by||'—'}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          <div className="flex gap-1">
+                            <button onClick={() => setEdit(r)} title="Update status"
+                              className="p-1 text-gray-300 hover:text-blue-500 rounded"><Pencil size={13} /></button>
+                            <button onClick={() => { if(window.confirm(`Delete this absence record for ${r.staff_name}?`)) delMut.mutate(r.id); }}
+                              title="Delete" className="p-1 text-gray-300 hover:text-red-400 rounded"><Trash2 size={13} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
+      )}
+
+      {/* ── TRENDS VIEW ── */}
+      {activeView === 'trends' && !analytics ? <Spinner /> : activeView === 'trends' && (
+        <div className="space-y-6">
+          <p className="text-xs text-gray-400">Analysis based on last 12 months{filters.team ? ` · ${filters.team}` : ' · all teams'}.</p>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* Bradford Factor ranking */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">Absence Frequency Ranking</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Bradford Factor = Spells² × Days. Higher = more disruptive pattern.</p>
+                </div>
+              </div>
+              <div className="divide-y divide-gray-50">
+                {!analytics.staffStats?.length
+                  ? <p className="px-4 py-6 text-sm text-gray-400 text-center">No absences recorded in this period.</p>
+                  : analytics.staffStats.map((s, i) => {
+                    const barW = Math.round((s.bradford_factor / Math.max(maxBradford, 1)) * 100);
+                    const bf   = parseInt(s.bradford_factor);
+                    const band = bf >= 400 ? { label: 'High Risk', cls: 'bg-red-500' }
+                               : bf >= 200 ? { label: 'Warning', cls: 'bg-orange-400' }
+                               : bf >= 100 ? { label: 'Monitor', cls: 'bg-amber-400' }
+                               : { label: '', cls: 'bg-blue-400' };
+                    return (
+                      <div key={s.id} className="px-4 py-2.5 flex items-center gap-3">
+                        <span className="text-xs text-gray-400 w-4 text-right shrink-0">{i+1}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-sm font-medium text-gray-800 truncate">{s.staff_name}</span>
+                            <span className="text-xs text-gray-400 shrink-0">{s.team_name||''}</span>
+                            {band.label && <span className={`text-xs px-1.5 py-0.5 rounded-full text-white font-medium shrink-0 ${band.cls}`}>{band.label}</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                              <div className={`h-full rounded-full ${band.cls}`} style={{ width: `${barW}%` }} />
+                            </div>
+                            <span className={`text-xs w-16 text-right shrink-0 ${bfColor(bf)}`}>BF: {bf}</span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-0.5">{s.absence_spells} spell{s.absence_spells!==1?'s':''} · {s.total_days} day{s.total_days!==1?'s':''}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+              <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 text-xs text-gray-400">
+                Bands: <span className="text-amber-600 font-medium">100–199</span> Monitor ·{' '}
+                <span className="text-orange-600 font-medium">200–399</span> Warning ·{' '}
+                <span className="text-red-600 font-medium">400+</span> High Risk
+              </div>
+            </div>
+
+            {/* Reason breakdown */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <p className="text-sm font-semibold text-gray-800">Absence by Reason</p>
+                <p className="text-xs text-gray-400 mt-0.5">Count of absence instances by recorded reason.</p>
+              </div>
+              <div className="px-4 py-3 space-y-3">
+                {!analytics.reasonBreakdown?.length
+                  ? <p className="text-sm text-gray-400 text-center py-6">No data.</p>
+                  : analytics.reasonBreakdown.map(r => {
+                    const meta = reasonMeta(r.reason);
+                    const maxCount = analytics.reasonBreakdown[0]?.count || 1;
+                    const pct  = Math.round((r.count / maxCount) * 100);
+                    const barC = {
+                      red: 'bg-red-400', amber: 'bg-amber-400', gray: 'bg-gray-400',
+                      blue: 'bg-blue-400', purple: 'bg-purple-400', teal: 'bg-teal-400',
+                    }[meta.color] || 'bg-gray-400';
+                    return (
+                      <div key={r.reason}>
+                        <div className="flex justify-between text-xs text-gray-700 mb-1">
+                          <span className="font-medium">{meta.label}</span>
+                          <span>{r.count} instance{r.count!==1?'s':''} · {r.total_days} day{r.total_days!==1?'s':''}</span>
+                        </div>
+                        <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${barC}`} style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+
+            {/* Day of week pattern */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <p className="text-sm font-semibold text-gray-800">Absence by Day of Week</p>
+                <p className="text-xs text-gray-400 mt-0.5">Detects patterns like frequent Monday absences.</p>
+              </div>
+              <div className="px-4 py-4">
+                {!analytics.dowPattern?.length
+                  ? <p className="text-sm text-gray-400 text-center py-4">No data.</p>
+                  : (() => {
+                    const maxC = Math.max(...analytics.dowPattern.map(d => d.count), 1);
+                    // Build full week array (0=Sun..6=Sat), fill missing with 0
+                    const dow = Array.from({length:7}, (_,i) => {
+                      const found = analytics.dowPattern.find(d => d.dow === i);
+                      return { dow: i, count: found?.count || 0 };
+                    });
+                    return (
+                      <div className="flex items-end gap-2 h-24">
+                        {dow.map(({ dow: d, count }) => {
+                          const pct = Math.round((count / maxC) * 100);
+                          const isWeekend = d === 0 || d === 6;
+                          return (
+                            <div key={d} className="flex-1 flex flex-col items-center gap-1">
+                              <span className="text-xs text-gray-500 font-medium">{count||''}</span>
+                              <div className="w-full bg-gray-100 rounded-t-md" style={{ height: '64px' }}>
+                                <div
+                                  className={`w-full rounded-t-md transition-all ${isWeekend ? 'bg-gray-300' : 'bg-indigo-400'}`}
+                                  style={{ height: `${pct}%`, marginTop: `${100-pct}%` }}
+                                />
+                              </div>
+                              <span className={`text-xs ${isWeekend ? 'text-gray-400' : 'text-gray-600'}`}>
+                                {DOW_LABELS_FULL[d].slice(0,3)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()
+                }
+              </div>
+            </div>
+
+            {/* Monthly trend */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <p className="text-sm font-semibold text-gray-800">Monthly Absence Trend</p>
+                <p className="text-xs text-gray-400 mt-0.5">Total absence days per month over the last 12 months.</p>
+              </div>
+              <div className="px-4 py-3 space-y-2">
+                {!analytics.monthlyTrend?.length
+                  ? <p className="text-sm text-gray-400 text-center py-4">No data.</p>
+                  : (() => {
+                    const maxD = Math.max(...analytics.monthlyTrend.map(m => m.total_days), 1);
+                    return analytics.monthlyTrend.map(m => {
+                      const pct = Math.round((m.total_days / maxD) * 100);
+                      const [y, mo] = m.month.split('-');
+                      const label = `${MONTH_NAMES[parseInt(mo)-1].slice(0,3)} ${y}`;
+                      return (
+                        <div key={m.month} className="flex items-center gap-3">
+                          <span className="text-xs text-gray-500 w-14 shrink-0">{label}</span>
+                          <div className="flex-1 bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                            <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="text-xs text-gray-600 w-16 text-right shrink-0">
+                            {m.total_days}d · {m.spells} spell{m.spells!==1?'s':''}
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()
+                }
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Shift Schedule Tab ───────────────────────────────────────────────────────
 const SHIFT_META = {
   days_exp:   { label: 'Days · Exp',    short: 'D-E', bg: 'bg-sky-100',    text: 'text-sky-800',   border: 'border-sky-200'   },
@@ -2272,6 +2772,7 @@ const TABS = [
   { key: 'overview',  label: 'Overview',  icon: CalendarDays },
   { key: 'calendar',  label: 'Calendar',  icon: CalendarDays },
   { key: 'shifts',    label: 'Shifts',    icon: ClipboardList },
+  { key: 'absences',  label: 'Absences',  icon: AlertTriangle },
   { key: 'submit',    label: '+ Submit',  icon: Plus },
   { key: 'records',   label: 'Records',   icon: ClipboardList },
   { key: 'balances',  label: 'Balances',  icon: Users },
@@ -2323,6 +2824,7 @@ export default function LeavePage() {
         {tab === 'overview'  && <OverviewTab />}
         {tab === 'calendar'  && <CalendarTab />}
         {tab === 'shifts'    && <ShiftsTab />}
+        {tab === 'absences'  && <AbsencesTab />}
         {tab === 'submit'    && <SubmitTab />}
         {tab === 'records'   && <RecordsTab isAdmin={isAdmin} />}
         {tab === 'balances'  && <BalancesTab />}

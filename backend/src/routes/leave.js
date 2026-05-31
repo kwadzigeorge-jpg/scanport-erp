@@ -16,6 +16,13 @@ router.get('/shifts',           adminOrSuper, c.getShifts);
 router.post('/shifts/import',   adminOnly,    c.importShifts);
 router.delete('/shifts',        adminOnly,    c.clearShifts);
 
+// Absence management
+router.get('/absences',               adminOrSuper, c.listAbsences);
+router.post('/absences',              adminOrSuper, c.logAbsence);
+router.put('/absences/:id',           adminOrSuper, c.updateAbsence);
+router.delete('/absences/:id',        adminOnly,    c.deleteAbsence);
+router.get('/absences/analytics',     adminOrSuper, c.getAbsenceAnalytics);
+
 // Overview
 router.get('/overview',         adminOrSuper, c.getOverview);
 

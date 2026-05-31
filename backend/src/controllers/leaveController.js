@@ -761,6 +761,130 @@ async function deleteHoliday(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Absence Management ───────────────────────────────────────────────────────
+async function listAbsences(req, res, next) {
+  try {
+    const { from, to, teamId, staffId, reason, status } = req.query;
+    const conds = []; const params = [];
+    const add = v => { params.push(v); return `$${params.length}`; };
+
+    if (from)    conds.push(`a.start_date >= ${add(from)}`);
+    if (to)      conds.push(`a.start_date <= ${add(to)}`);
+    if (staffId) conds.push(`a.staff_id = ${add(parseInt(staffId))}`);
+    if (reason)  conds.push(`a.reason = ${add(reason)}`);
+    if (status)  conds.push(`a.status = ${add(status)}`);
+    if (teamId)  conds.push(`s.team_id = ${add(parseInt(teamId))}`);
+
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+    const { rows } = await db.query(`
+      SELECT a.*, s.name AS staff_name, s.role AS staff_role,
+             t.name AS team_name, d.name AS dept_name
+      FROM lms_absences a
+      JOIN lms_staff s ON s.id = a.staff_id
+      LEFT JOIN lms_teams t ON t.id = s.team_id
+      LEFT JOIN lms_departments d ON d.id = t.department_id
+      ${where}
+      ORDER BY a.start_date DESC, s.name
+      LIMIT 500
+    `, params);
+    return res.json(rows);
+  } catch (err) { next(err); }
+}
+
+async function logAbsence(req, res, next) {
+  try {
+    const { staffId, startDate, endDate, days, reason, notes, shiftMissed } = req.body;
+    if (!staffId || !startDate || !reason) {
+      return res.status(400).json({ error: 'staffId, startDate and reason are required.' });
+    }
+    const end  = endDate || startDate;
+    const d    = days != null ? parseInt(days) : 1;
+    const { rows: [rec] } = await db.query(`
+      INSERT INTO lms_absences
+        (staff_id, start_date, end_date, days, reason, notes, shift_missed, logged_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *
+    `, [staffId, startDate, end, d, reason, notes||null, shiftMissed||null,
+        req.user.fullName || req.user.username]);
+    return res.status(201).json(rec);
+  } catch (err) { next(err); }
+}
+
+async function updateAbsence(req, res, next) {
+  try {
+    const { status, notes } = req.body;
+    const { rows: [rec] } = await db.query(`
+      UPDATE lms_absences SET status=$1, notes=$2, updated_at=NOW()
+      WHERE id=$3 RETURNING *
+    `, [status, notes||null, req.params.id]);
+    if (!rec) return res.status(404).json({ error: 'Absence record not found.' });
+    return res.json(rec);
+  } catch (err) { next(err); }
+}
+
+async function deleteAbsence(req, res, next) {
+  try {
+    const { rowCount } = await db.query('DELETE FROM lms_absences WHERE id=$1', [req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: 'Absence record not found.' });
+    return res.json({ message: 'Deleted.' });
+  } catch (err) { next(err); }
+}
+
+async function getAbsenceAnalytics(req, res, next) {
+  try {
+    const { from, to, teamId } = req.query;
+    const teamCond  = teamId ? `AND s.team_id = ${parseInt(teamId)}` : '';
+    const fromDate  = from || new Date(Date.now() - 365*24*60*60*1000).toISOString().slice(0,10);
+    const toDate    = to   || new Date().toISOString().slice(0,10);
+
+    // Per-staff frequency + Bradford Factor
+    const { rows: staffStats } = await db.query(`
+      SELECT s.id, s.name AS staff_name, t.name AS team_name,
+        COUNT(a.id)::int             AS absence_spells,
+        COALESCE(SUM(a.days),0)::int AS total_days,
+        (COUNT(a.id)^2 * COALESCE(SUM(a.days),0))::int AS bradford_factor
+      FROM lms_staff s
+      LEFT JOIN lms_absences a ON a.staff_id = s.id
+        AND a.start_date BETWEEN $1 AND $2
+      LEFT JOIN lms_teams t ON t.id = s.team_id
+      WHERE s.is_active = TRUE ${teamCond}
+      GROUP BY s.id, s.name, t.name
+      HAVING COUNT(a.id) > 0
+      ORDER BY bradford_factor DESC, total_days DESC
+      LIMIT 20
+    `, [fromDate, toDate]);
+
+    // Reason breakdown
+    const { rows: reasonBreakdown } = await db.query(`
+      SELECT a.reason, COUNT(*)::int AS count, SUM(a.days)::int AS total_days
+      FROM lms_absences a
+      JOIN lms_staff s ON s.id = a.staff_id
+      WHERE a.start_date BETWEEN $1 AND $2 ${teamCond.replace('AND s.team_id', 'AND s.team_id')}
+      GROUP BY a.reason ORDER BY count DESC
+    `, [fromDate, toDate]);
+
+    // Day-of-week pattern
+    const { rows: dowPattern } = await db.query(`
+      SELECT EXTRACT(DOW FROM a.start_date)::int AS dow, COUNT(*)::int AS count
+      FROM lms_absences a
+      JOIN lms_staff s ON s.id = a.staff_id
+      WHERE a.start_date BETWEEN $1 AND $2 ${teamCond}
+      GROUP BY dow ORDER BY dow
+    `, [fromDate, toDate]);
+
+    // Monthly trend
+    const { rows: monthlyTrend } = await db.query(`
+      SELECT TO_CHAR(a.start_date,'YYYY-MM') AS month,
+             COUNT(*)::int AS spells, SUM(a.days)::int AS total_days
+      FROM lms_absences a
+      JOIN lms_staff s ON s.id = a.staff_id
+      WHERE a.start_date BETWEEN $1 AND $2 ${teamCond}
+      GROUP BY month ORDER BY month
+    `, [fromDate, toDate]);
+
+    return res.json({ staffStats, reasonBreakdown, dowPattern, monthlyTrend, from: fromDate, to: toDate });
+  } catch (err) { next(err); }
+}
+
 // ─── Staff Leave History ──────────────────────────────────────────────────────
 async function getStaffHistory(req, res, next) {
   try {
@@ -941,6 +1065,7 @@ async function getCalendar(req, res, next) {
 
 module.exports = {
   ensureSchema, ROLE_LABELS, entitlementForRole,
+  listAbsences, logAbsence, updateAbsence, deleteAbsence, getAbsenceAnalytics,
   getStaffHistory,
   getShifts, importShifts, clearShifts,
   getCalendar,
