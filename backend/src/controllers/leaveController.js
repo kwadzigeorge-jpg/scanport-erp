@@ -16,6 +16,7 @@ const ROLE_LABELS = {
 };
 
 // ─── Seed data ────────────────────────────────────────────────────────────────
+// Seed roster reflects June 2026 (updated from original onboarding roster)
 const SEED_DEPTS = [
   {
     label: 'Scanning Teams',
@@ -26,89 +27,90 @@ const SEED_DEPTS = [
         { name: 'Sitsope Cudjoe', role: 'staff' },
         { name: 'Dorcas Gaayuoni Nantamba', role: 'staff' },
         { name: 'Linda Debrah', role: 'staff' },
-        { name: 'Jasper Frimpong', role: 'supervisor' },
+        { name: 'Jasper Frimpong', role: 'm_supervisor' },
       ],
       'Scanning Team 2': [
         { name: 'Janet Agyei-Gyane', role: 'supervisor' },
         { name: 'Joseph Dabuo', role: 'staff' },
         { name: 'Nana Yaw Mantey', role: 'staff' },
         { name: 'Wendy Lartey', role: 'staff' },
-        { name: 'Stephanie Ackah Blay', role: 'staff' },
-        { name: 'Alex Danquah-Smith', role: 'supervisor' },
+        { name: 'Stacey Naa Adjeley Adjei', role: 'staff' },   // moved from Intrusive Team B
+        { name: 'Alex Danquah-Smith', role: 'm_supervisor' },
       ],
       'Scanning Team 3': [
         { name: 'Eugenia Abbeo', role: 'supervisor' },
         { name: 'Gifty Ampaabeng', role: 'staff' },
         { name: 'Frank Onomah Hayford', role: 'staff' },
-        { name: 'Emmanuel Ackah', role: 'staff' },
+        { name: 'Nathaniel Codjoe', role: 'staff' },           // moved from Intrusive Team A
         { name: 'Gifty Yelifari', role: 'staff' },
-        { name: 'Paul Continua', role: 'supervisor' },
+        { name: 'Paul Continua', role: 'm_supervisor' },
       ],
       'Scanning Team 4': [
-        { name: 'Linda Otwey', role: 'supervisor' },
-        { name: 'Lilian Osei', role: 'staff' },
-        { name: 'Frederick Ankrah', role: 'staff' },
+        { name: 'Frederick Ankrah', role: 'supervisor' },       // promoted from staff
+        { name: 'Abdul-Malik Osumanu', role: 'staff' },         // moved from Intrusive Team D
+        { name: 'Bismack Acheampong', role: 'staff' },          // moved from Intrusive Team D
+        { name: 'Joshua Okpoti', role: 'staff' },               // moved from Intrusive Team D
         { name: 'Sarah Adjabeng Mongson', role: 'staff' },
-        { name: 'Edwina Aku Addo', role: 'staff' },
-        { name: 'Pius Duvor', role: 'staff' },
-        { name: 'Kwabena Akuamoah', role: 'supervisor' },
+        { name: 'Kwabena Akuamoah', role: 'm_supervisor' },
       ],
       'Scanning Team 5': [
         { name: 'Pamela Lamptey Mills', role: 'supervisor' },
-        { name: 'Salome Sinnia Gaayuoni', role: 'staff' },
-        { name: 'Justina S. Fosu', role: 'staff' },
+        { name: 'Kwabena Akosa', role: 'staff' },               // moved from Intrusive Team C
+        { name: 'Florence Kapre', role: 'staff' },              // moved from Intrusive Team C
         { name: 'Vanessa Akumeh', role: 'staff' },
         { name: 'Gabriel Wononua Aviella', role: 'staff' },
-        { name: 'Seth Ampem', role: 'supervisor' },
+        { name: 'Seth Ampem', role: 'm_supervisor' },
       ],
       'Scanning Team 6': [
         { name: 'Priscilla Quagraine', role: 'supervisor' },
+        { name: 'Saajida Osman Kasanga', role: 'staff' },       // moved from Intrusive Team B
         { name: 'Mubarik Sahanun', role: 'staff' },
-        { name: 'Andrew Nsowah', role: 'staff' },
-        { name: 'Mary Abalo', role: 'staff' },
-        { name: 'Briana Ayittah', role: 'staff' },
-        { name: 'Ampartey Boateng', role: 'supervisor' },
+        { name: 'Ouedraogo Peter Anthony', role: 'staff' },     // moved from Intrusive Team A
+        { name: 'Juliana Affum', role: 'staff' },               // moved from Intrusive Team B
+        { name: 'Ampartey Boateng', role: 'm_supervisor' },
       ],
       'Scanning Team 7': [
         { name: 'Kwadwo Asah-Opoku', role: 'supervisor' },
-        { name: 'Abdul-Rahman Imran', role: 'staff' },
         { name: 'Evelyn Ashitey', role: 'staff' },
+        { name: 'Bright Nyadzro', role: 'staff' },              // moved from Intrusive Team A
+        { name: 'Angela Dufie Agyemang', role: 'staff' },       // moved from Intrusive Team A
         { name: 'Maud Adubea Osei', role: 'staff' },
-        { name: 'Don Annan', role: 'staff' },
-        { name: 'Ebenezer Mensah', role: 'supervisor' },
+        { name: 'Ebenezer Mensah', role: 'm_supervisor' },
       ],
       'Scanning Team 8': [
-        { name: 'Kamaldeen Salifu', role: 'staff' },
+        { name: 'Mary Abalo', role: 'supervisor' },             // promoted; moved from Team 6
         { name: 'David Dabuq', role: 'staff' },
         { name: 'Enoch Adjei Agyapong', role: 'staff' },
         { name: 'Roland Abeiku Egyir', role: 'staff' },
         { name: 'Dennis Amofah', role: 'staff' },
-        { name: 'Raymond Adu Parkoh', role: 'supervisor' },
+        { name: 'Raymond Adu Parkoh', role: 'm_supervisor' },
       ],
     },
   },
   {
     label: 'Post-Scan Teams',
     teams: {
+      // Supervisors of Intrusive Teams A–D are labeled (M Spvr) in the roster
+      // document and identified by red text. They carry 21-day entitlement.
       'Intrusive Team A': [
         { name: 'Michael Fiawoyife', role: 'staff' },
         { name: 'Francis Essel', role: 'staff' },
         { name: 'Issahaku Nafisah', role: 'staff' },
         { name: 'Elsie Ankrah', role: 'staff' },
-        { name: 'Nathaniel Codjoe', role: 'staff' },
-        { name: 'Ouedraogo Peter Anthony', role: 'staff' },
-        { name: 'Bright Nyadzro', role: 'staff' },
-        { name: 'Angela Dufie Agyemang', role: 'staff' },
-        { name: 'Anthony Blay', role: 'supervisor' },
+        { name: 'Emmanuel Ackah', role: 'staff' },              // moved from Scanning Team 3
+        { name: 'Edwina Aku Addo', role: 'staff' },             // moved from Scanning Team 4
+        { name: 'Abdul-Rahman Imran', role: 'staff' },          // moved from Scanning Team 7
+        { name: 'Don Annan', role: 'staff' },                   // moved from Scanning Team 7
+        { name: 'Anthony Blay', role: 'm_supervisor' },
       ],
       'Intrusive Team B': [
         { name: 'Shelter Dogbatse', role: 'staff' },
         { name: 'Talent Abalo', role: 'staff' },
-        { name: 'Saajida Osman Kasanga', role: 'staff' },
-        { name: 'Stacey Naa Adjeley Adjei', role: 'staff' },
+        { name: 'Briana Ayittah', role: 'staff' },              // moved from Scanning Team 6
+        { name: 'Stephanie Ackah Blay', role: 'staff' },        // moved from Scanning Team 2
         { name: 'Emmanuel Kusark', role: 'staff' },
-        { name: 'Juliana Affum', role: 'staff' },
-        { name: 'Wisdom Zikpi', role: 'supervisor' },
+        { name: 'Andrew Nsowah', role: 'staff' },               // moved from Scanning Team 6
+        { name: 'Wisdom Zikpi', role: 'm_supervisor' },
       ],
       'Intrusive Team C': [
         { name: 'Esi Bassaw', role: 'staff' },
@@ -116,21 +118,20 @@ const SEED_DEPTS = [
         { name: 'Frederick Hunno-Osabutey', role: 'staff' },
         { name: 'Godfred Nyame', role: 'staff' },
         { name: 'Paul Essien', role: 'staff' },
-        { name: 'Kwabena Akosa', role: 'staff' },
         { name: 'Kwaku Amoako-Atta', role: 'staff' },
-        { name: 'Florence Kapre', role: 'staff' },
-        { name: 'Francis Videy', role: 'supervisor' },
+        { name: 'Justina S. Fosu', role: 'staff' },             // moved from Scanning Team 5
+        { name: 'Francis Videy', role: 'm_supervisor' },
       ],
       'Intrusive Team D': [
         { name: 'Alhassan Faisal', role: 'staff' },
         { name: 'Grant Albert Asiakwa', role: 'staff' },
         { name: 'Daniel Odei Fianko', role: 'staff' },
-        { name: 'Abdul-Malik Osumanu', role: 'staff' },
-        { name: 'Bismack Acheampong', role: 'staff' },
-        { name: 'Joshua Okpoti', role: 'staff' },
+        { name: 'Pius Duvor', role: 'staff' },                  // moved from Scanning Team 4
+        { name: 'Lilian Osei', role: 'staff' },                 // moved from Scanning Team 4
         { name: 'Esther Dabier', role: 'staff' },
+        { name: 'Kamaldeen Salifu', role: 'staff' },            // moved from Scanning Team 8
         { name: 'Lily Ofosua Acheampong', role: 'staff' },
-        { name: 'Prince Obiri', role: 'supervisor' },
+        { name: 'Samuel Baah-Borquaye', role: 'm_supervisor' }, // new; replaced Prince Obiri
       ],
     },
   },
