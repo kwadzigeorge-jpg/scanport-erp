@@ -39,6 +39,7 @@ router.post('/teams/:teamId/replace-roster',            adminOnly, c.replaceTeam
 
 // Staff
 router.get('/staff',           adminOrSuper, c.getStaff);
+router.get('/staff/:id/history', adminOrSuper, c.getStaffHistory);
 router.post('/staff',          adminOnly,    c.addStaff);
 router.put('/staff/:id',       adminOnly,    c.updateStaff);
 router.delete('/staff/:id',    adminOnly,    c.removeStaff);

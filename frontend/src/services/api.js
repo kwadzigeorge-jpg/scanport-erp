@@ -143,6 +143,7 @@ export const leaveApi = {
   addTeam:       (dId, d)   => api.post(`/leave/departments/${dId}/teams`, d),
   deleteTeam:    (dId, tId) => api.delete(`/leave/departments/${dId}/teams/${tId}`),
   staff:         (p)        => api.get('/leave/staff', { params: p }),
+  staffHistory:  (id)       => api.get(`/leave/staff/${id}/history`),
   addStaff:      (d)        => api.post('/leave/staff', d),
   updateStaff:   (id, d)    => api.put(`/leave/staff/${id}`, d),
   removeStaff:   (id)       => api.delete(`/leave/staff/${id}`),

@@ -126,6 +126,187 @@ const currentYear = new Date().getFullYear();
 const todayStr    = new Date().toISOString().slice(0, 10);
 const in7days     = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
 
+// ─── Staff History Modal ──────────────────────────────────────────────────────
+function StaffHistoryModal({ staffId, onClose }) {
+  const yr = new Date().getFullYear();
+  const [yearFilter, setYearFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+
+  const { data, isLoading } = useQuery(
+    ['lms-staff-history', staffId],
+    () => leaveApi.staffHistory(staffId).then(r => r.data),
+    { enabled: !!staffId }
+  );
+
+  const sl = 'border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300';
+
+  const filteredRequests = useMemo(() => {
+    if (!data?.requests) return [];
+    return data.requests.filter(r => {
+      if (statusFilter && r.status !== statusFilter) return false;
+      if (yearFilter && String(r.entitlement_year || r.year) !== yearFilter) return false;
+      return true;
+    });
+  }, [data, yearFilter, statusFilter]);
+
+  const staff = data?.staff;
+  const roleMap = { supervisor: 'Supervisor', m_supervisor: 'M Supervisor', maintenance: 'Maintenance Officer', staff: 'Staff' };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+          {isLoading || !staff ? (
+            <p className="text-sm text-gray-400">Loading…</p>
+          ) : (
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                {staff.name[0]}
+              </div>
+              <div>
+                <p className="font-bold text-gray-900">{staff.name}</p>
+                <p className="text-xs text-gray-400">
+                  {roleMap[staff.role] || staff.role} · {staff.team_name || 'Unassigned'}
+                  {staff.dept_name ? ` · ${staff.dept_name}` : ''}
+                  <span className="ml-2 text-blue-600 font-medium">{staff.annual_entitlement} days/yr entitlement</span>
+                </p>
+              </div>
+            </div>
+          )}
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 shrink-0"><X size={18} /></button>
+        </div>
+
+        {isLoading ? <div className="p-8 text-center text-sm text-gray-400">Loading…</div> : !data ? null : (
+          <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
+
+            {/* Balance cards */}
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Leave Balances</p>
+              <div className="grid grid-cols-3 gap-3">
+                {[yr - 1, yr, yr + 1].map(year => {
+                  const b = data.balances[year];
+                  if (!b) return null;
+                  const pct = Math.max(0, Math.min(100, b.total > 0 ? (b.used / b.total) * 100 : 0));
+                  const remPct = Math.max(0, Math.min(100, b.total > 0 ? (b.remaining / b.total) * 100 : 0));
+                  const isCurrent = year === yr;
+                  return (
+                    <div key={year} className={`rounded-xl border p-3.5 ${isCurrent ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white'}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`text-xs font-bold ${isCurrent ? 'text-blue-700' : 'text-gray-600'}`}>{year}</span>
+                        {isCurrent && <span className="text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded-full">Current</span>}
+                      </div>
+                      <div className="space-y-1 text-xs text-gray-600 mb-2.5">
+                        <div className="flex justify-between">
+                          <span>Entitlement</span><span className="font-medium">{b.entitlement}d</span>
+                        </div>
+                        {b.carry_over > 0 && (
+                          <div className="flex justify-between text-teal-600">
+                            <span>Carry-over</span><span className="font-medium">+{b.carry_over}d</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between font-semibold border-t border-gray-100 pt-1 mt-1">
+                          <span>Total</span><span>{b.total}d</span>
+                        </div>
+                        <div className="flex justify-between text-amber-600">
+                          <span>Used</span><span className="font-medium">{b.used}d</span>
+                        </div>
+                        <div className={`flex justify-between font-bold ${b.remaining <= 0 ? 'text-red-600' : b.remaining <= 5 ? 'text-amber-600' : 'text-green-600'}`}>
+                          <span>Remaining</span><span>{b.remaining}d</span>
+                        </div>
+                      </div>
+                      {/* Progress bar */}
+                      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${
+                          b.remaining <= 0 ? 'bg-red-500' : b.remaining <= 5 ? 'bg-amber-400' : 'bg-green-400'
+                        }`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1 text-right">{Math.round(pct)}% used</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Upcoming leave */}
+            {data.upcoming.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Upcoming Approved Leave</p>
+                <div className="space-y-2">
+                  {data.upcoming.map(r => (
+                    <div key={r.id} className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-2.5">
+                      <CheckCircle size={14} className="text-green-600 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-800">{r.leave_type}</p>
+                        <p className="text-xs text-gray-500">{fmtDate(r.start_date)} → {fmtDate(r.end_date)}</p>
+                      </div>
+                      <span className="text-sm font-bold text-green-700">{r.working_days}d</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Full history */}
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex-1">Leave History</p>
+                <select className={sl} value={yearFilter} onChange={e => setYearFilter(e.target.value)}>
+                  <option value="">All years</option>
+                  {[...new Set(data.requests.map(r => r.entitlement_year || r.year))].sort((a,b)=>b-a).map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+                <select className={sl} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                  <option value="">All statuses</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Rejected">Rejected</option>
+                  <option value="Pending">Pending</option>
+                </select>
+              </div>
+
+              {filteredRequests.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-6">No leave records found.</p>
+              ) : (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-100">
+                      <tr>
+                        {['Type', 'Dates', 'Days', 'Year', 'Status', 'Notes'].map(h => (
+                          <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {filteredRequests.map(r => (
+                        <tr key={r.id} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 text-xs">
+                            {r.leave_type}
+                            {r.is_gift_leave && <span className="ml-1 text-teal-600">🎁</span>}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
+                            {fmtDate(r.start_date)} – {fmtDate(r.end_date)}
+                          </td>
+                          <td className="px-3 py-2 font-semibold text-center text-xs">{r.working_days}</td>
+                          <td className="px-3 py-2 text-center text-xs text-gray-500">{r.entitlement_year || r.year}</td>
+                          <td className="px-3 py-2"><StatusBadge status={r.status} /></td>
+                          <td className="px-3 py-2 text-xs text-gray-400 max-w-[140px] truncate" title={r.rejection_reason || r.notes || ''}>
+                            {r.rejection_reason ? `Rejected: ${r.rejection_reason}` : r.notes || '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 function OverviewTab() {
   const { data, isLoading } = useQuery(
@@ -731,6 +912,7 @@ function BalancesTab() {
   const [lowOnly, setLowOnly]   = useState(false);
   const [teamFilter, setTeam]   = useState('');
   const [deptFilter, setDept]   = useState('');
+  const [historyStaffId, setHistoryStaffId] = useState(null);
 
   const { data = [], isLoading } = useQuery(
     ['lms-balances', year, teamFilter, deptFilter],
@@ -766,6 +948,7 @@ function BalancesTab() {
 
   return (
     <div className="p-6">
+      {historyStaffId && <StaffHistoryModal staffId={historyStaffId} onClose={() => setHistoryStaffId(null)} />}
       <div className="flex flex-wrap gap-3 items-end mb-4">
         {/* Year */}
         <div>
@@ -826,7 +1009,12 @@ function BalancesTab() {
                   const barColor = s.remaining <= 0 ? 'bg-red-500' : s.remaining <= 5 ? 'bg-amber-400' : 'bg-green-400';
                   return (
                     <tr key={s.id} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{s.name}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">
+                        <button onClick={() => setHistoryStaffId(s.id)}
+                          className="hover:text-blue-600 hover:underline text-left transition-colors">
+                          {s.name}
+                        </button>
+                      </td>
                       <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{roleLabel(s.role)}</td>
                       <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap">{s.team}</td>
                       <td className="px-3 py-2 text-center text-xs">{s.annual_entitlement}</td>
@@ -1773,6 +1961,7 @@ function RosterTab() {
   const [staffModal, setStaffModal]   = useState(null); // { staff?, teamId }
   const [replaceTeam, setReplaceTeam] = useState(null);
   const [search, setSearch]           = useState('');
+  const [historyStaffId, setHistoryStaffId] = useState(null);
 
   const toggle = id => setExpanded(e => ({ ...e, [id]: !e[id] }));
 
@@ -1824,6 +2013,7 @@ function RosterTab() {
   return (
     <div className="p-6 space-y-5">
       {/* Modals */}
+      {historyStaffId && <StaffHistoryModal staffId={historyStaffId} onClose={() => setHistoryStaffId(null)} />}
       {staffModal && (
         <StaffModal
           staff={staffModal.staff || null}
@@ -1878,6 +2068,10 @@ function RosterTab() {
                 </div>
                 <Badge color={ROLE_COLOR[s.role]}>{ROLE_ABBR[s.role]}</Badge>
                 <span className="text-xs text-gray-400">{s.annual_entitlement}d</span>
+                <button onClick={() => setHistoryStaffId(s.id)}
+                  title="Leave history" className="p-1.5 text-gray-300 hover:text-green-600 rounded-lg hover:bg-green-50">
+                  <CalendarDays size={13} />
+                </button>
                 <button onClick={() => setStaffModal({ staff: s, teamId: s.team_id })}
                   className="p-1.5 text-gray-300 hover:text-blue-500 rounded-lg hover:bg-blue-50">
                   <Pencil size={13} />
@@ -1979,6 +2173,11 @@ function RosterTab() {
                               <Badge color={ROLE_COLOR[s.role]}>{ROLE_ABBR[s.role]}</Badge>
                               <span className="text-xs text-gray-400 w-8 text-right">{s.annual_entitlement}d</span>
                               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => setHistoryStaffId(s.id)}
+                                  title="View leave history"
+                                  className="p-1 text-gray-300 hover:text-green-600 rounded">
+                                  <CalendarDays size={13} />
+                                </button>
                                 <button onClick={() => setStaffModal({ staff: s, teamId: s.team_id })}
                                   title="Edit member"
                                   className="p-1 text-gray-300 hover:text-blue-500 rounded">

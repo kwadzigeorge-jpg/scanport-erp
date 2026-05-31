@@ -761,6 +761,49 @@ async function deleteHoliday(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Staff Leave History ──────────────────────────────────────────────────────
+async function getStaffHistory(req, res, next) {
+  try {
+    const { id } = req.params;
+    const today = new Date().toISOString().slice(0, 10);
+    const yr    = new Date().getFullYear();
+
+    const { rows: [staff] } = await db.query(`
+      SELECT s.*, t.name AS team_name, d.name AS dept_name
+      FROM lms_staff s
+      LEFT JOIN lms_teams t ON t.id = s.team_id
+      LEFT JOIN lms_departments d ON d.id = t.department_id
+      WHERE s.id = $1
+    `, [id]);
+    if (!staff) return res.status(404).json({ error: 'Staff not found.' });
+
+    const { rows: requests } = await db.query(`
+      SELECT * FROM lms_leave_requests
+      WHERE staff_id = $1
+      ORDER BY start_date DESC
+    `, [id]);
+
+    // Balance for each of past, current, next year
+    const balances = {};
+    for (const year of [yr - 1, yr, yr + 1]) {
+      const prevUsed = requests
+        .filter(r => r.status==='Approved' && !r.is_gift_leave &&
+          (r.entitlement_year === year-1 || (!r.entitlement_year && r.year === year-1)))
+        .reduce((s, r) => s + r.working_days, 0);
+      const used = requests
+        .filter(r => r.status==='Approved' && !r.is_gift_leave &&
+          (r.entitlement_year === year || (!r.entitlement_year && r.year === year)))
+        .reduce((s, r) => s + r.working_days, 0);
+      const carryOver  = Math.max(0, staff.annual_entitlement - prevUsed);
+      const total      = staff.annual_entitlement + carryOver;
+      balances[year]   = { entitlement: staff.annual_entitlement, carry_over: carryOver, total, used, remaining: total - used };
+    }
+
+    const upcoming = requests.filter(r => r.status === 'Approved' && r.start_date > today);
+    return res.json({ staff, requests, balances, upcoming, today });
+  } catch (err) { next(err); }
+}
+
 // ─── Shift Schedule ───────────────────────────────────────────────────────────
 const VALID_SHIFTS = new Set([
   'days_exp','days_imp','days_int','days',
@@ -898,6 +941,7 @@ async function getCalendar(req, res, next) {
 
 module.exports = {
   ensureSchema, ROLE_LABELS, entitlementForRole,
+  getStaffHistory,
   getShifts, importShifts, clearShifts,
   getCalendar,
   getOverview, getRequests, submitRequest, approveRequest, rejectRequest, deleteRequest,
