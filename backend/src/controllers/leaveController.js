@@ -761,6 +761,109 @@ async function deleteHoliday(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Shift Schedule ───────────────────────────────────────────────────────────
+const VALID_SHIFTS = new Set([
+  'days_exp','days_imp','days_int','days',
+  'nights_exp','nights_imp','nights_int','nights',
+  'rest','flexi',
+]);
+
+function normalizeShift(raw) {
+  if (!raw) return null;
+  const s = raw.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!s || s === '-') return null;
+  if (s.includes('rest'))                              return 'rest';
+  if (s === 'flexi')                                   return 'flexi';
+  if (s.includes('day') && s.includes('exp'))          return 'days_exp';
+  if (s.includes('day') && s.includes('imp'))          return 'days_imp';
+  if (s.includes('day') && s.includes('int'))          return 'days_int';
+  if (s.includes('day'))                               return 'days';
+  if ((s.includes('night') || s.includes('nigh')) && s.includes('exp')) return 'nights_exp';
+  if ((s.includes('night') || s.includes('nigh')) && s.includes('imp')) return 'nights_imp';
+  if ((s.includes('night') || s.includes('nigh')) && s.includes('int')) return 'nights_int';
+  if (s.includes('night') || s.includes('nigh'))       return 'nights';
+  return null;
+}
+
+async function getShifts(req, res, next) {
+  try {
+    const { month, teamId } = req.query;
+    if (!month || !teamId) return res.status(400).json({ error: 'month and teamId are required.' });
+    const [y, m] = month.split('-').map(Number);
+    const start  = `${y}-${String(m).padStart(2,'0')}-01`;
+    const end    = new Date(y, m, 0).toISOString().slice(0, 10);
+
+    const { rows } = await db.query(`
+      SELECT sh.shift_date::text AS shift_date, sh.shift_type,
+             s.id AS staff_id, s.name AS staff_name, s.role AS staff_role
+      FROM lms_shifts sh
+      JOIN lms_staff s ON s.id = sh.staff_id
+      WHERE s.team_id = $1
+        AND sh.shift_date BETWEEN $2 AND $3
+        AND s.is_active = TRUE
+      ORDER BY s.name, sh.shift_date
+    `, [teamId, start, end]);
+
+    return res.json({ month, teamId: parseInt(teamId), rows });
+  } catch (err) { next(err); }
+}
+
+async function importShifts(req, res, next) {
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    const { month, teamId, entries } = req.body;
+    // entries: [{ staffId, shifts: ['rest','days_exp', ...] }]
+    if (!month || !teamId || !Array.isArray(entries) || !entries.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'month, teamId and entries[] are required.' });
+    }
+
+    const [y, m] = month.split('-').map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const pad = n => String(n).padStart(2,'0');
+    let inserted = 0;
+
+    for (const { staffId, shifts } of entries) {
+      for (let d = 1; d <= Math.min(shifts.length, daysInMonth); d++) {
+        const shiftType = normalizeShift(shifts[d - 1]);
+        if (!shiftType) continue;
+        const dateStr = `${y}-${pad(m)}-${pad(d)}`;
+        await client.query(`
+          INSERT INTO lms_shifts (staff_id, shift_date, shift_type)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (staff_id, shift_date) DO UPDATE SET shift_type = EXCLUDED.shift_type
+        `, [staffId, dateStr, shiftType]);
+        inserted++;
+      }
+    }
+
+    await client.query('COMMIT');
+    return res.json({ inserted, month, teamId });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
+}
+
+async function clearShifts(req, res, next) {
+  try {
+    const { month, teamId } = req.query;
+    if (!month || !teamId) return res.status(400).json({ error: 'month and teamId are required.' });
+    const [y, m] = month.split('-').map(Number);
+    const start  = `${y}-${String(m).padStart(2,'0')}-01`;
+    const end    = new Date(y, m, 0).toISOString().slice(0, 10);
+    const { rowCount } = await db.query(`
+      DELETE FROM lms_shifts
+      WHERE shift_date BETWEEN $1 AND $2
+        AND staff_id IN (SELECT id FROM lms_staff WHERE team_id = $3)
+    `, [start, end, teamId]);
+    return res.json({ deleted: rowCount });
+  } catch (err) { next(err); }
+}
+
 // ─── Calendar ─────────────────────────────────────────────────────────────────
 async function getCalendar(req, res, next) {
   try {
@@ -795,6 +898,7 @@ async function getCalendar(req, res, next) {
 
 module.exports = {
   ensureSchema, ROLE_LABELS, entitlementForRole,
+  getShifts, importShifts, clearShifts,
   getCalendar,
   getOverview, getRequests, submitRequest, approveRequest, rejectRequest, deleteRequest,
   getBalances,

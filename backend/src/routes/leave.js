@@ -11,6 +11,11 @@ const adminOnly    = requireRole('admin');
 // Calendar
 router.get('/calendar',         adminOrSuper, c.getCalendar);
 
+// Shift schedules
+router.get('/shifts',           adminOrSuper, c.getShifts);
+router.post('/shifts/import',   adminOnly,    c.importShifts);
+router.delete('/shifts',        adminOnly,    c.clearShifts);
+
 // Overview
 router.get('/overview',         adminOrSuper, c.getOverview);
 

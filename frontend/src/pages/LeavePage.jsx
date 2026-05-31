@@ -1376,6 +1376,391 @@ function CalendarTab() {
   );
 }
 
+// ─── Shift Schedule Tab ───────────────────────────────────────────────────────
+const SHIFT_META = {
+  days_exp:   { label: 'Days · Exp',    short: 'D-E', bg: 'bg-sky-100',    text: 'text-sky-800',   border: 'border-sky-200'   },
+  days_imp:   { label: 'Days · Imp',    short: 'D-I', bg: 'bg-blue-100',   text: 'text-blue-800',  border: 'border-blue-200'  },
+  days_int:   { label: 'Days · Int',    short: 'D-N', bg: 'bg-cyan-100',   text: 'text-cyan-800',  border: 'border-cyan-200'  },
+  days:       { label: 'Days',          short: 'D',   bg: 'bg-teal-100',   text: 'text-teal-800',  border: 'border-teal-200'  },
+  nights_exp: { label: 'Nights · Exp',  short: 'N-E', bg: 'bg-indigo-100', text: 'text-indigo-800',border: 'border-indigo-200'},
+  nights_imp: { label: 'Nights · Imp',  short: 'N-I', bg: 'bg-violet-100', text: 'text-violet-800',border: 'border-violet-200'},
+  nights_int: { label: 'Nights · Int',  short: 'N-N', bg: 'bg-purple-100', text: 'text-purple-800',border: 'border-purple-200'},
+  nights:     { label: 'Nights',        short: 'N',   bg: 'bg-slate-200',  text: 'text-slate-700', border: 'border-slate-300' },
+  rest:       { label: 'Rest Day',      short: 'R',   bg: 'bg-gray-100',   text: 'text-gray-400',  border: 'border-gray-200'  },
+  flexi:      { label: 'FLEXI',         short: 'F',   bg: 'bg-amber-100',  text: 'text-amber-700', border: 'border-amber-200' },
+};
+
+function parseRosterPaste(text, staffList) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const results = [];
+  for (const line of lines) {
+    // Try tab first, then comma
+    const parts = line.includes('\t') ? line.split('\t') : line.split(',');
+    if (parts.length < 2) continue;
+    // Name may include role suffix like "- (Spvr)" or "(M Spvr)" — strip it
+    const rawName = parts[0].replace(/\s*[-–]\s*\(.*?\)\s*$/, '').replace(/\s*\(.*?\)\s*$/, '').trim();
+    if (!rawName) continue;
+    // Find matching staff (case-insensitive, partial OK)
+    const match = staffList.find(s =>
+      s.name.toLowerCase() === rawName.toLowerCase() ||
+      s.name.toLowerCase().includes(rawName.toLowerCase()) ||
+      rawName.toLowerCase().includes(s.name.toLowerCase().split(' ')[0].toLowerCase())
+    );
+    if (!match) { results.push({ rawName, staffId: null, shifts: parts.slice(1), unmatched: true }); continue; }
+    results.push({ rawName, staffId: match.id, staffName: match.name, shifts: parts.slice(1), unmatched: false });
+  }
+  return results;
+}
+
+function ShiftImportModal({ teamId, teamName, month, staffList, onClose }) {
+  const qc = useQueryClient();
+  const [text, setText]       = useState('');
+  const [preview, setPreview] = useState([]);
+
+  const parsed = useMemo(() => {
+    if (!text.trim()) return [];
+    return parseRosterPaste(text, staffList);
+  }, [text, staffList]);
+
+  const matched   = parsed.filter(p => !p.unmatched);
+  const unmatched = parsed.filter(p => p.unmatched);
+
+  const mut = useMutation(d => leaveApi.importShifts(d), {
+    onSuccess: res => {
+      toast.success(`Shift schedule imported — ${res.data.inserted} entries saved.`);
+      qc.invalidateQueries(['lms-shifts']);
+      onClose();
+    },
+    onError: e => toast.error(e.response?.data?.error || 'Import failed.'),
+  });
+
+  const handleImport = () => {
+    if (!matched.length) return toast.error('No matched staff found.');
+    mut.mutate({
+      month,
+      teamId,
+      entries: matched.map(p => ({ staffId: p.staffId, shifts: p.shifts })),
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+          <div>
+            <h3 className="font-semibold text-gray-900">Import Shift Schedule — {teamName}</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{MONTH_NAMES[parseInt(month.split('-')[1])-1]} {month.split('-')[0]}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        <div className="flex gap-4 flex-1 overflow-hidden px-6 py-4">
+          {/* Paste area */}
+          <div className="flex-1 flex flex-col gap-2 min-w-0">
+            <p className="text-xs text-gray-500">
+              Copy shift data from the roster spreadsheet and paste below.<br />
+              <strong>Format:</strong> one person per line, tab- or comma-separated.<br />
+              <code className="bg-gray-100 px-1 rounded text-xs">Name [tab] Day1 [tab] Day2 … Day30</code><br />
+              Role suffixes like <code className="bg-gray-100 px-1 rounded text-xs">- (Spvr)</code> are stripped automatically.
+            </p>
+            <textarea
+              className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
+              rows={14}
+              placeholder={"Dennis Gardiner - (Spvr)\tRest Day\tRest Day\tNights - Exp\tNights - Exp...\nMertz Matthew\tRest Day\tRest Day\tNights - Exp..."}
+              value={text}
+              onChange={e => setText(e.target.value)}
+            />
+          </div>
+
+          {/* Preview */}
+          <div className="w-60 flex flex-col gap-2 shrink-0">
+            <p className="text-xs font-medium text-gray-600">
+              Preview — {matched.length} matched, {unmatched.length} unmatched
+            </p>
+            <div className="flex-1 border border-gray-200 rounded-xl overflow-y-auto divide-y divide-gray-100 text-xs">
+              {parsed.length === 0
+                ? <p className="p-3 text-gray-400 italic">Paste roster to preview…</p>
+                : parsed.map((p, i) => (
+                  <div key={i} className={`px-3 py-2 flex items-center gap-2 ${p.unmatched ? 'bg-red-50' : ''}`}>
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${p.unmatched ? 'bg-red-400' : 'bg-green-400'}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className={`truncate font-medium ${p.unmatched ? 'text-red-600' : 'text-gray-800'}`}>{p.rawName}</p>
+                      {p.unmatched
+                        ? <p className="text-red-400">Not found in roster</p>
+                        : <p className="text-gray-400">{p.staffName} · {p.shifts.length} days</p>}
+                    </div>
+                  </div>
+                ))}
+            </div>
+            {unmatched.length > 0 && (
+              <p className="text-xs text-red-500">
+                Unmatched names won't be imported. Check spelling against the roster.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
+          <button onClick={onClose} className="flex-1 border border-gray-200 text-gray-600 text-sm py-2.5 rounded-lg hover:bg-gray-50">
+            Cancel
+          </button>
+          <button onClick={handleImport} disabled={!matched.length || mut.isLoading}
+            className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg">
+            {mut.isLoading ? 'Importing…' : `Import ${matched.length} Staff`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShiftsTab() {
+  const now   = new Date();
+  const [year, setYear]   = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [teamId, setTeamId] = useState('');
+  const [showImport, setShowImport] = useState(false);
+
+  const monthStr = `${year}-${String(month).padStart(2,'0')}`;
+  const todayStr = now.toISOString().slice(0,10);
+
+  const prevMonth = () => { if (month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1); };
+  const nextMonth = () => { if (month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1); };
+
+  // Department/team tree
+  const { data: depts = [] } = useQuery('lms-departments', () => leaveApi.departments().then(r => r.data));
+  const allTeams = useMemo(() => depts.flatMap(d => (d.teams||[]).map(t => ({...t, deptName: d.name}))), [depts]);
+  const selectedTeam = allTeams.find(t => String(t.id) === String(teamId));
+
+  // Staff in selected team
+  const { data: teamStaff = [] } = useQuery(
+    ['lms-staff', teamId],
+    () => leaveApi.staff({ teamId }).then(r => r.data),
+    { enabled: !!teamId }
+  );
+
+  // Shifts
+  const { data: shiftData, isLoading: shiftsLoading } = useQuery(
+    ['lms-shifts', monthStr, teamId],
+    () => leaveApi.shifts({ month: monthStr, teamId }).then(r => r.data),
+    { enabled: !!teamId }
+  );
+
+  // Approved leave for this team/month
+  const { data: calData } = useQuery(
+    ['lms-calendar', monthStr],
+    () => leaveApi.calendar({ month: monthStr }).then(r => r.data),
+    { enabled: !!teamId }
+  );
+
+  // Build shift map: { staffId → { "YYYY-MM-DD" → shiftType } }
+  const shiftMap = useMemo(() => {
+    const m = {};
+    (shiftData?.rows || []).forEach(r => {
+      if (!m[r.staff_id]) m[r.staff_id] = {};
+      m[r.staff_id][r.shift_date] = r.shift_type;
+    });
+    return m;
+  }, [shiftData]);
+
+  // Build leave map: { staffName → Set of date strings on leave }
+  const leaveMap = useMemo(() => {
+    const m = {};
+    if (!calData?.records) return m;
+    calData.records.forEach(r => {
+      if (!m[r.staff_name]) m[r.staff_name] = new Set();
+      const s = new Date(r.start_date+'T00:00:00');
+      const e = new Date(r.end_date+'T00:00:00');
+      for (const d = new Date(s); d <= e; d.setDate(d.getDate()+1)) {
+        m[r.staff_name].add(d.toISOString().slice(0,10));
+      }
+    });
+    return m;
+  }, [calData]);
+
+  // Day columns for the month
+  const days = useMemo(() => {
+    const total = new Date(year, month, 0).getDate();
+    return Array.from({length: total}, (_, i) => {
+      const d = i + 1;
+      const ds = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const dow = new Date(ds+'T00:00:00').getDay(); // 0=Sun
+      return { day: d, dateStr: ds, dow };
+    });
+  }, [year, month]);
+
+  const DOW_SHORT = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+  const qc = useQueryClient();
+  const clearMut = useMutation(() => leaveApi.clearShifts({ month: monthStr, teamId }), {
+    onSuccess: r => { toast.success(`${r.data.deleted} shift entries cleared.`); qc.invalidateQueries(['lms-shifts']); },
+    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+  });
+
+  const fSel = 'border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300';
+
+  return (
+    <div className="p-4 md:p-6 space-y-4">
+      {showImport && selectedTeam && (
+        <ShiftImportModal
+          teamId={parseInt(teamId)}
+          teamName={selectedTeam.name}
+          month={monthStr}
+          staffList={teamStaff}
+          onClose={() => setShowImport(false)}
+        />
+      )}
+
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Month nav */}
+        <div className="flex items-center gap-2">
+          <button onClick={prevMonth} className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600">
+            <ChevronDown size={14} className="rotate-90" />
+          </button>
+          <span className="text-base font-bold text-gray-900 w-36 text-center">
+            {MONTH_NAMES[month-1]} {year}
+          </span>
+          <button onClick={nextMonth} className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600">
+            <ChevronDown size={14} className="-rotate-90" />
+          </button>
+        </div>
+
+        {/* Team selector */}
+        <select className={fSel + ' w-56'} value={teamId} onChange={e => setTeamId(e.target.value)}>
+          <option value="">— Select a team —</option>
+          {depts.map(d => (
+            <optgroup key={d.id} label={d.name}>
+              {(d.teams||[]).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </optgroup>
+          ))}
+        </select>
+
+        {/* Actions */}
+        {teamId && (
+          <>
+            <button onClick={() => setShowImport(true)}
+              className="flex items-center gap-1.5 text-xs text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 px-3 py-1.5 rounded-lg">
+              <Upload size={13} /> Import Shifts
+            </button>
+            <button onClick={() => { if (window.confirm(`Clear all shift data for ${selectedTeam?.name} in ${MONTH_NAMES[month-1]} ${year}?`)) clearMut.mutate(); }}
+              className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 px-3 py-1.5 rounded-lg">
+              <Trash2 size={13} /> Clear Month
+            </button>
+          </>
+        )}
+
+        {/* Legend */}
+        <div className="flex items-center gap-2 ml-auto flex-wrap">
+          {[['days_exp','Days·Exp'],['nights_exp','Nights·Exp'],['rest','Rest'],['flexi','FLEXI']].map(([k,l]) => {
+            const { bg, text } = SHIFT_META[k];
+            return <span key={k} className={`text-xs px-2 py-0.5 rounded font-medium ${bg} ${text}`}>{l}</span>;
+          })}
+          <span className="text-xs px-2 py-0.5 rounded font-medium bg-red-100 text-red-700">On Leave</span>
+        </div>
+      </div>
+
+      {!teamId ? (
+        <div className="text-center py-16 text-gray-400 text-sm">Select a team above to view their shift schedule.</div>
+      ) : shiftsLoading ? (
+        <Spinner />
+      ) : (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="text-xs border-collapse" style={{ minWidth: `${180 + days.length * 42}px` }}>
+              <thead>
+                {/* Day number row */}
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="sticky left-0 z-10 bg-gray-50 px-3 py-2 text-left text-xs font-semibold text-gray-500 border-r border-gray-200 w-44 min-w-[176px]">
+                    Staff Member
+                  </th>
+                  {days.map(({ day, dateStr, dow }) => {
+                    const isToday   = dateStr === todayStr;
+                    const isWeekend = dow === 0 || dow === 6;
+                    return (
+                      <th key={dateStr}
+                        className={`w-10 min-w-[40px] py-1.5 text-center border-r last:border-0 border-gray-100 ${
+                          isToday ? 'bg-blue-100' : isWeekend ? 'bg-gray-100' : ''
+                        }`}>
+                        <div className={`font-bold ${isToday ? 'text-blue-700' : isWeekend ? 'text-gray-400' : 'text-gray-600'}`}>{day}</div>
+                        <div className={`text-gray-400 font-normal ${isWeekend ? 'text-gray-300' : ''}`}>{DOW_SHORT[dow]}</div>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {teamStaff.length === 0 ? (
+                  <tr><td colSpan={days.length + 1} className="text-center py-8 text-gray-400">No staff in this team.</td></tr>
+                ) : teamStaff.map(staff => {
+                  const staffShifts = shiftMap[staff.id] || {};
+                  const onLeaveDays = leaveMap[staff.name] || new Set();
+                  const isSupervisor = staff.role === 'supervisor' || staff.role === 'm_supervisor';
+                  return (
+                    <tr key={staff.id} className={`hover:bg-gray-50/50 ${isSupervisor ? 'bg-amber-50/30' : ''}`}>
+                      <td className="sticky left-0 z-10 bg-white px-3 py-1.5 border-r border-gray-200 font-medium text-gray-800 whitespace-nowrap"
+                        style={{ background: isSupervisor ? '#fffbeb' : 'white' }}>
+                        <div className="flex items-center gap-1.5">
+                          {isSupervisor && <span className="text-amber-500 text-xs">⭐</span>}
+                          <span className="truncate max-w-[150px]" title={staff.name}>{staff.name}</span>
+                        </div>
+                      </td>
+                      {days.map(({ day, dateStr, dow }) => {
+                        const isOnLeave = onLeaveDays.has(dateStr);
+                        const shiftType = staffShifts[dateStr];
+                        const isToday   = dateStr === todayStr;
+                        const isWeekend = dow === 0 || dow === 6;
+
+                        if (isOnLeave) {
+                          return (
+                            <td key={dateStr} title="On Leave"
+                              className={`border-r last:border-0 border-gray-100 p-0.5 text-center ${isToday ? 'bg-blue-50' : isWeekend ? 'bg-gray-50' : ''}`}>
+                              <span className="block w-full text-center text-xs font-semibold bg-red-100 text-red-600 border border-red-200 rounded px-0.5 py-0.5">L</span>
+                            </td>
+                          );
+                        }
+                        if (!shiftType) {
+                          return (
+                            <td key={dateStr}
+                              className={`border-r last:border-0 border-gray-100 p-0.5 text-center ${isToday ? 'bg-blue-50' : isWeekend ? 'bg-gray-50' : ''}`}>
+                              <span className="block text-gray-200">—</span>
+                            </td>
+                          );
+                        }
+                        const { short, bg, text, border } = SHIFT_META[shiftType] || SHIFT_META.rest;
+                        return (
+                          <td key={dateStr} title={SHIFT_META[shiftType]?.label}
+                            className={`border-r last:border-0 border-gray-100 p-0.5 ${isToday ? 'bg-blue-50' : isWeekend ? 'bg-gray-50' : ''}`}>
+                            <span className={`block text-center text-xs font-semibold rounded px-0.5 py-0.5 border ${bg} ${text} ${border}`}>{short}</span>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Shift legend */}
+          <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex flex-wrap gap-x-4 gap-y-1.5">
+            {Object.entries(SHIFT_META).map(([k, { label, short, bg, text }]) => (
+              <span key={k} className="flex items-center gap-1.5 text-xs text-gray-600">
+                <span className={`w-5 h-5 rounded flex items-center justify-center font-bold text-xs ${bg} ${text}`}>{short}</span>
+                {label}
+              </span>
+            ))}
+            <span className="flex items-center gap-1.5 text-xs text-gray-600">
+              <span className="w-5 h-5 rounded flex items-center justify-center font-bold text-xs bg-red-100 text-red-600">L</span>
+              On Leave
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Roster tab ───────────────────────────────────────────────────────────────
 function RosterTab() {
   const qc = useQueryClient();
@@ -1687,6 +2072,7 @@ function HolidaysTab() {
 const TABS = [
   { key: 'overview',  label: 'Overview',  icon: CalendarDays },
   { key: 'calendar',  label: 'Calendar',  icon: CalendarDays },
+  { key: 'shifts',    label: 'Shifts',    icon: ClipboardList },
   { key: 'submit',    label: '+ Submit',  icon: Plus },
   { key: 'records',   label: 'Records',   icon: ClipboardList },
   { key: 'balances',  label: 'Balances',  icon: Users },
@@ -1737,6 +2123,7 @@ export default function LeavePage() {
       <div className="flex-1 overflow-y-auto bg-gray-50">
         {tab === 'overview'  && <OverviewTab />}
         {tab === 'calendar'  && <CalendarTab />}
+        {tab === 'shifts'    && <ShiftsTab />}
         {tab === 'submit'    && <SubmitTab />}
         {tab === 'records'   && <RecordsTab isAdmin={isAdmin} />}
         {tab === 'balances'  && <BalancesTab />}
