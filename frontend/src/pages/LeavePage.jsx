@@ -1106,6 +1106,276 @@ function ReplaceRosterModal({ team, onClose }) {
   );
 }
 
+// ─── Calendar Tab ─────────────────────────────────────────────────────────────
+const LEAVE_COLORS = {
+  'Annual Leave':        { chip: 'bg-blue-100 text-blue-700 border-blue-200',   dot: 'bg-blue-500' },
+  'Sick Leave':          { chip: 'bg-red-100 text-red-700 border-red-200',      dot: 'bg-red-500' },
+  'Compassionate Leave': { chip: 'bg-purple-100 text-purple-700 border-purple-200', dot: 'bg-purple-500' },
+  'Maternity Leave':     { chip: 'bg-pink-100 text-pink-700 border-pink-200',   dot: 'bg-pink-500' },
+  'Paternity Leave':     { chip: 'bg-teal-100 text-teal-700 border-teal-200',   dot: 'bg-teal-500' },
+};
+const MONTH_NAMES = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
+const DOW_LABELS  = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+function CalendarTab() {
+  const now   = new Date();
+  const [year,  setYear]  = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1); // 1-indexed
+  const [teamFilter, setTeamFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  const monthStr = `${year}-${String(month).padStart(2,'0')}`;
+  const todayStr = now.toISOString().slice(0,10);
+
+  const { data, isLoading } = useQuery(
+    ['lms-calendar', monthStr],
+    () => leaveApi.calendar({ month: monthStr }).then(r => r.data),
+    { keepPreviousData: true }
+  );
+  const { data: allStaff = [] } = useQuery('lms-staff', () => leaveApi.staff().then(r => r.data));
+  const teams = useMemo(() => [...new Set(allStaff.map(s => s.team_name).filter(Boolean))].sort(), [allStaff]);
+
+  // Navigate months
+  const prevMonth = () => { if (month === 1) { setMonth(12); setYear(y => y-1); } else setMonth(m => m-1); };
+  const nextMonth = () => { if (month === 12) { setMonth(1); setYear(y => y+1); } else setMonth(m => m+1); };
+  const goToday   = () => { setYear(now.getFullYear()); setMonth(now.getMonth()+1); setSelectedDay(null); };
+
+  // Build day → records map
+  const dayMap = useMemo(() => {
+    if (!data?.records) return {};
+    const map = {};
+    const firstDay = new Date(year, month-1, 1);
+    const lastDay  = new Date(year, month, 0);
+
+    data.records.forEach(r => {
+      if (teamFilter && r.team_name !== teamFilter) return;
+      if (typeFilter && r.leave_type !== typeFilter) return;
+      const s = new Date(Math.max(new Date(r.start_date+'T00:00:00'), firstDay));
+      const e = new Date(Math.min(new Date(r.end_date+'T00:00:00'), lastDay));
+      for (const d = new Date(s); d <= e; d.setDate(d.getDate()+1)) {
+        const k = d.toISOString().slice(0,10);
+        if (!map[k]) map[k] = [];
+        map[k].push(r);
+      }
+    });
+    return map;
+  }, [data, teamFilter, typeFilter, year, month]);
+
+  // Build holiday map
+  const holidayMap = useMemo(() => {
+    const m = {};
+    (data?.holidays || []).forEach(h => { m[h.date.slice(0,10)] = h.name; });
+    return m;
+  }, [data]);
+
+  // Calendar grid: array of weeks (each 7 slots, null = padding)
+  const weeks = useMemo(() => {
+    const first   = new Date(year, month-1, 1);
+    const total   = new Date(year, month, 0).getDate();
+    const startDow = (first.getDay() + 6) % 7; // Mon=0
+    const days = [...Array(startDow).fill(null), ...Array.from({length: total}, (_,i) => i+1)];
+    while (days.length % 7) days.push(null);
+    const w = [];
+    for (let i=0; i<days.length; i+=7) w.push(days.slice(i,i+7));
+    return w;
+  }, [year, month]);
+
+  // Monthly summary
+  const summary = useMemo(() => {
+    const counts = {};
+    (data?.records || []).forEach(r => {
+      if (teamFilter && r.team_name !== teamFilter) return;
+      if (typeFilter && r.leave_type !== typeFilter) return;
+      counts[r.leave_type] = (counts[r.leave_type]||0) + 1;
+    });
+    return counts;
+  }, [data, teamFilter, typeFilter]);
+
+  const selectedEntries = selectedDay ? (dayMap[selectedDay] || []) : [];
+  const fSel = 'border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300';
+
+  return (
+    <div className="p-4 md:p-6 space-y-4">
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Month nav */}
+        <div className="flex items-center gap-2">
+          <button onClick={prevMonth} className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600">
+            <ChevronDown size={14} className="rotate-90" />
+          </button>
+          <span className="text-base font-bold text-gray-900 w-36 text-center">
+            {MONTH_NAMES[month-1]} {year}
+          </span>
+          <button onClick={nextMonth} className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600">
+            <ChevronDown size={14} className="-rotate-90" />
+          </button>
+          <button onClick={goToday} className="text-xs text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg ml-1">
+            Today
+          </button>
+        </div>
+
+        {/* Filters */}
+        <select className={fSel} value={teamFilter} onChange={e => { setTeamFilter(e.target.value); setSelectedDay(null); }}>
+          <option value="">All teams</option>
+          {teams.map(t => <option key={t}>{t}</option>)}
+        </select>
+        <select className={fSel} value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setSelectedDay(null); }}>
+          <option value="">All leave types</option>
+          {LEAVE_TYPES.map(t => <option key={t}>{t}</option>)}
+        </select>
+
+        {/* Legend */}
+        <div className="flex items-center gap-3 ml-auto flex-wrap">
+          {Object.entries(LEAVE_COLORS).map(([type, { dot }]) => (
+            <span key={type} className="flex items-center gap-1 text-xs text-gray-500">
+              <span className={`w-2.5 h-2.5 rounded-full ${dot}`} />
+              {type.replace(' Leave','')}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Monthly summary bar */}
+      {Object.keys(summary).length > 0 && (
+        <div className="flex items-center gap-4 px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs text-gray-500 flex-wrap">
+          <span className="font-semibold text-gray-700">
+            {Object.values(summary).reduce((a,b)=>a+b,0)} leave instance{Object.values(summary).reduce((a,b)=>a+b,0)!==1?'s':''} this month
+          </span>
+          {Object.entries(summary).map(([type, count]) => {
+            const { dot } = LEAVE_COLORS[type] || { dot: 'bg-gray-400' };
+            return (
+              <span key={type} className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${dot}`} />
+                {type.replace(' Leave','')}: <strong className="text-gray-700">{count}</strong>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="flex gap-4 items-start">
+        {/* Calendar grid */}
+        <div className="flex-1 min-w-0 bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {/* Day-of-week headers */}
+          <div className="grid grid-cols-7 border-b border-gray-100">
+            {DOW_LABELS.map(d => (
+              <div key={d} className={`py-2 text-center text-xs font-semibold ${d==='Sat'||d==='Sun' ? 'text-gray-400' : 'text-gray-500'}`}>
+                {d}
+              </div>
+            ))}
+          </div>
+
+          {isLoading ? <div className="py-16 text-center text-sm text-gray-400">Loading…</div> : (
+            <div>
+              {weeks.map((week, wi) => (
+                <div key={wi} className="grid grid-cols-7 border-b last:border-0 border-gray-100">
+                  {week.map((day, di) => {
+                    if (!day) return <div key={di} className="bg-gray-50/50 min-h-[80px] border-r last:border-0 border-gray-100" />;
+
+                    const dateStr  = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                    const entries  = dayMap[dateStr] || [];
+                    const isToday  = dateStr === todayStr;
+                    const holiday  = holidayMap[dateStr];
+                    const isWeekend = di >= 5; // Sat/Sun
+                    const isSelected = selectedDay === dateStr;
+                    const show     = entries.slice(0, 2);
+                    const overflow = entries.length - show.length;
+
+                    return (
+                      <div key={di}
+                        onClick={() => setSelectedDay(isSelected ? null : dateStr)}
+                        className={`min-h-[80px] p-1.5 border-r last:border-0 border-gray-100 cursor-pointer transition-colors ${
+                          isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-400' :
+                          isWeekend  ? 'bg-gray-50/40 hover:bg-gray-50' : 'hover:bg-gray-50'
+                        }`}>
+                        {/* Date number */}
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full ${
+                            isToday ? 'bg-blue-600 text-white' : isWeekend ? 'text-gray-400' : 'text-gray-700'
+                          }`}>{day}</span>
+                          {holiday && <span className="text-xs text-amber-600" title={holiday}>🎌</span>}
+                        </div>
+                        {/* Holiday label */}
+                        {holiday && (
+                          <p className="text-xs text-amber-600 truncate leading-tight mb-0.5" title={holiday}>{holiday}</p>
+                        )}
+                        {/* Leave chips */}
+                        <div className="space-y-0.5">
+                          {show.map((r, i) => {
+                            const { chip } = LEAVE_COLORS[r.leave_type] || { chip: 'bg-gray-100 text-gray-600 border-gray-200' };
+                            return (
+                              <div key={i} className={`text-xs px-1.5 py-0.5 rounded border truncate leading-tight ${chip}`}
+                                title={`${r.staff_name} — ${r.leave_type}`}>
+                                {r.staff_name.split(' ')[0]}
+                              </div>
+                            );
+                          })}
+                          {overflow > 0 && (
+                            <div className="text-xs text-gray-400 pl-1">+{overflow} more</div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Day detail panel */}
+        {selectedDay && (
+          <div className="w-72 shrink-0 bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-gray-900">
+                  {new Date(selectedDay+'T00:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}
+                </p>
+                {holidayMap[selectedDay] && (
+                  <p className="text-xs text-amber-600 mt-0.5">🎌 {holidayMap[selectedDay]}</p>
+                )}
+              </div>
+              <button onClick={() => setSelectedDay(null)} className="text-gray-300 hover:text-gray-500">
+                <X size={15} />
+              </button>
+            </div>
+
+            {selectedEntries.length === 0 ? (
+              <p className="px-4 py-6 text-sm text-gray-400 text-center">No approved leave on this day.</p>
+            ) : (
+              <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto">
+                {selectedEntries.map((r, i) => {
+                  const { chip, dot } = LEAVE_COLORS[r.leave_type] || { chip:'bg-gray-100 text-gray-600 border-gray-200', dot:'bg-gray-400' };
+                  return (
+                    <div key={i} className="px-4 py-2.5 flex items-start gap-2.5">
+                      <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dot}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{r.staff_name}</p>
+                        <p className="text-xs text-gray-400 truncate">{r.team_name || 'Unassigned'}</p>
+                        <span className={`inline-block mt-1 text-xs px-1.5 py-0.5 rounded border ${chip}`}>
+                          {r.leave_type}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50">
+              <p className="text-xs text-gray-500">
+                <strong className="text-gray-700">{selectedEntries.length}</strong> person{selectedEntries.length!==1?'s':''} on leave
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Roster tab ───────────────────────────────────────────────────────────────
 function RosterTab() {
   const qc = useQueryClient();
@@ -1415,12 +1685,13 @@ function HolidaysTab() {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 const TABS = [
-  { key: 'overview', label: 'Overview',  icon: CalendarDays },
-  { key: 'submit',   label: '+ Submit',  icon: Plus },
-  { key: 'records',  label: 'Records',   icon: ClipboardList },
-  { key: 'balances', label: 'Balances',  icon: Users },
-  { key: 'roster',   label: 'Roster',    icon: Users,        adminOnly: true },
-  { key: 'holidays', label: 'Holidays',  icon: CalendarDays, adminOnly: true },
+  { key: 'overview',  label: 'Overview',  icon: CalendarDays },
+  { key: 'calendar',  label: 'Calendar',  icon: CalendarDays },
+  { key: 'submit',    label: '+ Submit',  icon: Plus },
+  { key: 'records',   label: 'Records',   icon: ClipboardList },
+  { key: 'balances',  label: 'Balances',  icon: Users },
+  { key: 'roster',    label: 'Roster',    icon: Users,        adminOnly: true },
+  { key: 'holidays',  label: 'Holidays',  icon: CalendarDays, adminOnly: true },
 ];
 
 export default function LeavePage() {
@@ -1465,6 +1736,7 @@ export default function LeavePage() {
 
       <div className="flex-1 overflow-y-auto bg-gray-50">
         {tab === 'overview'  && <OverviewTab />}
+        {tab === 'calendar'  && <CalendarTab />}
         {tab === 'submit'    && <SubmitTab />}
         {tab === 'records'   && <RecordsTab isAdmin={isAdmin} />}
         {tab === 'balances'  && <BalancesTab />}

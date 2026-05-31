@@ -126,6 +126,7 @@ export const reportsApi = {
 
 // ─── Leave Management ─────────────────────────────────────────────────────────
 export const leaveApi = {
+  calendar:      (p)        => api.get('/leave/calendar', { params: p }),
   overview:      ()         => api.get('/leave/overview'),
   requests:      (p)        => api.get('/leave/requests', { params: p }),
   submit:        (d)        => api.post('/leave/requests', d),

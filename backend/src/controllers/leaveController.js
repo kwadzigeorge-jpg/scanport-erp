@@ -761,8 +761,41 @@ async function deleteHoliday(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Calendar ─────────────────────────────────────────────────────────────────
+async function getCalendar(req, res, next) {
+  try {
+    const raw   = req.query.month || new Date().toISOString().slice(0, 7); // "YYYY-MM"
+    const [y, m] = raw.split('-').map(Number);
+    const start  = `${y}-${String(m).padStart(2,'0')}-01`;
+    const end    = new Date(y, m, 0).toISOString().slice(0, 10); // last day of month
+
+    const { rows: records } = await db.query(`
+      SELECT lr.id, lr.start_date, lr.end_date, lr.leave_type, lr.working_days,
+             lr.is_gift_leave, s.name AS staff_name, s.role AS staff_role,
+             t.name AS team_name, d.name AS dept_name
+      FROM lms_leave_requests lr
+      JOIN lms_staff s ON s.id = lr.staff_id
+      LEFT JOIN lms_teams t ON t.id = s.team_id
+      LEFT JOIN lms_departments d ON d.id = t.department_id
+      WHERE lr.status = 'Approved'
+        AND lr.start_date <= $2
+        AND lr.end_date   >= $1
+      ORDER BY t.name, s.name
+    `, [start, end]);
+
+    const { rows: holidays } = await db.query(
+      `SELECT date::text AS date, name FROM lms_public_holidays
+       WHERE date >= $1 AND date <= $2 ORDER BY date`,
+      [start, end]
+    );
+
+    return res.json({ month: raw, start, end, records, holidays });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   ensureSchema, ROLE_LABELS, entitlementForRole,
+  getCalendar,
   getOverview, getRequests, submitRequest, approveRequest, rejectRequest, deleteRequest,
   getBalances,
   getDepartments, createDepartment, deleteDepartment, addTeam, deleteTeam,

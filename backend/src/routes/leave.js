@@ -8,6 +8,9 @@ router.use(authenticate);
 const adminOrSuper = requireRole('admin', 'supervisor');
 const adminOnly    = requireRole('admin');
 
+// Calendar
+router.get('/calendar',         adminOrSuper, c.getCalendar);
+
 // Overview
 router.get('/overview',         adminOrSuper, c.getOverview);
 
