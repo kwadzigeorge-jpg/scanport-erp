@@ -6,7 +6,8 @@ import toast from 'react-hot-toast';
 import {
   CalendarDays, Users, Clock, CheckCircle, XCircle, AlertTriangle,
   ChevronDown, ChevronUp, Plus, Trash2, UserPlus, ShieldOff,
-  ClipboardList, Upload, Download, Search, ChevronRight,
+  ClipboardList, Upload, Download, Search, ChevronRight, Pencil, X,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -871,21 +872,259 @@ function BalancesTab() {
   );
 }
 
+// ─── Staff Modal (add / edit) ─────────────────────────────────────────────────
+function StaffModal({ staff, defaultTeamId, allTeams, onClose }) {
+  const qc = useQueryClient();
+  const isEdit = !!staff;
+
+  const [form, setForm] = useState({
+    name:             staff?.name              || '',
+    role:             staff?.role              || 'staff',
+    teamId:           staff?.team_id?.toString() || defaultTeamId?.toString() || '',
+    annualEntitlement: staff?.annual_entitlement ?? entitlementForRole(staff?.role || 'staff'),
+    customEnt:        false,
+  });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // Auto-fill entitlement when role changes (unless user overrode it)
+  const handleRoleChange = (role) => {
+    set('role', role);
+    if (!form.customEnt) set('annualEntitlement', entitlementForRole(role));
+  };
+
+  const ROLE_COLOR = {
+    supervisor: 'border-purple-300 bg-purple-50',
+    m_supervisor: 'border-blue-300 bg-blue-50',
+    maintenance: 'border-teal-300 bg-teal-50',
+    staff: 'border-gray-200 bg-white',
+  };
+
+  const mut = useMutation(
+    (d) => isEdit
+      ? leaveApi.updateStaff(staff.id, d)
+      : leaveApi.addStaff(d),
+    {
+      onSuccess: () => {
+        toast.success(isEdit ? 'Member updated.' : 'Member added to roster.');
+        qc.invalidateQueries('lms-staff');
+        qc.invalidateQueries('lms-departments');
+        onClose();
+      },
+      onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+    }
+  );
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) return toast.error('Name is required.');
+    mut.mutate({
+      name:             form.name.trim(),
+      role:             form.role,
+      teamId:           form.teamId ? parseInt(form.teamId) : null,
+      annualEntitlement: parseInt(form.annualEntitlement),
+      isActive:         true,
+    });
+  };
+
+  const sl = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-900">{isEdit ? `Edit — ${staff.name}` : 'Add Staff Member'}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {/* Full name */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Full Name <span className="text-red-500">*</span></label>
+            <input className={sl} value={form.name} onChange={e => set('name', e.target.value)} required placeholder="e.g. Kwame Asante" />
+          </div>
+
+          {/* Role — visual selector */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Role</label>
+            <div className="grid grid-cols-2 gap-2">
+              {ROLE_OPTIONS.map(r => (
+                <button type="button" key={r.value}
+                  onClick={() => handleRoleChange(r.value)}
+                  className={`flex flex-col items-start px-3 py-2.5 rounded-xl border-2 text-left transition-all ${
+                    form.role === r.value
+                      ? ROLE_COLOR[r.value] + ' border-opacity-100'
+                      : 'border-gray-100 hover:border-gray-200'
+                  }`}>
+                  <span className="text-xs font-semibold text-gray-800">{r.label}</span>
+                  <span className="text-xs text-gray-400">{r.ent} days entitlement</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Team assignment */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Team {isEdit && <span className="text-gray-400 font-normal">(change to transfer member)</span>}
+            </label>
+            <select className={sl} value={form.teamId} onChange={e => set('teamId', e.target.value)}>
+              <option value="">— Unassigned —</option>
+              {allTeams.map(t => (
+                <option key={t.id} value={t.id}>{t.deptName} › {t.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Entitlement override */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-gray-600">Annual Entitlement (days)</label>
+              <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+                <input type="checkbox" checked={form.customEnt} onChange={e => set('customEnt', e.target.checked)} />
+                Override default
+              </label>
+            </div>
+            <input type="number" className={sl} min={1} max={60}
+              value={form.annualEntitlement}
+              disabled={!form.customEnt}
+              onChange={e => set('annualEntitlement', e.target.value)} />
+            {!form.customEnt && (
+              <p className="text-xs text-gray-400 mt-0.5">Auto-set by role: {entitlementForRole(form.role)} days</p>
+            )}
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 border border-gray-200 text-gray-600 text-sm py-2.5 rounded-lg hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="submit" disabled={mut.isLoading}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg">
+              {mut.isLoading ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Member'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Replace Roster Modal ────────────────────────────────────────────────────
+function ReplaceRosterModal({ team, onClose }) {
+  const qc = useQueryClient();
+  const [text, setText] = useState('');
+
+  function parseRosterText(t) {
+    return t.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+      const parts = l.split(/\s*[-–]\s*/);
+      const name = parts[0].trim();
+      const raw  = parts[1]?.trim().toLowerCase() || '';
+      let role = 'staff';
+      if (raw.includes('m spvr') || raw.includes('marshal')) role = 'm_supervisor';
+      else if (raw.includes('spvr') || raw.includes('supervisor'))  role = 'supervisor';
+      else if (raw.includes('maint'))                                role = 'maintenance';
+      return { name, role };
+    });
+  }
+
+  const preview = useMemo(() => parseRosterText(text), [text]);
+
+  const mut = useMutation(({ teamId, members }) => leaveApi.replaceRoster(teamId, { members }), {
+    onSuccess: res => {
+      toast.success(`Roster replaced — ${res.data.replaced} member(s) set.`);
+      qc.invalidateQueries('lms-staff');
+      qc.invalidateQueries('lms-departments');
+      onClose();
+    },
+    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+  });
+
+  const handleReplace = () => {
+    if (!preview.length) return toast.error('Paste at least one name.');
+    if (!window.confirm(`Replace all current members of "${team.name}" with ${preview.length} new member(s)?\n\nExisting leave records are preserved.`)) return;
+    mut.mutate({ teamId: team.id, members: preview });
+  };
+
+  const ROLE_BADGE = { supervisor: 'Spvr', m_supervisor: 'M Spvr', maintenance: 'Maint', staff: 'Staff' };
+  const ROLE_CLR   = { supervisor: 'purple', m_supervisor: 'blue', maintenance: 'teal', staff: 'gray' };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+          <div>
+            <h3 className="font-semibold text-gray-900">Replace Roster — {team.name}</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Current members will be deactivated. Leave records are preserved.</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        <div className="flex gap-4 flex-1 overflow-hidden px-6 py-4">
+          {/* Input */}
+          <div className="flex-1 flex flex-col gap-2">
+            <p className="text-xs font-medium text-gray-600">
+              Paste roster — one name per line.<br />
+              Add role after a dash: <code className="bg-gray-100 px-1 rounded">Name - Spvr</code><br />
+              Role codes: <strong>Spvr</strong>, <strong>M Spvr</strong>, <strong>Maint</strong> (blank = Staff)
+            </p>
+            <textarea
+              className="flex-1 border border-gray-300 rounded-xl px-3 py-2.5 text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
+              rows={12}
+              placeholder={"Dennis Gardiner - Spvr\nMertz Matthew\nSitsope Cudjoe - Maint"}
+              value={text}
+              onChange={e => setText(e.target.value)}
+            />
+          </div>
+
+          {/* Preview */}
+          <div className="w-56 flex flex-col gap-2 shrink-0">
+            <p className="text-xs font-medium text-gray-600">Preview ({preview.length} members)</p>
+            <div className="flex-1 border border-gray-200 rounded-xl overflow-y-auto divide-y divide-gray-100">
+              {preview.length === 0
+                ? <p className="px-3 py-3 text-xs text-gray-400 italic">Start typing to preview…</p>
+                : preview.map((m, i) => (
+                  <div key={i} className="flex items-center justify-between px-3 py-2">
+                    <span className="text-xs text-gray-800 truncate flex-1 mr-2">{m.name}</span>
+                    <Badge color={ROLE_CLR[m.role]}>{ROLE_BADGE[m.role]}</Badge>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
+          <button onClick={onClose} className="flex-1 border border-gray-200 text-gray-600 text-sm py-2.5 rounded-lg hover:bg-gray-50">
+            Cancel
+          </button>
+          <button onClick={handleReplace} disabled={!preview.length || mut.isLoading}
+            className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg">
+            {mut.isLoading ? 'Replacing…' : `Replace with ${preview.length} Member${preview.length !== 1 ? 's' : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Roster tab ───────────────────────────────────────────────────────────────
 function RosterTab() {
   const qc = useQueryClient();
   const { data: depts = [], isLoading } = useQuery('lms-departments', () => leaveApi.departments().then(r => r.data));
   const { data: allStaff = [] }         = useQuery('lms-staff',       () => leaveApi.staff().then(r => r.data));
 
-  const [expanded, setExpanded]         = useState({});
-  const [newDept, setNewDept]           = useState('');
-  const [newTeams, setNewTeams]         = useState({});
-  const [addMemberTeam, setAddMemberTeam] = useState(null);
-  const [newMember, setNewMember]       = useState({ name: '', role: 'staff' });
-  const [replaceTeam, setReplaceTeam]   = useState(null);
-  const [rosterText, setRosterText]     = useState('');
+  const [expanded, setExpanded]   = useState({});
+  const [newDept, setNewDept]     = useState('');
+  const [newTeams, setNewTeams]   = useState({});
+  const [staffModal, setStaffModal]   = useState(null); // { staff?, teamId }
+  const [replaceTeam, setReplaceTeam] = useState(null);
+  const [search, setSearch]           = useState('');
 
   const toggle = id => setExpanded(e => ({ ...e, [id]: !e[id] }));
+
+  // Flat list of all teams for the staff modal team selector
+  const allTeams = useMemo(() => depts.flatMap(d =>
+    (d.teams || []).map(t => ({ ...t, deptName: d.name }))
+  ), [depts]);
 
   const staffByTeam = useMemo(() => {
     const map = {};
@@ -893,179 +1132,231 @@ function RosterTab() {
     return map;
   }, [allStaff]);
 
-  const createDept   = useMutation(() => leaveApi.createDept({ name: newDept }), {
+  // Cross-team search results
+  const searchResults = useMemo(() => {
+    if (!search.trim()) return [];
+    const q = search.toLowerCase();
+    return allStaff.filter(s => s.name.toLowerCase().includes(q));
+  }, [allStaff, search]);
+
+  const ROLE_COLOR = { supervisor: 'purple', m_supervisor: 'blue', maintenance: 'teal', staff: 'gray' };
+  const ROLE_ABBR  = { supervisor: 'Spvr', m_supervisor: 'M Spvr', maintenance: 'Maint. Officer', staff: 'Staff' };
+  const AVATAR_BG  = { supervisor: 'bg-purple-500', m_supervisor: 'bg-blue-500', maintenance: 'bg-teal-500', staff: 'bg-gray-400' };
+
+  const createDept = useMutation(() => leaveApi.createDept({ name: newDept }), {
     onSuccess: () => { setNewDept(''); qc.invalidateQueries('lms-departments'); toast.success('Department created.'); },
     onError: e => toast.error(e.response?.data?.error || 'Failed.'),
   });
-  const deleteDept   = useMutation(id => leaveApi.deleteDept(id), {
-    onSuccess: () => { qc.invalidateQueries('lms-departments'); toast.success('Deleted.'); },
+  const deleteDept = useMutation(id => leaveApi.deleteDept(id), {
+    onSuccess: () => { qc.invalidateQueries('lms-departments'); toast.success('Department deleted.'); },
     onError: e => toast.error(e.response?.data?.error || 'Failed.'),
   });
-  const addTeam      = useMutation(({ deptId, name }) => leaveApi.addTeam(deptId, { name }), {
-    onSuccess: (_, { deptId }) => { setNewTeams(t => ({ ...t, [deptId]: '' })); qc.invalidateQueries('lms-departments'); },
+  const addTeam = useMutation(({ deptId, name }) => leaveApi.addTeam(deptId, { name }), {
+    onSuccess: (_, { deptId }) => { setNewTeams(t => ({ ...t, [deptId]: '' })); qc.invalidateQueries('lms-departments'); toast.success('Team added.'); },
     onError: e => toast.error(e.response?.data?.error || 'Failed.'),
   });
-  const deleteTeam   = useMutation(({ deptId, teamId }) => leaveApi.deleteTeam(deptId, teamId), {
+  const deleteTeam = useMutation(({ deptId, teamId }) => leaveApi.deleteTeam(deptId, teamId), {
     onSuccess: () => { qc.invalidateQueries('lms-departments'); qc.invalidateQueries('lms-staff'); toast.success('Team removed.'); },
     onError: e => toast.error(e.response?.data?.error || 'Failed.'),
   });
-  const addStaff     = useMutation(({ teamId }) => leaveApi.addStaff({ teamId, name: newMember.name, role: newMember.role }), {
-    onSuccess: () => { setAddMemberTeam(null); setNewMember({ name: '', role: 'staff' }); qc.invalidateQueries('lms-staff'); qc.invalidateQueries('lms-departments'); toast.success('Member added.'); },
+  const removeStaff = useMutation(id => leaveApi.removeStaff(id), {
+    onSuccess: () => { qc.invalidateQueries('lms-staff'); qc.invalidateQueries('lms-departments'); toast.success('Member removed.'); },
     onError: e => toast.error(e.response?.data?.error || 'Failed.'),
   });
-  const removeStaff  = useMutation(id => leaveApi.removeStaff(id), {
-    onSuccess: () => { qc.invalidateQueries('lms-staff'); qc.invalidateQueries('lms-departments'); },
-    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
-  });
-  const replaceRoster = useMutation(({ teamId, members }) => leaveApi.replaceRoster(teamId, { members }), {
-    onSuccess: res => {
-      toast.success(`Roster updated — ${res.data.replaced} member(s) added.`);
-      setReplaceTeam(null); setRosterText('');
-      qc.invalidateQueries('lms-staff'); qc.invalidateQueries('lms-departments');
-    },
-    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
-  });
-
-  function parseRosterText(text) {
-    return text.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
-      const parts = l.split(/\s*[-–]\s*/);
-      const name = parts[0].trim();
-      const rawRole = parts[1]?.trim().toLowerCase() || '';
-      let role = 'staff';
-      if (rawRole.includes('m spvr') || rawRole.includes('marshal')) role = 'm_supervisor';
-      else if (rawRole.includes('spvr') || rawRole.includes('supervisor')) role = 'supervisor';
-      else if (rawRole.includes('maint')) role = 'maintenance';
-      return { name, role };
-    });
-  }
 
   if (isLoading) return <Spinner />;
 
   return (
     <div className="p-6 space-y-5">
-      {/* Replace Roster modal */}
+      {/* Modals */}
+      {staffModal && (
+        <StaffModal
+          staff={staffModal.staff || null}
+          defaultTeamId={staffModal.teamId}
+          allTeams={allTeams}
+          onClose={() => setStaffModal(null)}
+        />
+      )}
       {replaceTeam && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4">
-            <h3 className="font-semibold text-gray-900 mb-1">Replace Roster — {replaceTeam.name}</h3>
-            <p className="text-xs text-gray-500 mb-3">
-              One member per line. Format: <code className="bg-gray-100 px-1 rounded">Name - Role</code><br />
-              Roles: <strong>Spvr</strong>, <strong>M Spvr</strong>, <strong>Maint</strong>, or blank for Staff.<br />
-              Current members will be deactivated. Leave history is preserved.
+        <ReplaceRosterModal team={replaceTeam} onClose={() => setReplaceTeam(null)} />
+      )}
+
+      {/* Top bar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[220px] max-w-sm">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input className="w-full border border-gray-200 rounded-lg pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            placeholder="Search staff across all teams…" value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+
+        {/* Add department */}
+        <div className="flex gap-2 ml-auto">
+          <input type="text" className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 w-44"
+            placeholder="New department name" value={newDept} onChange={e => setNewDept(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && newDept.trim() && createDept.mutate()} />
+          <button onClick={() => newDept.trim() && createDept.mutate()}
+            className="btn-primary text-sm py-2 px-4 flex items-center gap-1.5">
+            <Plus size={14} /> Add Dept
+          </button>
+        </div>
+      </div>
+
+      {/* Search results panel */}
+      {search.trim() && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Search results — {searchResults.length} member{searchResults.length !== 1 ? 's' : ''} found
             </p>
-            <textarea className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono" rows={10}
-              placeholder={"Dennis Gardiner - Spvr\nMertz Matthew\nSitsope Cudjoe"}
-              value={rosterText} onChange={e => setRosterText(e.target.value)} />
-            {rosterText && (
-              <p className="mt-1 text-xs text-gray-500">Preview: {parseRosterText(rosterText).length} member(s)</p>
-            )}
-            <div className="flex gap-2 mt-3">
-              <button disabled={replaceRoster.isLoading}
-                onClick={() => {
-                  const members = parseRosterText(rosterText);
-                  if (!members.length) return toast.error('No valid members found.');
-                  if (!window.confirm(`Replace all current members of "${replaceTeam.name}" with ${members.length} new member(s)?`)) return;
-                  replaceRoster.mutate({ teamId: replaceTeam.id, members });
-                }}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm py-2 rounded-lg">
-                {replaceRoster.isLoading ? 'Updating…' : 'Replace Roster'}
-              </button>
-              <button onClick={() => { setReplaceTeam(null); setRosterText(''); }}
-                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-            </div>
           </div>
+          {searchResults.length === 0
+            ? <p className="px-4 py-3 text-sm text-gray-400">No staff matched "{search}".</p>
+            : searchResults.map(s => (
+              <div key={s.id} className="flex items-center gap-3 px-4 py-2.5 border-b last:border-0 border-gray-50 hover:bg-gray-50">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 ${AVATAR_BG[s.role]}`}>
+                  {s.name[0]}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">{s.name}</p>
+                  <p className="text-xs text-gray-400">{s.team_name || 'Unassigned'} {s.dept_name ? `· ${s.dept_name}` : ''}</p>
+                </div>
+                <Badge color={ROLE_COLOR[s.role]}>{ROLE_ABBR[s.role]}</Badge>
+                <span className="text-xs text-gray-400">{s.annual_entitlement}d</span>
+                <button onClick={() => setStaffModal({ staff: s, teamId: s.team_id })}
+                  className="p-1.5 text-gray-300 hover:text-blue-500 rounded-lg hover:bg-blue-50">
+                  <Pencil size={13} />
+                </button>
+              </div>
+            ))
+          }
         </div>
       )}
 
-      {/* Add department */}
-      <Card title="Add Department">
-        <div className="flex gap-2">
-          <input type="text" className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
-            placeholder="Department name" value={newDept} onChange={e => setNewDept(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && newDept.trim() && createDept.mutate()} />
-          <button onClick={() => newDept.trim() && createDept.mutate()}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-1.5 rounded-lg">Create</button>
-        </div>
-      </Card>
-
-      {depts.map(d => (
-        <div key={d.id} className="bg-white border border-gray-200 rounded-xl">
-          <div className="flex items-center justify-between px-4 py-3 cursor-pointer select-none" onClick={() => toggle(d.id)}>
-            <span className="font-semibold text-sm text-gray-900">{d.name}</span>
-            <div className="flex items-center gap-2">
-              <button onClick={e => { e.stopPropagation(); if (window.confirm(`Delete "${d.name}" and all its teams?`)) deleteDept.mutate(d.id); }}
-                className="text-red-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
-              {expanded[d.id] ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
-            </div>
-          </div>
-          {expanded[d.id] && (
-            <div className="border-t border-gray-100 p-4 space-y-4">
-              <div className="flex gap-2">
-                <input type="text" className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
-                  placeholder="New team name" value={newTeams[d.id] || ''}
-                  onChange={e => setNewTeams(t => ({ ...t, [d.id]: e.target.value }))} />
-                <button onClick={() => { const name = (newTeams[d.id] || '').trim(); if (name) addTeam.mutate({ deptId: d.id, name }); }}
-                  className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg">+ Add Team</button>
+      {/* Department / Team cards */}
+      {depts.map(d => {
+        const deptCount = (d.teams || []).reduce((s, t) => s + (t.member_count || 0), 0);
+        return (
+          <div key={d.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            {/* Department header */}
+            <div className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none hover:bg-gray-50 transition-colors"
+              onClick={() => toggle(d.id)}>
+              <div className="flex-1 flex items-center gap-3">
+                <span className="font-bold text-gray-900">{d.name}</span>
+                <Badge color="gray">{(d.teams || []).length} teams · {deptCount} staff</Badge>
               </div>
-              {(d.teams || []).map(t => (
-                <div key={t.id} className="border border-gray-100 rounded-xl overflow-hidden">
-                  <div className="flex items-center justify-between px-3 py-2 bg-gray-50">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-800">{t.name}</span>
-                      <Badge color="gray">{t.member_count} members</Badge>
-                    </div>
-                    <div className="flex gap-1 items-center">
-                      <button onClick={() => { setReplaceTeam({ id: t.id, name: t.name }); setRosterText(''); }}
-                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">
-                        <Upload size={12} /> Replace Roster
-                      </button>
-                      <button onClick={() => setAddMemberTeam(addMemberTeam === t.id ? null : t.id)}
-                        className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1 px-2 py-1 rounded hover:bg-green-50">
-                        <UserPlus size={12} /> Add Member
-                      </button>
-                      <button onClick={() => { if (window.confirm(`Remove team "${t.name}"?`)) deleteTeam.mutate({ deptId: d.id, teamId: t.id }); }}
-                        className="text-red-300 hover:text-red-500 p-1"><Trash2 size={13} /></button>
-                    </div>
-                  </div>
-                  {addMemberTeam === t.id && (
-                    <div className="px-3 py-2 border-b border-gray-100 bg-green-50 flex gap-2 flex-wrap">
-                      <input type="text" placeholder="Full name"
-                        className="flex-1 min-w-[150px] border border-gray-300 rounded px-2 py-1.5 text-xs"
-                        value={newMember.name} onChange={e => setNewMember(m => ({ ...m, name: e.target.value }))} />
-                      <select className="border border-gray-300 rounded px-2 py-1.5 text-xs"
-                        value={newMember.role} onChange={e => setNewMember(m => ({ ...m, role: e.target.value }))}>
-                        {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label} ({r.ent} days)</option>)}
-                      </select>
-                      <button onClick={() => newMember.name.trim() && addStaff.mutate({ teamId: t.id })}
-                        className="text-xs bg-green-600 text-white px-3 py-1.5 rounded">Add</button>
-                      <button onClick={() => setAddMemberTeam(null)}
-                        className="text-xs text-gray-500 px-2 py-1.5 rounded hover:bg-gray-100">Cancel</button>
-                    </div>
-                  )}
-                  <div className="divide-y divide-gray-100">
-                    {(staffByTeam[t.id] || []).map(s => (
-                      <div key={s.id} className="flex items-center justify-between px-3 py-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-900">{s.name}</span>
-                          <Badge color={s.role === 'supervisor' ? 'purple' : s.role === 'm_supervisor' ? 'blue' : s.role === 'maintenance' ? 'teal' : 'gray'}>
-                            {s.role === 'supervisor' ? 'Spvr' : s.role === 'm_supervisor' ? 'M Spvr' : s.role === 'maintenance' ? 'Maint. Officer' : 'Staff'}
-                          </Badge>
-                          <span className="text-xs text-gray-400">{s.annual_entitlement}d</span>
-                        </div>
-                        <button onClick={() => { if (window.confirm(`Remove ${s.name}?`)) removeStaff.mutate(s.id); }}
-                          className="text-red-200 hover:text-red-400"><Trash2 size={12} /></button>
-                      </div>
-                    ))}
-                    {!(staffByTeam[t.id] || []).length && (
-                      <p className="px-3 py-2 text-xs text-gray-400 italic">No active members</p>
-                    )}
-                  </div>
-                </div>
-              ))}
+              <button onClick={e => { e.stopPropagation(); if (window.confirm(`Delete department "${d.name}" and all its teams?`)) deleteDept.mutate(d.id); }}
+                className="p-1 text-red-200 hover:text-red-500 rounded" title="Delete department">
+                <Trash2 size={14} />
+              </button>
+              {expanded[d.id]
+                ? <ChevronUp size={16} className="text-gray-400 shrink-0" />
+                : <ChevronDown size={16} className="text-gray-400 shrink-0" />}
             </div>
-          )}
+
+            {expanded[d.id] && (
+              <div className="border-t border-gray-100 p-4 space-y-3">
+                {/* Add team bar */}
+                <div className="flex gap-2">
+                  <input type="text"
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    placeholder="New team name…"
+                    value={newTeams[d.id] || ''}
+                    onChange={e => setNewTeams(t => ({ ...t, [d.id]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') { const name = (newTeams[d.id]||'').trim(); if(name) addTeam.mutate({deptId: d.id, name}); }}} />
+                  <button onClick={() => { const name = (newTeams[d.id]||'').trim(); if(name) addTeam.mutate({deptId: d.id, name}); }}
+                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg whitespace-nowrap">
+                    + Add Team
+                  </button>
+                </div>
+
+                {/* Teams */}
+                {(d.teams || []).map(t => {
+                  const members = staffByTeam[t.id] || [];
+                  const roleBreakdown = ROLE_OPTIONS.map(r => ({
+                    ...r, count: members.filter(m => m.role === r.value).length
+                  })).filter(r => r.count > 0);
+
+                  return (
+                    <div key={t.id} className="border border-gray-100 rounded-xl overflow-hidden">
+                      {/* Team header */}
+                      <div className="flex items-center gap-3 px-3 py-2.5 bg-gray-50">
+                        <div className="flex-1 flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold text-gray-800">{t.name}</span>
+                          <span className="text-xs text-gray-400">{members.length} member{members.length !== 1 ? 's' : ''}</span>
+                          {roleBreakdown.map(r => (
+                            <Badge key={r.value} color={ROLE_COLOR[r.value]}>
+                              {r.count} {ROLE_ABBR[r.value]}
+                            </Badge>
+                          ))}
+                        </div>
+                        <div className="flex gap-1 items-center shrink-0">
+                          <button onClick={() => setStaffModal({ staff: null, teamId: t.id })}
+                            className="flex items-center gap-1 text-xs text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 px-2 py-1 rounded-lg">
+                            <UserPlus size={12} /> Add
+                          </button>
+                          <button onClick={() => setReplaceTeam(t)}
+                            className="flex items-center gap-1 text-xs text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-1 rounded-lg">
+                            <Upload size={12} /> Bulk
+                          </button>
+                          <button onClick={() => { if (window.confirm(`Remove team "${t.name}"?`)) deleteTeam.mutate({ deptId: d.id, teamId: t.id }); }}
+                            className="p-1 text-red-200 hover:text-red-400 rounded" title="Delete team">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Member rows */}
+                      <div className="divide-y divide-gray-50">
+                        {members.length === 0
+                          ? (
+                            <button onClick={() => setStaffModal({ staff: null, teamId: t.id })}
+                              className="w-full flex items-center gap-2 px-4 py-3 text-xs text-gray-400 hover:text-blue-500 hover:bg-blue-50 transition-colors">
+                              <Plus size={13} /> Click to add the first member
+                            </button>
+                          )
+                          : members.map(s => (
+                            <div key={s.id} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 transition-colors group">
+                              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 ${AVATAR_BG[s.role]}`}>
+                                {s.name[0]}
+                              </div>
+                              <span className="flex-1 text-sm text-gray-800">{s.name}</span>
+                              <Badge color={ROLE_COLOR[s.role]}>{ROLE_ABBR[s.role]}</Badge>
+                              <span className="text-xs text-gray-400 w-8 text-right">{s.annual_entitlement}d</span>
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => setStaffModal({ staff: s, teamId: s.team_id })}
+                                  title="Edit member"
+                                  className="p-1 text-gray-300 hover:text-blue-500 rounded">
+                                  <Pencil size={13} />
+                                </button>
+                                <button onClick={() => { if (window.confirm(`Remove ${s.name} from this team?`)) removeStaff.mutate(s.id); }}
+                                  title="Remove member"
+                                  className="p-1 text-gray-300 hover:text-red-400 rounded">
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        }
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {!(d.teams || []).length && (
+                  <p className="text-xs text-gray-400 italic px-1">No teams yet — add one above.</p>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {!depts.length && (
+        <div className="text-center py-12 text-gray-400 text-sm">
+          No departments configured. Add one above to start building the roster.
         </div>
-      ))}
+      )}
     </div>
   );
 }
