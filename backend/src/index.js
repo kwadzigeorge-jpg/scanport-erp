@@ -27,9 +27,25 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/api', routes);
 app.use(errorHandler);
 
+const DAY_DEFAULTS = [3,3,3,3,3,3,3]; // Sun–Sat day-shift max gangs
+const NIGHT_DEFAULTS = [2,2,2,2,2,2,2]; // Sun–Sat night-shift max gangs
+
+async function seedShiftLimits() {
+  const count = await prisma.shiftDeploymentLimit.count();
+  if (count > 0) return;
+  const rows = [];
+  for (let d = 0; d < 7; d++) {
+    rows.push({ day_of_week: d, shift: 'day',   max_gangs: DAY_DEFAULTS[d] });
+    rows.push({ day_of_week: d, shift: 'night', max_gangs: NIGHT_DEFAULTS[d] });
+  }
+  await prisma.shiftDeploymentLimit.createMany({ data: rows });
+  console.log('[Seed] shift_deployment_limits seeded with 14 rows');
+}
+
 async function main() {
   await prisma.$connect();
   console.log('[DB] Connected to PostgreSQL');
+  await seedShiftLimits();
 
   startDailyCheck();
   startBackupJob();
