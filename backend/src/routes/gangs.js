@@ -47,4 +47,10 @@ router.get('/analytics/audit',            requirePermission('gang.view'),     gc
 router.get('/notifications/list',         requirePermission('gang.view'),     gc.getNotifications);
 router.patch('/notifications/:id/read',   requirePermission('gang.view'),     gc.markNotificationRead);
 
+// ── Substitutions ─────────────────────────────────────────────────────────────
+router.get('/reserves/available',          requirePermission('gang.view'),     gc.getReserveMembers);
+router.get('/substitutions/active',        requirePermission('gang.view'),     gc.listActiveSubstitutions);
+router.post('/:id/substitutions',          requirePermission('gang.manage'),   gc.createSubstitution);
+router.patch('/substitutions/:subId/end',  requirePermission('gang.manage'),   gc.endSubstitution);
+
 module.exports = router;

@@ -329,6 +329,12 @@ export const gangApi = {
   // Notifications
   getNotifications:   ()        => api.get('/gangs/notifications/list'),
   markRead:           (id)      => api.patch(`/gangs/notifications/${id}/read`),
+
+  // Substitutions
+  getReserves:              ()           => api.get('/gangs/reserves/available'),
+  listActiveSubstitutions:  ()           => api.get('/gangs/substitutions/active'),
+  createSubstitution:       (gangId, d)  => api.post(`/gangs/${gangId}/substitutions`, d),
+  endSubstitution:          (subId)      => api.patch(`/gangs/substitutions/${subId}/end`),
 };
 
 // ─── Service Feedback ─────────────────────────────────────────────────────────

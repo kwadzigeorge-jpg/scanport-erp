@@ -1,4 +1,5 @@
-const db = require('../config/database');
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function genRef() {
@@ -7,13 +8,15 @@ function genRef() {
   return `REQ-${ts}-${rand}`;
 }
 
+function round1(n) { return Math.round(n * 10) / 10; }
+function round2(n) { return Math.round(n * 100) / 100; }
+
 function computeAllocationScore(gang, jobsToday, hoursSinceLastJob) {
-  const headmanAvail = parseInt(gang.headman_available) > 0;
-  const dockersAvail = Math.min(parseInt(gang.dockers_available) || 0, 4);
-  // Availability (0–40): head man must be present; each available docker adds points
+  const headmanAvail = gang.headman_available > 0;
+  const dockersAvail = Math.min(gang.dockers_available || 0, 4);
   const availability = !headmanAvail ? 0 : Math.round(10 + dockersAvail * 7.5);
   const workload = Math.max(0, 25 - jobsToday * 5);
-  const performance = (parseFloat(gang.performance_score) / 100) * 25;
+  const performance = (gang.performance_score / 100) * 25;
   const idle = Math.min((hoursSinceLastJob || 0) * 2.5, 10);
   return Math.round((availability + workload + performance + idle) * 10) / 10;
 }
@@ -25,85 +28,111 @@ function computeJobScore({ actualMin, expectedMin, delayCount, agentRating, arri
   const arrivalScore = arrivedOnTime ? 20 : 0;
   const ratingScore = agentRating ? (agentRating / 5) * 25 : 12.5;
   return {
-    durationScore: Math.round(durationScore * 10) / 10,
-    delayScore:    Math.round(delayScore    * 10) / 10,
+    durationScore: round1(durationScore),
+    delayScore:    round1(delayScore),
     arrivalScore,
-    ratingScore:   Math.round(ratingScore   * 10) / 10,
-    total:         Math.round((durationScore + delayScore + arrivalScore + ratingScore) * 10) / 10,
+    ratingScore:   round1(ratingScore),
+    total:         round1(durationScore + delayScore + arrivalScore + ratingScore),
   };
 }
 
 async function logAudit(req, action, entity, entityId, details) {
   try {
-    await db.query(
-      `INSERT INTO audit_logs (username, role, action, entity, entity_id, details, ip_address)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [req.user?.username, req.user?.role, action, entity, entityId, details, req.ip]
-    );
+    await prisma.auditLog.create({
+      data: {
+        userId:    req.user?.id    || 'system',
+        userEmail: req.user?.email || 'system',
+        action,
+        entity,
+        entityId: String(entityId),
+        details: typeof details === 'string' ? details : JSON.stringify(details),
+      },
+    });
   } catch (_) { /* non-fatal */ }
+}
+
+// Build a plain gang object with derived member stats from an included members array
+function withMemberStats(gang, jobsToday = 0, lastJobCompleted = null) {
+  const members = gang.members || [];
+  return {
+    ...gang,
+    headman_count:     members.filter(m => m.role === 'head_man').length,
+    docker_count:      members.filter(m => m.role === 'docker').length,
+    total_members:     members.length,
+    headman_available: members.filter(m => m.role === 'head_man' && m.status === 'available').length,
+    dockers_available: members.filter(m => m.role === 'docker'   && m.status === 'available').length,
+    available_count:   members.filter(m => m.status === 'available').length,
+    jobs_today:        jobsToday,
+    last_job_completed: lastJobCompleted,
+  };
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 async function getDashboard(req, res, next) {
   try {
-    const [gangStats, requestStats, activeJobs, pendingQueue, topGangs, recentNotifs] = await Promise.all([
-      db.query(`
-        SELECT
-          COUNT(*) FILTER (WHERE status = 'available')  AS available,
-          COUNT(*) FILTER (WHERE status = 'busy')       AS busy,
-          COUNT(*) FILTER (WHERE status = 'on_break')   AS on_break,
-          COUNT(*) FILTER (WHERE status = 'off_duty')   AS off_duty,
-          COUNT(*)                                       AS total
-        FROM gangs
-      `),
-      db.query(`
-        SELECT
-          COUNT(*) FILTER (WHERE status = 'pending')   AS pending,
-          COUNT(*) FILTER (WHERE status = 'allocated') AS allocated,
-          COUNT(*) FILTER (WHERE status = 'in_progress') AS in_progress,
-          COUNT(*) FILTER (WHERE DATE(created_at) = CURRENT_DATE) AS today
-        FROM gang_requests
-      `),
-      db.query(`
-        SELECT a.*, g.gang_code, r.request_ref, r.bay_number, r.container_number,
-               r.priority, r.agent_name,
-               EXTRACT(EPOCH FROM (NOW() - a.allocated_at))/60 AS elapsed_minutes,
-               CASE WHEN a.expected_start IS NOT NULL
-                 THEN EXTRACT(EPOCH FROM (NOW() - (a.expected_start + (a.expected_duration_minutes||' minutes')::INTERVAL)))/60
-                 ELSE NULL
-               END AS overdue_minutes
-        FROM gang_allocations a
-        JOIN gangs g ON g.id = a.gang_id
-        JOIN gang_requests r ON r.id = a.request_id
-        WHERE a.status IN ('allocated','gang_dispatched','in_progress')
-        ORDER BY r.priority DESC, a.allocated_at ASC
-      `),
-      db.query(`
-        SELECT r.*, u.full_name AS received_by_name
-        FROM gang_requests r
-        LEFT JOIN users u ON u.id = r.received_by
-        WHERE r.status = 'pending'
-        ORDER BY r.priority DESC, r.created_at ASC
-        LIMIT 10
-      `),
-      db.query(`
-        SELECT gang_code, status, performance_score, total_jobs_completed
-        FROM gangs ORDER BY performance_score DESC LIMIT 5
-      `),
-      db.query(`
-        SELECT * FROM gang_notifications
-        WHERE is_read = FALSE ORDER BY created_at DESC LIMIT 20
-      `),
+    const now = new Date();
+    const todayStart = new Date(now.toISOString().slice(0, 10));
+
+    const [allGangs, allRequests, activeAllocations, pendingQueue, notifications] = await Promise.all([
+      prisma.gang.findMany({ select: { status: true } }),
+      prisma.gangRequest.findMany({ select: { status: true, created_at: true } }),
+      prisma.gangAllocation.findMany({
+        where: { status: { in: ['allocated', 'gang_dispatched', 'in_progress'] } },
+        include: { gang: true, request: true },
+        orderBy: [{ request: { priority: 'desc' } }, { allocated_at: 'asc' }],
+      }),
+      prisma.gangRequest.findMany({
+        where: { status: 'pending' },
+        include: { receiver: { select: { name: true } } },
+        orderBy: [{ priority: 'desc' }, { created_at: 'asc' }],
+        take: 10,
+      }),
+      prisma.gangNotification.findMany({
+        where: { is_read: false },
+        include: { gang: { select: { gang_code: true } } },
+        orderBy: { created_at: 'desc' },
+        take: 20,
+      }),
     ]);
 
-    return res.json({
-      gangs:         gangStats.rows[0],
-      requests:      requestStats.rows[0],
-      active_jobs:   activeJobs.rows,
-      pending_queue: pendingQueue.rows,
-      top_gangs:     topGangs.rows,
-      notifications: recentNotifs.rows,
+    const topGangs = await prisma.gang.findMany({
+      orderBy: { performance_score: 'desc' },
+      take: 5,
+      select: { gang_code: true, status: true, performance_score: true, total_jobs_completed: true },
     });
+
+    const gangs = {
+      available: allGangs.filter(g => g.status === 'available').length,
+      busy:      allGangs.filter(g => g.status === 'busy').length,
+      on_break:  allGangs.filter(g => g.status === 'on_break').length,
+      off_duty:  allGangs.filter(g => g.status === 'off_duty').length,
+      total:     allGangs.length,
+    };
+
+    const requests = {
+      pending:     allRequests.filter(r => r.status === 'pending').length,
+      allocated:   allRequests.filter(r => r.status === 'allocated').length,
+      in_progress: allRequests.filter(r => r.status === 'in_progress').length,
+      today:       allRequests.filter(r => r.created_at >= todayStart).length,
+    };
+
+    const active_jobs = activeAllocations.map(a => ({
+      ...a,
+      gang_code:        a.gang.gang_code,
+      request_ref:      a.request.request_ref,
+      bay_number:       a.request.bay_number,
+      container_number: a.request.container_number,
+      priority:         a.request.priority,
+      agent_name:       a.request.agent_name,
+      elapsed_minutes:  (now - a.allocated_at) / 60000,
+      overdue_minutes:  a.expected_start
+        ? (now - new Date(a.expected_start.getTime() + a.expected_duration_minutes * 60000)) / 60000
+        : null,
+    }));
+
+    const pending_queue = pendingQueue.map(r => ({ ...r, received_by_name: r.receiver?.name ?? null }));
+
+    return res.json({ gangs, requests, active_jobs, pending_queue, top_gangs: topGangs, notifications });
   } catch (err) { next(err); }
 }
 
@@ -111,49 +140,66 @@ async function getDashboard(req, res, next) {
 async function listGangs(req, res, next) {
   try {
     const { status } = req.query;
-    const params = [];
-    const where = status ? `WHERE g.status=$1` : '';
-    if (status) params.push(status);
+    const [gangs, activeSubs] = await Promise.all([
+      prisma.gang.findMany({
+        where: status ? { status } : undefined,
+        include: { members: { where: { is_active: true }, orderBy: [{ role: 'asc' }, { full_name: 'asc' }] } },
+        orderBy: [{ performance_score: 'desc' }, { gang_code: 'asc' }],
+      }),
+      prisma.gangSubstitution.findMany({
+        where: { ended_at: null },
+        include: {
+          absent_member: { select: { id: true, full_name: true, role: true, employee_id: true } },
+          substitute:    { select: { id: true, full_name: true, role: true, employee_id: true, gang: { select: { gang_code: true } } } },
+        },
+      }),
+    ]);
 
-    const { rows } = await db.query(`
-      SELECT g.*,
-        COUNT(m.id) FILTER (WHERE m.role = 'head_man') AS headman_count,
-        COUNT(m.id) FILTER (WHERE m.role = 'docker')   AS docker_count,
-        COUNT(m.id)                                     AS total_members,
-        COUNT(m.id) FILTER (WHERE m.status = 'available' AND m.role = 'head_man') AS headman_available,
-        COUNT(m.id) FILTER (WHERE m.status = 'available' AND m.role = 'docker')   AS dockers_available,
-        COUNT(m.id) FILTER (WHERE m.status = 'available') AS available_count,
-        COALESCE(json_agg(
-          json_build_object(
-            'id', m.id, 'full_name', m.full_name, 'role', m.role,
-            'employee_id', m.employee_id, 'phone', m.phone, 'status', m.status
-          ) ORDER BY CASE m.role WHEN 'head_man' THEN 1 ELSE 2 END, m.full_name
-        ) FILTER (WHERE m.id IS NOT NULL), '[]') AS members,
-        (SELECT COUNT(*) FROM gang_allocations
-         WHERE gang_id = g.id AND DATE(allocated_at) = CURRENT_DATE) AS jobs_today,
-        (SELECT MAX(work_completed_at) FROM gang_allocations
-         WHERE gang_id = g.id AND status = 'completed') AS last_job_completed
-      FROM gangs g
-      LEFT JOIN gang_members m ON m.gang_id = g.id AND m.is_active = TRUE
-      ${where ? where.replace('g.status', 'g.status') : ''}
-      GROUP BY g.id
-      ORDER BY g.performance_score DESC, g.gang_code
-    `, params);
-    return res.json(rows);
+    const subsByGang = {};
+    for (const s of activeSubs) {
+      if (!subsByGang[s.gang_id]) subsByGang[s.gang_id] = [];
+      subsByGang[s.gang_id].push({
+        id:                s.id,
+        absent_member_id:  s.absent_member_id,
+        absent_member:     s.absent_member,
+        substitute_id:     s.substitute_id,
+        substitute:        { ...s.substitute, gang_code: s.substitute.gang?.gang_code },
+        reason:            s.reason,
+        notes:             s.notes,
+        created_at:        s.created_at,
+      });
+    }
+
+    const today = new Date(new Date().toISOString().slice(0, 10));
+    const result = await Promise.all(gangs.map(async g => {
+      const [jobsToday, lastJob] = await Promise.all([
+        prisma.gangAllocation.count({
+          where: { gang_id: g.id, allocated_at: { gte: today }, status: { not: 'cancelled' } },
+        }),
+        prisma.gangAllocation.findFirst({
+          where: { gang_id: g.id, status: 'completed' },
+          orderBy: { work_completed_at: 'desc' },
+          select: { work_completed_at: true },
+        }),
+      ]);
+      return { ...withMemberStats(g, jobsToday, lastJob?.work_completed_at ?? null), active_substitutions: subsByGang[g.id] || [] };
+    }));
+
+    return res.json(result);
   } catch (err) { next(err); }
 }
 
 async function getGang(req, res, next) {
   try {
-    const { rows } = await db.query(
-      `SELECT g.*, u.full_name AS created_by_name FROM gangs g LEFT JOIN users u ON u.id = g.created_by WHERE g.id=$1`,
-      [req.params.id]
-    );
-    if (!rows[0]) return res.status(404).json({ error: 'Gang not found.' });
-    const { rows: members } = await db.query(
-      `SELECT * FROM gang_members WHERE gang_id=$1 ORDER BY role, full_name`, [req.params.id]
-    );
-    return res.json({ ...rows[0], members });
+    const gang = await prisma.gang.findUnique({
+      where: { id: req.params.id },
+      include: {
+        creator: { select: { name: true } },
+        members: { orderBy: [{ role: 'asc' }, { full_name: 'asc' }] },
+      },
+    });
+    if (!gang) return res.status(404).json({ error: 'Gang not found.' });
+    return res.json({ ...gang, created_by_name: gang.creator?.name ?? null });
   } catch (err) { next(err); }
 }
 
@@ -161,131 +207,123 @@ async function createGang(req, res, next) {
   try {
     const { gang_code, specialization, notes } = req.body;
     if (!gang_code) return res.status(400).json({ error: 'gang_code is required.' });
-    const { rows } = await db.query(
-      `INSERT INTO gangs (gang_code, specialization, notes, created_by)
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [gang_code.toUpperCase(), specialization||null, notes||null, req.user.id]
-    );
-    await logAudit(req, 'gang:created', 'gangs', rows[0].id, { gang_code });
-    return res.status(201).json(rows[0]);
+    const gang = await prisma.gang.create({
+      data: { gang_code: gang_code.toUpperCase(), specialization: specialization || null, notes: notes || null, created_by: req.user.id },
+    });
+    await logAudit(req, 'gang:created', 'Gang', gang.id, { gang_code });
+    return res.status(201).json(gang);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Gang code already exists.' });
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Gang code already exists.' });
     next(err);
   }
 }
 
 async function updateGang(req, res, next) {
   try {
-    const { id } = req.params;
     const { gang_code, specialization, notes, status } = req.body;
-    const { rows } = await db.query(
-      `UPDATE gangs SET
-         gang_code=$1, specialization=$2, notes=$3, status=$4, updated_at=NOW()
-       WHERE id=$5 RETURNING *`,
-      [gang_code, specialization||null, notes||null, status, id]
-    );
-    if (!rows[0]) return res.status(404).json({ error: 'Gang not found.' });
-    await logAudit(req, 'gang:updated', 'gangs', id, req.body);
-    return res.json(rows[0]);
-  } catch (err) { next(err); }
+    const gang = await prisma.gang.update({
+      where: { id: req.params.id },
+      data: { gang_code, specialization: specialization || null, notes: notes || null, status },
+    });
+    await logAudit(req, 'gang:updated', 'Gang', req.params.id, req.body);
+    return res.json(gang);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Gang not found.' });
+    next(err);
+  }
 }
 
 async function setGangStatus(req, res, next) {
   try {
-    const { id } = req.params;
     const { status } = req.body;
-    const valid = ['available','busy','on_break','off_duty'];
+    const valid = ['available', 'busy', 'on_break', 'off_duty'];
     if (!valid.includes(status)) return res.status(400).json({ error: 'Invalid status.' });
-    const { rows } = await db.query(
-      `UPDATE gangs SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *`, [status, id]
-    );
-    if (!rows[0]) return res.status(404).json({ error: 'Gang not found.' });
-    await logAudit(req, 'gang:status_changed', 'gangs', id, { status });
-    return res.json(rows[0]);
-  } catch (err) { next(err); }
+    const gang = await prisma.gang.update({ where: { id: req.params.id }, data: { status } });
+    await logAudit(req, 'gang:status_changed', 'Gang', req.params.id, { status });
+    return res.json(gang);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Gang not found.' });
+    next(err);
+  }
 }
 
-// ── Members ──────────────────────────────────────────────────────────────────
+// ─── Members ──────────────────────────────────────────────────────────────────
 async function listMembers(req, res, next) {
   try {
-    const { rows } = await db.query(
-      `SELECT * FROM gang_members WHERE gang_id=$1 ORDER BY role, full_name`, [req.params.id]
-    );
-    return res.json(rows);
+    const members = await prisma.gangMember.findMany({
+      where: { gang_id: req.params.id },
+      orderBy: [{ role: 'asc' }, { full_name: 'asc' }],
+    });
+    return res.json(members);
   } catch (err) { next(err); }
 }
 
 async function addMember(req, res, next) {
   try {
-    const { id: gang_id } = req.params;
+    const gang_id = req.params.id;
     const { role, full_name, employee_id, phone, joined_date } = req.body;
-    if (!role || !full_name || !employee_id) return res.status(400).json({ error: 'role, full_name, employee_id required.' });
-
-    const validRoles = ['head_man', 'docker'];
-    if (!validRoles.includes(role)) return res.status(400).json({ error: 'role must be head_man or docker.' });
-
-    const { rows: existing } = await db.query(
-      `SELECT COUNT(*) FROM gang_members WHERE gang_id=$1 AND role='docker' AND is_active=TRUE`, [gang_id]
-    );
-    if (role === 'docker' && parseInt(existing[0].count) >= 4) {
-      return res.status(400).json({ error: 'A gang can have at most 4 dockers.' });
+    if (!role || !full_name || !employee_id) {
+      return res.status(400).json({ error: 'role, full_name, employee_id required.' });
     }
-    const { rows: headman } = await db.query(
-      `SELECT COUNT(*) FROM gang_members WHERE gang_id=$1 AND role='head_man' AND is_active=TRUE`, [gang_id]
-    );
-    if (role === 'head_man' && parseInt(headman[0].count) >= 1) {
-      return res.status(400).json({ error: 'A gang can have only 1 head man.' });
+    if (!['head_man', 'docker'].includes(role)) {
+      return res.status(400).json({ error: 'role must be head_man or docker.' });
     }
 
-    const { rows } = await db.query(
-      `INSERT INTO gang_members (gang_id, role, full_name, employee_id, phone, joined_date)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [gang_id, role, full_name, employee_id, phone||null, joined_date||null]
-    );
-    return res.status(201).json(rows[0]);
+    const [dockerCount, headmanCount] = await Promise.all([
+      prisma.gangMember.count({ where: { gang_id, role: 'docker', is_active: true } }),
+      prisma.gangMember.count({ where: { gang_id, role: 'head_man', is_active: true } }),
+    ]);
+    if (role === 'docker'   && dockerCount  >= 4) return res.status(400).json({ error: 'A gang can have at most 4 dockers.' });
+    if (role === 'head_man' && headmanCount >= 1) return res.status(400).json({ error: 'A gang can have only 1 head man.' });
+
+    const member = await prisma.gangMember.create({
+      data: { gang_id, role, full_name, employee_id, phone: phone || null, joined_date: joined_date ? new Date(joined_date) : null },
+    });
+    return res.status(201).json(member);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Employee ID already exists.' });
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Employee ID already exists.' });
     next(err);
   }
 }
 
 async function updateMember(req, res, next) {
   try {
-    const { memberId } = req.params;
     const { full_name, phone, is_active } = req.body;
-    const { rows } = await db.query(
-      `UPDATE gang_members SET full_name=$1, phone=$2, is_active=$3 WHERE id=$4 RETURNING *`,
-      [full_name, phone||null, is_active !== false, memberId]
-    );
-    if (!rows[0]) return res.status(404).json({ error: 'Member not found.' });
-    return res.json(rows[0]);
-  } catch (err) { next(err); }
+    const member = await prisma.gangMember.update({
+      where: { id: req.params.memberId },
+      data: { full_name, phone: phone || null, is_active: is_active !== false },
+    });
+    return res.json(member);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Member not found.' });
+    next(err);
+  }
 }
 
 async function removeMember(req, res, next) {
   try {
-    const { rows } = await db.query(
-      `UPDATE gang_members SET is_active=FALSE WHERE id=$1 AND gang_id=$2 RETURNING *`,
-      [req.params.memberId, req.params.id]
-    );
-    if (!rows[0]) return res.status(404).json({ error: 'Member not found.' });
+    const member = await prisma.gangMember.updateMany({
+      where: { id: req.params.memberId, gang_id: req.params.id },
+      data: { is_active: false },
+    });
+    if (member.count === 0) return res.status(404).json({ error: 'Member not found.' });
     return res.json({ ok: true });
   } catch (err) { next(err); }
 }
 
 async function setMemberStatus(req, res, next) {
   try {
-    const { id: gangId, memberId } = req.params;
     const { status } = req.body;
     const valid = ['available', 'on_break', 'off_duty', 'sick', 'on_leave'];
     if (!valid.includes(status)) return res.status(400).json({ error: 'Invalid status.' });
-    const { rows } = await db.query(
-      `UPDATE gang_members SET status=$1 WHERE id=$2 AND gang_id=$3 AND is_active=TRUE RETURNING *`,
-      [status, memberId, gangId]
-    );
-    if (!rows[0]) return res.status(404).json({ error: 'Member not found.' });
-    await logAudit(req, 'gang:member_status_changed', 'gang_members', memberId, { status, gang_id: gangId });
-    return res.json(rows[0]);
+    const updated = await prisma.gangMember.updateMany({
+      where: { id: req.params.memberId, gang_id: req.params.id, is_active: true },
+      data: { status },
+    });
+    if (updated.count === 0) return res.status(404).json({ error: 'Member not found.' });
+    const member = await prisma.gangMember.findUnique({ where: { id: req.params.memberId } });
+    await logAudit(req, 'gang:member_status_changed', 'GangMember', req.params.memberId, { status, gang_id: req.params.id });
+    return res.json(member);
   } catch (err) { next(err); }
 }
 
@@ -293,27 +331,49 @@ async function setMemberStatus(req, res, next) {
 async function listRequests(req, res, next) {
   try {
     const { status, priority, from, to, search } = req.query;
-    const conditions = []; const params = [];
-    if (status)   { params.push(status);              conditions.push(`r.status=$${params.length}`); }
-    if (priority) { params.push(priority);            conditions.push(`r.priority=$${params.length}`); }
-    if (from)     { params.push(from);                conditions.push(`DATE(r.created_at)>=$${params.length}`); }
-    if (to)       { params.push(to);                  conditions.push(`DATE(r.created_at)<=$${params.length}`); }
-    if (search)   { params.push(`%${search}%`);       conditions.push(`(r.container_number ILIKE $${params.length} OR r.agent_name ILIKE $${params.length} OR r.bay_number ILIKE $${params.length})`); }
-    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+    const where = {};
+    if (status)   where.status   = status;
+    if (priority) where.priority = priority;
+    if (from || to) where.created_at = {};
+    if (from) where.created_at.gte = new Date(from);
+    if (to)   where.created_at.lte = new Date(to + 'T23:59:59');
+    if (search) {
+      where.OR = [
+        { container_number: { contains: search } },
+        { agent_name:       { contains: search } },
+        { bay_number:       { contains: search } },
+      ];
+    }
 
-    const { rows } = await db.query(`
-      SELECT r.*, u.full_name AS received_by_name,
-        a.id AS allocation_id, a.gang_id, g.gang_code,
-        a.status AS allocation_status, a.allocated_at
-      FROM gang_requests r
-      LEFT JOIN users u ON u.id = r.received_by
-      LEFT JOIN gang_allocations a ON a.request_id = r.id AND a.status != 'cancelled'
-      LEFT JOIN gangs g ON g.id = a.gang_id
-      ${where}
-      ORDER BY r.priority DESC, r.created_at DESC
-      LIMIT 200
-    `, params);
-    return res.json(rows);
+    const rows = await prisma.gangRequest.findMany({
+      where,
+      include: {
+        receiver: { select: { name: true } },
+        allocations: {
+          where: { status: { not: 'cancelled' } },
+          include: { gang: { select: { gang_code: true } } },
+          orderBy: { created_at: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: [{ priority: 'desc' }, { created_at: 'desc' }],
+      take: 200,
+    });
+
+    const result = rows.map(r => {
+      const alloc = r.allocations[0] ?? null;
+      return {
+        ...r,
+        received_by_name: r.receiver?.name ?? null,
+        allocation_id:    alloc?.id ?? null,
+        gang_id:          alloc?.gang_id ?? null,
+        gang_code:        alloc?.gang?.gang_code ?? null,
+        allocation_status: alloc?.status ?? null,
+        allocated_at:     alloc?.allocated_at ?? null,
+      };
+    });
+
+    return res.json(result);
   } catch (err) { next(err); }
 }
 
@@ -324,96 +384,93 @@ async function createRequest(req, res, next) {
       return res.status(400).json({ error: 'agent_name, bay_number, container_number are required.' });
     }
     const cnumRegex = /^[A-Z]{4}\d{7}$/;
-    const cnum = container_number.toUpperCase().replace(/\s/g,'');
+    const cnum = container_number.toUpperCase().replace(/\s/g, '');
     if (!cnumRegex.test(cnum)) {
       return res.status(400).json({ error: 'Invalid container number format. Expected: 4 letters + 7 digits (e.g. MSCU1234567).' });
     }
 
     let cnum2 = null;
-    if (container_number_2 && container_number_2.trim()) {
-      cnum2 = container_number_2.toUpperCase().replace(/\s/g,'');
-      if (!cnumRegex.test(cnum2)) {
-        return res.status(400).json({ error: 'Invalid second container number format. Expected: 4 letters + 7 digits.' });
-      }
-      if (cnum2 === cnum) {
-        return res.status(400).json({ error: 'Second container number must differ from the first.' });
-      }
-      // Check duplicate on second container
-      const { rows: dup2 } = await db.query(
-        `SELECT id FROM gang_requests WHERE (container_number=$1 OR container_number_2=$1) AND status IN ('pending','allocated','in_progress')`,
-        [cnum2]
-      );
-      if (dup2.length) return res.status(409).json({ error: 'An active request for the second container already exists.' });
+    if (container_number_2?.trim()) {
+      cnum2 = container_number_2.toUpperCase().replace(/\s/g, '');
+      if (!cnumRegex.test(cnum2)) return res.status(400).json({ error: 'Invalid second container number format.' });
+      if (cnum2 === cnum) return res.status(400).json({ error: 'Second container number must differ from the first.' });
+      const dup2 = await prisma.gangRequest.findFirst({
+        where: { status: { in: ['pending', 'allocated', 'in_progress'] }, OR: [{ container_number: cnum2 }, { container_number_2: cnum2 }] },
+      });
+      if (dup2) return res.status(409).json({ error: 'An active request for the second container already exists.' });
     }
 
-    // Check for duplicate active request on first container
-    const { rows: dup } = await db.query(
-      `SELECT id FROM gang_requests WHERE (container_number=$1 OR container_number_2=$1) AND status IN ('pending','allocated','in_progress')`,
-      [cnum]
-    );
-    if (dup.length) return res.status(409).json({ error: 'An active request for this container already exists.' });
+    const dup = await prisma.gangRequest.findFirst({
+      where: { status: { in: ['pending', 'allocated', 'in_progress'] }, OR: [{ container_number: cnum }, { container_number_2: cnum }] },
+    });
+    if (dup) return res.status(409).json({ error: 'An active request for this container already exists.' });
 
-    const ref = genRef();
-    const isDual = !!cnum2;
-    const { rows } = await db.query(`
-      INSERT INTO gang_requests
-        (request_ref, agent_name, agent_phone, agency, bay_number, container_number,
-         container_number_2, is_dual_container, cargo_type, priority, notes, received_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *
-    `, [ref, agent_name, agent_phone||null, agency||null, bay_number, cnum,
-        cnum2, isDual, cargo_type||null, priority||'normal', notes||null, req.user.id]);
+    const request = await prisma.gangRequest.create({
+      data: {
+        request_ref: genRef(),
+        agent_name, agent_phone: agent_phone || null, agency: agency || null,
+        bay_number, container_number: cnum, container_number_2: cnum2,
+        is_dual_container: !!cnum2, cargo_type: cargo_type || null,
+        priority: priority || 'normal', notes: notes || null,
+        received_by: req.user.id,
+      },
+    });
 
-    await logAudit(req, 'gang:request_created', 'gang_requests', rows[0].id, { ref, container_number: cnum, container_number_2: cnum2 });
-    return res.status(201).json(rows[0]);
+    await logAudit(req, 'gang:request_created', 'GangRequest', request.id, { ref: request.request_ref, container_number: cnum });
+    return res.status(201).json(request);
   } catch (err) { next(err); }
 }
 
 async function cancelRequest(req, res, next) {
   try {
-    const { id } = req.params;
-    const { rows } = await db.query(
-      `UPDATE gang_requests SET status='cancelled', updated_at=NOW() WHERE id=$1 AND status='pending' RETURNING *`, [id]
-    );
-    if (!rows[0]) return res.status(400).json({ error: 'Request not found or not in pending status.' });
-    await logAudit(req, 'gang:request_cancelled', 'gang_requests', id, {});
-    return res.json(rows[0]);
+    const updated = await prisma.gangRequest.updateMany({
+      where: { id: req.params.id, status: 'pending' },
+      data: { status: 'cancelled' },
+    });
+    if (updated.count === 0) return res.status(400).json({ error: 'Request not found or not in pending status.' });
+    const request = await prisma.gangRequest.findUnique({ where: { id: req.params.id } });
+    await logAudit(req, 'gang:request_cancelled', 'GangRequest', req.params.id, {});
+    return res.json(request);
   } catch (err) { next(err); }
 }
 
 // ─── Allocation Engine ────────────────────────────────────────────────────────
 async function recommendGangs(req, res, next) {
   try {
-    const { rows: gangs } = await db.query(`
-      SELECT g.*,
-        COUNT(m.id) FILTER (WHERE m.is_active AND m.status='available' AND m.role='head_man') AS headman_available,
-        COUNT(m.id) FILTER (WHERE m.is_active AND m.status='available' AND m.role='docker')   AS dockers_available,
-        COUNT(m.id) FILTER (WHERE m.is_active)                                                AS total_members,
-        (SELECT COUNT(*) FROM gang_allocations
-         WHERE gang_id=g.id AND DATE(allocated_at)=CURRENT_DATE
-           AND status NOT IN ('cancelled')) AS jobs_today,
-        (SELECT EXTRACT(EPOCH FROM (NOW() - MAX(work_completed_at)))/3600
-         FROM gang_allocations WHERE gang_id=g.id AND status='completed') AS hours_since_last_job
-      FROM gangs g
-      LEFT JOIN gang_members m ON m.gang_id = g.id
-      WHERE g.status != 'busy'
-      GROUP BY g.id
-    `);
-
-    const scored = gangs.map(g => {
-      const score = computeAllocationScore(g, parseInt(g.jobs_today)||0, parseFloat(g.hours_since_last_job)||0);
-      const headAvail = parseInt(g.headman_available) > 0;
-      const dockAvail = parseInt(g.dockers_available) || 0;
-      const total     = parseInt(g.total_members) || 0;
-      const reasons = [];
-      if (!headAvail) reasons.push('Head man unavailable');
-      else reasons.push(`Head man available`);
-      reasons.push(`${dockAvail}/4 dockers available`);
-      reasons.push(`${g.jobs_today} job(s) today`);
-      reasons.push(`Perf: ${g.performance_score}`);
-      return { ...g, allocation_score: score, score_reasons: reasons };
+    const today = new Date(new Date().toISOString().slice(0, 10));
+    const gangs = await prisma.gang.findMany({
+      where: { status: { not: 'busy' }, specialization: { not: 'Reserve Pool' } },
+      include: { members: { where: { is_active: true } } },
     });
 
-    scored.sort((a,b) => b.allocation_score - a.allocation_score);
+    const scored = await Promise.all(gangs.map(async g => {
+      const headmanAvailable = g.members.filter(m => m.role === 'head_man' && m.status === 'available').length;
+      const dockersAvailable = g.members.filter(m => m.role === 'docker'   && m.status === 'available').length;
+      const totalMembers     = g.members.length;
+
+      const [jobsToday, lastCompleted] = await Promise.all([
+        prisma.gangAllocation.count({ where: { gang_id: g.id, allocated_at: { gte: today }, status: { not: 'cancelled' } } }),
+        prisma.gangAllocation.findFirst({ where: { gang_id: g.id, status: 'completed' }, orderBy: { work_completed_at: 'desc' }, select: { work_completed_at: true } }),
+      ]);
+
+      const hoursSinceLastJob = lastCompleted?.work_completed_at
+        ? (Date.now() - lastCompleted.work_completed_at.getTime()) / 3600000
+        : 0;
+
+      const gangData = { ...g, headman_available: headmanAvailable, dockers_available: dockersAvailable, performance_score: g.performance_score };
+      const score = computeAllocationScore(gangData, jobsToday, hoursSinceLastJob);
+
+      const reasons = [];
+      if (!headmanAvailable) reasons.push('Head man unavailable');
+      else reasons.push('Head man available');
+      reasons.push(`${dockersAvailable}/4 dockers available`);
+      reasons.push(`${jobsToday} job(s) today`);
+      reasons.push(`Perf: ${g.performance_score}`);
+
+      return { ...withMemberStats(g, jobsToday, lastCompleted?.work_completed_at), allocation_score: score, score_reasons: reasons };
+    }));
+
+    scored.sort((a, b) => b.allocation_score - a.allocation_score);
     return res.json(scored);
   } catch (err) { next(err); }
 }
@@ -421,115 +478,112 @@ async function recommendGangs(req, res, next) {
 // ─── Allocations ──────────────────────────────────────────────────────────────
 async function createAllocation(req, res, next) {
   try {
-    const {
-      request_id, gang_id, is_override, override_reason,
-      expected_start, expected_duration_minutes,
-      engine_recommended_gang, engine_score,
-    } = req.body;
-
+    const { request_id, gang_id, is_override, override_reason, expected_start, expected_duration_minutes, engine_recommended_gang, engine_score } = req.body;
     if (!request_id || !gang_id) return res.status(400).json({ error: 'request_id and gang_id are required.' });
 
-    // Validate request is still pending
-    const { rows: reqRows } = await db.query(
-      `SELECT * FROM gang_requests WHERE id=$1`, [request_id]
-    );
-    if (!reqRows[0]) return res.status(404).json({ error: 'Request not found.' });
-    if (reqRows[0].status !== 'pending') return res.status(400).json({ error: `Request is already ${reqRows[0].status}.` });
+    const [gangRequest, gang] = await Promise.all([
+      prisma.gangRequest.findUnique({ where: { id: request_id } }),
+      prisma.gang.findUnique({ where: { id: gang_id } }),
+    ]);
+    if (!gangRequest) return res.status(404).json({ error: 'Request not found.' });
+    if (gangRequest.status !== 'pending') return res.status(400).json({ error: `Request is already ${gangRequest.status}.` });
+    if (!gang) return res.status(404).json({ error: 'Gang not found.' });
 
-    // Validate gang
-    const { rows: gangRows } = await db.query(`SELECT * FROM gangs WHERE id=$1`, [gang_id]);
-    if (!gangRows[0]) return res.status(404).json({ error: 'Gang not found.' });
+    const [alloc] = await prisma.$transaction([
+      prisma.gangAllocation.create({
+        data: {
+          request_id, gang_id, allocated_by: req.user.id,
+          is_override: !!is_override, override_reason: override_reason || null,
+          engine_recommended_gang: engine_recommended_gang || null,
+          engine_score: engine_score || null,
+          expected_start: expected_start ? new Date(expected_start) : null,
+          expected_duration_minutes: expected_duration_minutes || 60,
+          status: 'allocated',
+        },
+      }),
+      prisma.gangRequest.update({ where: { id: request_id }, data: { status: 'allocated' } }),
+      prisma.gang.update({ where: { id: gang_id }, data: { status: 'busy' } }),
+    ]);
 
-    const client = await db.pool ? db.pool.connect() : null;
-    try {
-      // Create allocation
-      const { rows: [alloc] } = await db.query(`
-        INSERT INTO gang_allocations
-          (request_id, gang_id, allocated_by, is_override, override_reason,
-           engine_recommended_gang, engine_score,
-           expected_start, expected_duration_minutes, status)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'allocated') RETURNING *
-      `, [request_id, gang_id, req.user.id, !!is_override, override_reason||null,
-          engine_recommended_gang||null, engine_score||null,
-          expected_start||null, expected_duration_minutes||60]);
+    await prisma.gangNotification.create({
+      data: {
+        type: 'job_assigned',
+        message: `Gang ${gang.gang_code} assigned to Bay ${gangRequest.bay_number} — Container ${gangRequest.container_number}`,
+        allocation_id: alloc.id,
+        gang_id,
+      },
+    });
 
-      // Update request status
-      await db.query(`UPDATE gang_requests SET status='allocated', updated_at=NOW() WHERE id=$1`, [request_id]);
-
-      // Update gang status to busy
-      await db.query(`UPDATE gangs SET status='busy', updated_at=NOW() WHERE id=$1`, [gang_id]);
-
-      // Create notification
-      await db.query(`
-        INSERT INTO gang_notifications (type, message, allocation_id, gang_id)
-        VALUES ('job_assigned', $1, $2, $3)
-      `, [`Gang ${gangRows[0].gang_code} assigned to Bay ${reqRows[0].bay_number} — Container ${reqRows[0].container_number}`, alloc.id, gang_id]);
-
-      await logAudit(req, 'gang:allocated', 'gang_allocations', alloc.id, {
-        request_id, gang_id, gang_code: gangRows[0].gang_code, is_override,
-      });
-      return res.status(201).json(alloc);
-    } finally {
-      if (client) client.release();
-    }
+    await logAudit(req, 'gang:allocated', 'GangAllocation', alloc.id, { request_id, gang_id, gang_code: gang.gang_code, is_override });
+    return res.status(201).json(alloc);
   } catch (err) { next(err); }
 }
 
 async function listAllocations(req, res, next) {
   try {
     const { status, gang_id, from, to } = req.query;
-    const conditions = []; const params = [];
-    if (status)  { params.push(status);  conditions.push(`a.status=$${params.length}`); }
-    if (gang_id) { params.push(gang_id); conditions.push(`a.gang_id=$${params.length}`); }
-    if (from)    { params.push(from);    conditions.push(`DATE(a.allocated_at)>=$${params.length}`); }
-    if (to)      { params.push(to);      conditions.push(`DATE(a.allocated_at)<=$${params.length}`); }
-    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+    const where = {};
+    if (status)  where.status  = status;
+    if (gang_id) where.gang_id = gang_id;
+    if (from || to) where.allocated_at = {};
+    if (from) where.allocated_at.gte = new Date(from);
+    if (to)   where.allocated_at.lte = new Date(to + 'T23:59:59');
 
-    const { rows } = await db.query(`
-      SELECT a.*, g.gang_code, g.performance_score,
-             r.request_ref, r.bay_number, r.container_number, r.priority,
-             r.agent_name, r.agent_phone, r.agency, r.cargo_type,
-             u.full_name AS allocated_by_name,
-             EXTRACT(EPOCH FROM (COALESCE(a.work_completed_at, NOW()) - COALESCE(a.work_started_at, a.allocated_at)))/60 AS elapsed_minutes,
-             (SELECT COUNT(*) FROM gang_delay_logs WHERE allocation_id=a.id) AS delay_count
-      FROM gang_allocations a
-      JOIN gangs g ON g.id = a.gang_id
-      JOIN gang_requests r ON r.id = a.request_id
-      JOIN users u ON u.id = a.allocated_by
-      ${where}
-      ORDER BY a.allocated_at DESC
-      LIMIT 200
-    `, params);
-    return res.json(rows);
+    const rows = await prisma.gangAllocation.findMany({
+      where,
+      include: {
+        gang:      { select: { gang_code: true, performance_score: true } },
+        request:   { select: { request_ref: true, bay_number: true, container_number: true, priority: true, agent_name: true, agent_phone: true, agency: true, cargo_type: true } },
+        allocator: { select: { name: true } },
+        delay_logs: { select: { id: true } },
+      },
+      orderBy: { allocated_at: 'desc' },
+      take: 200,
+    });
+
+    const now = new Date();
+    const result = rows.map(a => ({
+      ...a,
+      gang_code:         a.gang.gang_code,
+      performance_score: a.gang.performance_score,
+      request_ref:       a.request.request_ref,
+      bay_number:        a.request.bay_number,
+      container_number:  a.request.container_number,
+      priority:          a.request.priority,
+      agent_name:        a.request.agent_name,
+      agent_phone:       a.request.agent_phone,
+      agency:            a.request.agency,
+      cargo_type:        a.request.cargo_type,
+      allocated_by_name: a.allocator.name,
+      elapsed_minutes:   (new Date(a.work_completed_at || now) - new Date(a.work_started_at || a.allocated_at)) / 60000,
+      delay_count:       a.delay_logs.length,
+    }));
+
+    return res.json(result);
   } catch (err) { next(err); }
 }
 
 async function logTimestamp(req, res, next) {
   try {
     const { id } = req.params;
-    const { event } = req.body; // 'arrived' | 'started' | 'completed'
-
+    const { event } = req.body;
     const colMap = {
-      arrived:   { col: 'gang_arrived_at',  status: 'gang_dispatched' },
-      started:   { col: 'work_started_at',  status: 'in_progress' },
+      arrived: { data: { gang_arrived_at: new Date(), status: 'gang_dispatched' } },
+      started: { data: { work_started_at: new Date(), status: 'in_progress' } },
     };
-
     if (!colMap[event]) return res.status(400).json({ error: 'event must be arrived or started.' });
-    const { col, status } = colMap[event];
 
-    const { rows } = await db.query(
-      `UPDATE gang_allocations SET ${col}=NOW(), status=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
-      [status, id]
-    );
-    if (!rows[0]) return res.status(404).json({ error: 'Allocation not found.' });
+    const alloc = await prisma.gangAllocation.update({ where: { id }, data: colMap[event].data });
 
-    // Update request status to in_progress when work starts
     if (event === 'started') {
-      await db.query(`UPDATE gang_requests SET status='in_progress', updated_at=NOW() WHERE id=$1`, [rows[0].request_id]);
+      await prisma.gangRequest.update({ where: { id: alloc.request_id }, data: { status: 'in_progress' } });
     }
-    await logAudit(req, `gang:timestamp_${event}`, 'gang_allocations', id, { event });
-    return res.json(rows[0]);
-  } catch (err) { next(err); }
+    await logAudit(req, `gang:timestamp_${event}`, 'GangAllocation', id, { event });
+    return res.json(alloc);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Allocation not found.' });
+    next(err);
+  }
 }
 
 async function completeJob(req, res, next) {
@@ -537,161 +591,188 @@ async function completeJob(req, res, next) {
     const { id } = req.params;
     const { supervisor_comments } = req.body;
 
-    const { rows: [alloc] } = await db.query(`
-      UPDATE gang_allocations
-        SET work_completed_at=NOW(), status='completed',
-            supervisor_comments=$1, updated_at=NOW()
-      WHERE id=$2 AND status='in_progress'
-      RETURNING *
-    `, [supervisor_comments||null, id]);
+    const alloc = await prisma.gangAllocation.update({
+      where: { id, status: 'in_progress' },
+      data: { work_completed_at: new Date(), status: 'completed', supervisor_comments: supervisor_comments || null },
+    }).catch(() => null);
+
     if (!alloc) return res.status(400).json({ error: 'Allocation not found or not in_progress.' });
 
-    // Mark request completed
-    await db.query(`UPDATE gang_requests SET status='completed', updated_at=NOW() WHERE id=$1`, [alloc.request_id]);
+    await Promise.all([
+      prisma.gangRequest.update({ where: { id: alloc.request_id }, data: { status: 'completed' } }),
+      prisma.gang.update({ where: { id: alloc.gang_id }, data: { status: 'available', total_jobs_completed: { increment: 1 } } }),
+    ]);
 
-    // Set gang back to available
-    await db.query(`UPDATE gangs SET status='available', total_jobs_completed=total_jobs_completed+1, updated_at=NOW() WHERE id=$1`, [alloc.gang_id]);
-
-    // Compute and store performance score
-    const delayRes = await db.query(`SELECT COUNT(*) FROM gang_delay_logs WHERE allocation_id=$1`, [id]);
-    const delayCount = parseInt(delayRes.rows[0].count);
-    const actualMin = alloc.work_completed_at && alloc.work_started_at
-      ? Math.round((new Date(alloc.work_completed_at) - new Date(alloc.work_started_at)) / 60000)
+    const delayCount = await prisma.gangDelayLog.count({ where: { allocation_id: id } });
+    const actualMin = alloc.work_started_at
+      ? Math.round((alloc.work_completed_at.getTime() - alloc.work_started_at.getTime()) / 60000)
       : null;
     const arrivedOnTime = alloc.gang_arrived_at && alloc.expected_start
-      ? new Date(alloc.gang_arrived_at) <= new Date(new Date(alloc.expected_start).getTime() + 10*60000)
+      ? alloc.gang_arrived_at <= new Date(alloc.expected_start.getTime() + 10 * 60000)
       : null;
 
     if (actualMin !== null) {
-      const scores = computeJobScore({
-        actualMin,
-        expectedMin: alloc.expected_duration_minutes,
-        delayCount,
-        agentRating: alloc.agent_rating,
-        arrivedOnTime,
+      const scores = computeJobScore({ actualMin, expectedMin: alloc.expected_duration_minutes, delayCount, agentRating: alloc.agent_rating, arrivedOnTime });
+      await prisma.gangPerformanceRecord.create({
+        data: {
+          gang_id: alloc.gang_id, allocation_id: id,
+          period_date: new Date(new Date().toISOString().slice(0, 10)),
+          actual_duration_minutes: actualMin, expected_duration_minutes: alloc.expected_duration_minutes,
+          delay_count: delayCount, agent_rating: alloc.agent_rating, arrived_on_time: arrivedOnTime,
+          duration_score: scores.durationScore, delay_score: scores.delayScore,
+          arrival_score: scores.arrivalScore, rating_score: scores.ratingScore, total_score: scores.total,
+        },
       });
 
-      await db.query(`
-        INSERT INTO gang_performance_records
-          (gang_id, allocation_id, period_date,
-           actual_duration_minutes, expected_duration_minutes, delay_count, agent_rating,
-           arrived_on_time, duration_score, delay_score, arrival_score, rating_score, total_score)
-        VALUES ($1,$2,CURRENT_DATE,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-      `, [alloc.gang_id, id, actualMin, alloc.expected_duration_minutes, delayCount,
-          alloc.agent_rating, arrivedOnTime,
-          scores.durationScore, scores.delayScore, scores.arrivalScore, scores.ratingScore, scores.total]);
-
-      // Update rolling performance score (avg of last 10 jobs)
-      await db.query(`
-        UPDATE gangs SET performance_score = (
-          SELECT ROUND(AVG(total_score)::NUMERIC, 2)
-          FROM (SELECT total_score FROM gang_performance_records WHERE gang_id=$1 ORDER BY computed_at DESC LIMIT 10) t
-        ), updated_at=NOW() WHERE id=$1
-      `, [alloc.gang_id]);
+      // Rolling average of last 10 jobs
+      const last10 = await prisma.gangPerformanceRecord.findMany({
+        where: { gang_id: alloc.gang_id },
+        orderBy: { computed_at: 'desc' },
+        take: 10,
+        select: { total_score: true },
+      });
+      const validScores = last10.filter(r => r.total_score != null).map(r => r.total_score);
+      const newScore = validScores.length
+        ? round2(validScores.reduce((a, b) => a + b, 0) / validScores.length)
+        : 100;
+      await prisma.gang.update({ where: { id: alloc.gang_id }, data: { performance_score: newScore } });
     }
 
-    await logAudit(req, 'gang:job_completed', 'gang_allocations', id, { gang_id: alloc.gang_id });
+    await logAudit(req, 'gang:job_completed', 'GangAllocation', id, { gang_id: alloc.gang_id });
     return res.json(alloc);
   } catch (err) { next(err); }
 }
 
 async function logDelay(req, res, next) {
   try {
-    const { id } = req.params;
     const { delay_type, delay_minutes, description } = req.body;
     if (!delay_type || !description) return res.status(400).json({ error: 'delay_type and description required.' });
-    const { rows } = await db.query(`
-      INSERT INTO gang_delay_logs (allocation_id, delay_type, delay_minutes, description, reported_by)
-      VALUES ($1,$2,$3,$4,$5) RETURNING *
-    `, [id, delay_type, delay_minutes||null, description, req.user.id]);
-    await logAudit(req, 'gang:delay_logged', 'gang_delay_logs', rows[0].id, { allocation_id: id, delay_type });
-    return res.status(201).json(rows[0]);
-  } catch (err) { next(err); }
-}
-
-async function submitFeedback(req, res, next) {
-  try {
-    const { id } = req.params;
-    const { agent_rating, agent_feedback } = req.body;
-    if (!agent_rating) return res.status(400).json({ error: 'agent_rating required.' });
-    const { rows } = await db.query(
-      `UPDATE gang_allocations SET agent_rating=$1, agent_feedback=$2, updated_at=NOW() WHERE id=$3 RETURNING *`,
-      [agent_rating, agent_feedback||null, id]
-    );
-    if (!rows[0]) return res.status(404).json({ error: 'Allocation not found.' });
-    return res.json(rows[0]);
+    const log = await prisma.gangDelayLog.create({
+      data: { allocation_id: req.params.id, delay_type, delay_minutes: delay_minutes || null, description, reported_by: req.user.id },
+    });
+    await logAudit(req, 'gang:delay_logged', 'GangDelayLog', log.id, { allocation_id: req.params.id, delay_type });
+    return res.status(201).json(log);
   } catch (err) { next(err); }
 }
 
 async function getDelays(req, res, next) {
   try {
-    const { rows } = await db.query(
-      `SELECT d.*, u.full_name AS reported_by_name FROM gang_delay_logs d
-       LEFT JOIN users u ON u.id = d.reported_by
-       WHERE d.allocation_id=$1 ORDER BY d.reported_at`, [req.params.id]
-    );
-    return res.json(rows);
+    const delays = await prisma.gangDelayLog.findMany({
+      where: { allocation_id: req.params.id },
+      include: { reporter: { select: { name: true } } },
+      orderBy: { reported_at: 'asc' },
+    });
+    const result = delays.map(d => ({ ...d, reported_by_name: d.reporter?.name ?? null }));
+    return res.json(result);
   } catch (err) { next(err); }
+}
+
+async function submitFeedback(req, res, next) {
+  try {
+    const { agent_rating, agent_feedback } = req.body;
+    if (!agent_rating) return res.status(400).json({ error: 'agent_rating required.' });
+    const alloc = await prisma.gangAllocation.update({
+      where: { id: req.params.id },
+      data: { agent_rating, agent_feedback: agent_feedback || null },
+    });
+    return res.json(alloc);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Allocation not found.' });
+    next(err);
+  }
 }
 
 // ─── Performance ──────────────────────────────────────────────────────────────
 async function getPerformance(req, res, next) {
   try {
     const { from, to, gang_id } = req.query;
-    const fromDate = from || new Date(Date.now() - 30*24*60*60*1000).toISOString().slice(0,10);
-    const toDate   = to   || new Date().toISOString().slice(0,10);
+    const fromDate = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const toDate   = to   || new Date().toISOString().slice(0, 10);
+    const rangeWhere = { gte: new Date(fromDate), lte: new Date(toDate + 'T23:59:59') };
 
-    const params = [fromDate, toDate];
-    const gangFilter = gang_id ? `AND pr.gang_id=$3` : '';
-    if (gang_id) params.push(gang_id);
+    // Per-gang stats
+    const gangsWithPerf = await prisma.gang.findMany({
+      where: gang_id ? { id: gang_id } : undefined,
+      include: { performance_records: { where: { period_date: rangeWhere } } },
+    });
 
-    const { rows: gangStats } = await db.query(`
-      SELECT g.gang_code, g.status, g.performance_score, g.total_jobs_completed,
-        COUNT(pr.id)                          AS jobs_in_period,
-        ROUND(AVG(pr.actual_duration_minutes)::NUMERIC, 1) AS avg_duration_min,
-        ROUND(AVG(pr.total_score)::NUMERIC, 2) AS avg_score,
-        SUM(pr.delay_count)                   AS total_delays,
-        ROUND(AVG(pr.agent_rating)::NUMERIC, 2) AS avg_rating,
-        SUM(CASE WHEN pr.arrived_on_time THEN 1 ELSE 0 END) AS on_time_count
-      FROM gangs g
-      LEFT JOIN gang_performance_records pr
-        ON pr.gang_id = g.id AND pr.period_date BETWEEN $1 AND $2 ${gangFilter}
-      GROUP BY g.id, g.gang_code, g.status, g.performance_score, g.total_jobs_completed
-      ORDER BY avg_score DESC NULLS LAST
-    `, params);
+    const gang_stats = gangsWithPerf.map(g => {
+      const recs = g.performance_records;
+      const validDur  = recs.filter(r => r.actual_duration_minutes != null);
+      const validScore = recs.filter(r => r.total_score != null);
+      const validRating = recs.filter(r => r.agent_rating != null);
+      return {
+        gang_code:            g.gang_code,
+        status:               g.status,
+        performance_score:    g.performance_score,
+        total_jobs_completed: g.total_jobs_completed,
+        jobs_in_period:       recs.length,
+        avg_duration_min:     validDur.length   ? round1(validDur.reduce((s, r) => s + r.actual_duration_minutes, 0) / validDur.length) : null,
+        avg_score:            validScore.length  ? round2(validScore.reduce((s, r) => s + r.total_score, 0) / validScore.length) : null,
+        total_delays:         recs.reduce((s, r) => s + r.delay_count, 0),
+        avg_rating:           validRating.length ? round2(validRating.reduce((s, r) => s + r.agent_rating, 0) / validRating.length) : null,
+        on_time_count:        recs.filter(r => r.arrived_on_time === true).length,
+      };
+    }).sort((a, b) => (b.avg_score ?? -1) - (a.avg_score ?? -1));
 
-    const { rows: dailyTrend } = await db.query(`
-      SELECT period_date,
-        COUNT(*) AS jobs,
-        ROUND(AVG(total_score)::NUMERIC, 2) AS avg_score,
-        ROUND(AVG(actual_duration_minutes)::NUMERIC, 1) AS avg_duration,
-        SUM(delay_count) AS total_delays
-      FROM gang_performance_records
-      WHERE period_date BETWEEN $1 AND $2
-      GROUP BY period_date ORDER BY period_date
-    `, [fromDate, toDate]);
+    // Daily trend — group in JS
+    const allRecs = await prisma.gangPerformanceRecord.findMany({
+      where: { period_date: rangeWhere, ...(gang_id ? { gang_id } : {}) },
+      orderBy: { period_date: 'asc' },
+    });
+    const byDate = {};
+    for (const r of allRecs) {
+      const d = r.period_date.toISOString().slice(0, 10);
+      if (!byDate[d]) byDate[d] = { period_date: d, jobs: 0, scores: [], durations: [], delays: 0 };
+      byDate[d].jobs++;
+      if (r.total_score != null)              byDate[d].scores.push(r.total_score);
+      if (r.actual_duration_minutes != null)  byDate[d].durations.push(r.actual_duration_minutes);
+      byDate[d].delays += r.delay_count;
+    }
+    const daily_trend = Object.values(byDate).map(d => ({
+      period_date:  d.period_date,
+      jobs:         d.jobs,
+      avg_score:    d.scores.length    ? round2(d.scores.reduce((a, b) => a + b, 0) / d.scores.length) : null,
+      avg_duration: d.durations.length ? round1(d.durations.reduce((a, b) => a + b, 0) / d.durations.length) : null,
+      total_delays: d.delays,
+    }));
 
-    const { rows: delayBreakdown } = await db.query(`
-      SELECT delay_type, COUNT(*) AS count,
-             ROUND(AVG(delay_minutes)::NUMERIC, 1) AS avg_minutes
-      FROM gang_delay_logs d
-      JOIN gang_allocations a ON a.id = d.allocation_id
-      WHERE DATE(d.reported_at) BETWEEN $1 AND $2
-      GROUP BY delay_type ORDER BY count DESC
-    `, [fromDate, toDate]);
+    // Delay breakdown — group by type in JS
+    const allDelays = await prisma.gangDelayLog.findMany({
+      where: { reported_at: rangeWhere },
+    });
+    const byType = {};
+    for (const d of allDelays) {
+      if (!byType[d.delay_type]) byType[d.delay_type] = { delay_type: d.delay_type, count: 0, mins: [] };
+      byType[d.delay_type].count++;
+      if (d.delay_minutes != null) byType[d.delay_type].mins.push(d.delay_minutes);
+    }
+    const delay_breakdown = Object.values(byType).map(t => ({
+      delay_type:  t.delay_type,
+      count:       t.count,
+      avg_minutes: t.mins.length ? round1(t.mins.reduce((a, b) => a + b, 0) / t.mins.length) : null,
+    })).sort((a, b) => b.count - a.count);
 
-    const { rows: bayStats } = await db.query(`
-      SELECT r.bay_number,
-        COUNT(*) AS job_count,
-        ROUND(AVG(pr.actual_duration_minutes)::NUMERIC, 1) AS avg_duration
-      FROM gang_performance_records pr
-      JOIN gang_allocations a ON a.id = pr.allocation_id
-      JOIN gang_requests r ON r.id = a.request_id
-      WHERE pr.period_date BETWEEN $1 AND $2
-      GROUP BY r.bay_number ORDER BY job_count DESC
-    `, [fromDate, toDate]);
+    // Bay stats — join through allocations
+    const perfWithBay = await prisma.gangPerformanceRecord.findMany({
+      where: { period_date: rangeWhere },
+      include: { allocation: { include: { request: { select: { bay_number: true } } } } },
+    });
+    const byBay = {};
+    for (const p of perfWithBay) {
+      const bay = p.allocation?.request?.bay_number;
+      if (!bay) continue;
+      if (!byBay[bay]) byBay[bay] = { bay_number: bay, job_count: 0, durs: [] };
+      byBay[bay].job_count++;
+      if (p.actual_duration_minutes != null) byBay[bay].durs.push(p.actual_duration_minutes);
+    }
+    const bay_stats = Object.values(byBay).map(b => ({
+      bay_number:   b.bay_number,
+      job_count:    b.job_count,
+      avg_duration: b.durs.length ? round1(b.durs.reduce((a, c) => a + c, 0) / b.durs.length) : null,
+    })).sort((a, b) => b.job_count - a.job_count);
 
-    return res.json({ gang_stats: gangStats, daily_trend: dailyTrend, delay_breakdown: delayBreakdown, bay_stats: bayStats });
+    return res.json({ gang_stats, daily_trend, delay_breakdown, bay_stats });
   } catch (err) { next(err); }
 }
 
@@ -699,114 +780,222 @@ async function getPerformance(req, res, next) {
 async function getAuditLog(req, res, next) {
   try {
     const { from, to, gang_id } = req.query;
-    const fromDate = from || new Date(Date.now() - 7*24*60*60*1000).toISOString().slice(0,10);
-    const toDate   = to   || new Date().toISOString().slice(0,10);
+    const fromDate = from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const toDate   = to   || new Date().toISOString().slice(0, 10);
+    const where = {
+      allocated_at: { gte: new Date(fromDate), lte: new Date(toDate + 'T23:59:59') },
+      ...(gang_id ? { gang_id } : {}),
+    };
 
-    const params = [fromDate, toDate];
-    const gangFilter = gang_id ? `AND a.gang_id=$3` : '';
-    if (gang_id) params.push(gang_id);
+    const rows = await prisma.gangAllocation.findMany({
+      where,
+      include: {
+        gang:      { select: { gang_code: true } },
+        request:   { select: { request_ref: true, bay_number: true, container_number: true, priority: true, agent_name: true } },
+        allocator: { select: { name: true } },
+        delay_logs: { select: { delay_type: true } },
+      },
+      orderBy: { allocated_at: 'desc' },
+      take: 500,
+    });
 
-    const { rows } = await db.query(`
-      SELECT a.*, g.gang_code, r.request_ref, r.bay_number, r.container_number,
-             r.priority, r.agent_name,
-             u.full_name AS allocated_by_name,
-             (SELECT COUNT(*) FROM gang_delay_logs WHERE allocation_id=a.id) AS delay_count,
-             (SELECT STRING_AGG(delay_type, ', ') FROM gang_delay_logs WHERE allocation_id=a.id) AS delay_types
-      FROM gang_allocations a
-      JOIN gangs g ON g.id = a.gang_id
-      JOIN gang_requests r ON r.id = a.request_id
-      JOIN users u ON u.id = a.allocated_by
-      WHERE DATE(a.allocated_at) BETWEEN $1 AND $2 ${gangFilter}
-      ORDER BY a.allocated_at DESC
-      LIMIT 500
-    `, params);
-    return res.json(rows);
+    const result = rows.map(a => ({
+      ...a,
+      gang_code:         a.gang.gang_code,
+      request_ref:       a.request.request_ref,
+      bay_number:        a.request.bay_number,
+      container_number:  a.request.container_number,
+      priority:          a.request.priority,
+      agent_name:        a.request.agent_name,
+      allocated_by_name: a.allocator.name,
+      delay_count:       a.delay_logs.length,
+      delay_types:       a.delay_logs.length ? a.delay_logs.map(d => d.delay_type).join(', ') : null,
+    }));
+
+    return res.json(result);
   } catch (err) { next(err); }
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
 async function getNotifications(req, res, next) {
   try {
-    const { rows } = await db.query(
-      `SELECT n.*, g.gang_code FROM gang_notifications n
-       LEFT JOIN gangs g ON g.id = n.gang_id
-       ORDER BY n.created_at DESC LIMIT 50`
-    );
-    return res.json(rows);
+    const notifications = await prisma.gangNotification.findMany({
+      include: { gang: { select: { gang_code: true } } },
+      orderBy: { created_at: 'desc' },
+      take: 50,
+    });
+    const result = notifications.map(n => ({ ...n, gang_code: n.gang?.gang_code ?? null }));
+    return res.json(result);
   } catch (err) { next(err); }
 }
 
 async function markNotificationRead(req, res, next) {
   try {
-    await db.query(`UPDATE gang_notifications SET is_read=TRUE WHERE id=$1`, [req.params.id]);
+    await prisma.gangNotification.update({ where: { id: req.params.id }, data: { is_read: true } });
     return res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+// ─── Substitutions ────────────────────────────────────────────────────────────
+async function getReserveMembers(req, res, next) {
+  try {
+    const reserves = await prisma.gangMember.findMany({
+      where: {
+        is_active: true,
+        status: 'available',
+        gang: { specialization: 'Reserve Pool' },
+        substituting_for: { none: { ended_at: null } },
+      },
+      include: { gang: { select: { gang_code: true } } },
+      orderBy: [{ gang: { gang_code: 'asc' } }, { full_name: 'asc' }],
+    });
+    return res.json(reserves.map(m => ({ ...m, gang_code: m.gang.gang_code })));
+  } catch (err) { next(err); }
+}
+
+async function listActiveSubstitutions(req, res, next) {
+  try {
+    const subs = await prisma.gangSubstitution.findMany({
+      where: { ended_at: null },
+      include: {
+        gang:          { select: { gang_code: true } },
+        absent_member: { select: { id: true, full_name: true, role: true, employee_id: true } },
+        substitute:    { select: { id: true, full_name: true, role: true, employee_id: true, gang: { select: { gang_code: true } } } },
+        creator:       { select: { name: true } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+    return res.json(subs.map(s => ({
+      ...s,
+      gang_code:      s.gang.gang_code,
+      created_by_name: s.creator.name,
+      substitute:     { ...s.substitute, gang_code: s.substitute.gang?.gang_code },
+    })));
+  } catch (err) { next(err); }
+}
+
+async function createSubstitution(req, res, next) {
+  try {
+    const { absent_member_id, substitute_id, reason, notes } = req.body;
+    if (!absent_member_id || !substitute_id) {
+      return res.status(400).json({ error: 'absent_member_id and substitute_id are required.' });
+    }
+
+    const [absent, substitute] = await Promise.all([
+      prisma.gangMember.findUnique({ where: { id: absent_member_id } }),
+      prisma.gangMember.findUnique({ where: { id: substitute_id }, include: { gang: { select: { specialization: true } } } }),
+    ]);
+    if (!absent)     return res.status(404).json({ error: 'Absent member not found.' });
+    if (!substitute) return res.status(404).json({ error: 'Substitute member not found.' });
+    if (substitute.gang?.specialization !== 'Reserve Pool') {
+      return res.status(400).json({ error: 'Substitute must be a member of a Reserve Pool gang.' });
+    }
+
+    const existing = await prisma.gangSubstitution.findFirst({
+      where: { absent_member_id, ended_at: null },
+    });
+    if (existing) return res.status(409).json({ error: 'This member already has an active substitution.' });
+
+    const subInUse = await prisma.gangSubstitution.findFirst({
+      where: { substitute_id, ended_at: null },
+    });
+    if (subInUse) return res.status(409).json({ error: 'This reserve member is already substituting elsewhere.' });
+
+    const sub = await prisma.gangSubstitution.create({
+      data: {
+        gang_id:          absent.gang_id,
+        absent_member_id,
+        substitute_id,
+        reason:           reason || null,
+        notes:            notes  || null,
+        created_by:       req.user.id,
+      },
+      include: {
+        absent_member: { select: { full_name: true, role: true, employee_id: true } },
+        substitute:    { select: { full_name: true, role: true, employee_id: true } },
+      },
+    });
+
+    await logAudit(req, 'substitution:created', 'GangSubstitution', sub.id, {
+      gang_id: absent.gang_id, absent_member_id, substitute_id, reason,
+    });
+
+    return res.status(201).json(sub);
+  } catch (err) { next(err); }
+}
+
+async function endSubstitution(req, res, next) {
+  try {
+    const sub = await prisma.gangSubstitution.findUnique({ where: { id: req.params.subId } });
+    if (!sub)           return res.status(404).json({ error: 'Substitution not found.' });
+    if (sub.ended_at)   return res.status(409).json({ error: 'Substitution already ended.' });
+
+    const updated = await prisma.gangSubstitution.update({
+      where: { id: req.params.subId },
+      data:  { ended_at: new Date() },
+    });
+
+    await logAudit(req, 'substitution:ended', 'GangSubstitution', sub.id, { gang_id: sub.gang_id });
+
+    return res.json(updated);
   } catch (err) { next(err); }
 }
 
 // ─── Automated Alerts (called by scheduler) ──────────────────────────────────
 async function runGangAlerts() {
   try {
-    // Alert: job overdue (active job exceeded expected duration by >15min)
-    const { rows: overdue } = await db.query(`
-      SELECT a.id, a.gang_id, g.gang_code, r.bay_number, r.container_number
-      FROM gang_allocations a
-      JOIN gangs g ON g.id = a.gang_id
-      JOIN gang_requests r ON r.id = a.request_id
-      WHERE a.status = 'in_progress'
-        AND a.expected_start IS NOT NULL
-        AND NOW() > a.expected_start + ((a.expected_duration_minutes + 15) || ' minutes')::INTERVAL
-        AND NOT EXISTS (
-          SELECT 1 FROM gang_notifications
-          WHERE allocation_id = a.id AND type = 'job_overdue'
-            AND created_at > NOW() - INTERVAL '1 hour'
-        )
-    `);
-    for (const r of overdue) {
-      await db.query(`
-        INSERT INTO gang_notifications (type, message, allocation_id, gang_id)
-        VALUES ('job_overdue', $1, $2, $3)
-      `, [`OVERDUE: Gang ${r.gang_code} — Bay ${r.bay_number} (${r.container_number})`, r.id, r.gang_id]);
+    const now = new Date();
+    const oneHourAgo  = new Date(now - 3600000);
+    const twoHoursAgo = new Date(now - 7200000);
+    const thirtyMinAgo = new Date(now - 1800000);
+
+    // 1. Overdue jobs (in_progress, past expected end + 15min)
+    const inProgress = await prisma.gangAllocation.findMany({
+      where: { status: 'in_progress', expected_start: { not: null } },
+      include: { gang: { select: { gang_code: true } }, request: { select: { bay_number: true, container_number: true } } },
+    });
+    for (const a of inProgress) {
+      const expectedEnd = new Date(a.expected_start.getTime() + (a.expected_duration_minutes + 15) * 60000);
+      if (now < expectedEnd) continue;
+      const recent = await prisma.gangNotification.findFirst({
+        where: { allocation_id: a.id, type: 'job_overdue', created_at: { gte: oneHourAgo } },
+      });
+      if (recent) continue;
+      await prisma.gangNotification.create({
+        data: { type: 'job_overdue', message: `OVERDUE: Gang ${a.gang.gang_code} — Bay ${a.request.bay_number} (${a.request.container_number})`, allocation_id: a.id, gang_id: a.gang_id },
+      });
     }
 
-    // Alert: gang idle (available gang with no job for >2h)
-    const { rows: idle } = await db.query(`
-      SELECT g.id, g.gang_code
-      FROM gangs g
-      WHERE g.status = 'available'
-        AND (
-          SELECT MAX(work_completed_at) FROM gang_allocations WHERE gang_id = g.id
-        ) < NOW() - INTERVAL '2 hours'
-        AND NOT EXISTS (
-          SELECT 1 FROM gang_notifications
-          WHERE gang_id = g.id AND type = 'idle_gang'
-            AND created_at > NOW() - INTERVAL '2 hours'
-        )
-    `);
-    for (const g of idle) {
-      await db.query(`
-        INSERT INTO gang_notifications (type, message, gang_id)
-        VALUES ('idle_gang', $1, $2)
-      `, [`Gang ${g.gang_code} has been idle for over 2 hours`, g.id]);
+    // 2. Idle gangs (available, last job completed >2h ago)
+    const availableGangs = await prisma.gang.findMany({ where: { status: 'available' } });
+    for (const g of availableGangs) {
+      const lastJob = await prisma.gangAllocation.findFirst({
+        where: { gang_id: g.id, status: 'completed' },
+        orderBy: { work_completed_at: 'desc' },
+        select: { work_completed_at: true },
+      });
+      if (!lastJob?.work_completed_at || lastJob.work_completed_at >= twoHoursAgo) continue;
+      const recent = await prisma.gangNotification.findFirst({
+        where: { gang_id: g.id, type: 'idle_gang', created_at: { gte: twoHoursAgo } },
+      });
+      if (recent) continue;
+      await prisma.gangNotification.create({
+        data: { type: 'idle_gang', message: `Gang ${g.gang_code} has been idle for over 2 hours`, gang_id: g.id },
+      });
     }
 
-    // Alert: pending request waiting >30min
-    const { rows: longPending } = await db.query(`
-      SELECT r.id, r.request_ref, r.bay_number, r.container_number, r.priority
-      FROM gang_requests r
-      WHERE r.status = 'pending'
-        AND r.created_at < NOW() - INTERVAL '30 minutes'
-        AND NOT EXISTS (
-          SELECT 1 FROM gang_notifications n
-          JOIN gang_allocations a ON a.id = n.allocation_id
-          WHERE a.request_id = r.id AND n.type = 'pending_request'
-            AND n.created_at > NOW() - INTERVAL '30 minutes'
-        )
-    `);
+    // 3. Pending requests unallocated >30min
+    const longPending = await prisma.gangRequest.findMany({
+      where: { status: 'pending', created_at: { lt: thirtyMinAgo } },
+    });
     for (const r of longPending) {
-      await db.query(`
-        INSERT INTO gang_notifications (type, message)
-        VALUES ('pending_request', $1)
-      `, [`UNALLOCATED: ${r.priority.toUpperCase()} request ${r.request_ref} — Bay ${r.bay_number} pending >30min`]);
+      const recent = await prisma.gangNotification.findFirst({
+        where: { type: 'pending_request', created_at: { gte: thirtyMinAgo } },
+      });
+      if (recent) continue;
+      await prisma.gangNotification.create({
+        data: { type: 'pending_request', message: `UNALLOCATED: ${r.priority.toUpperCase()} request ${r.request_ref} — Bay ${r.bay_number} pending >30min` },
+      });
     }
   } catch (_) { /* non-fatal scheduler */ }
 }
@@ -821,5 +1010,6 @@ module.exports = {
   getPerformance,
   getAuditLog,
   getNotifications, markNotificationRead,
+  getReserveMembers, listActiveSubstitutions, createSubstitution, endSubstitution,
   runGangAlerts,
 };

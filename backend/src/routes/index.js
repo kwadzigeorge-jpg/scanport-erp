@@ -11,6 +11,7 @@ router.use('/admin',          require('./admin'));
 router.use('/incidents',      require('./incidents'));
 router.use('/scanner-board',   require('./scannerBoard'));
 router.use('/agent-requests',  require('./agentRequests'));
+router.use('/gangs',           require('./gangs'));
 
 router.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 

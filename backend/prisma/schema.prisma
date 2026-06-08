@@ -19,6 +19,11 @@ model User {
   assignedTickets  Ticket[]         @relation("AssignedToTickets")
   ticketActivities TicketActivity[]
   agentRequests    AgentRequest[]   @relation("SubmittedAgentRequests")
+  created_gangs    Gang[]           @relation("GangCreatedBy")
+  received_gang_requests GangRequest[] @relation("GangRequestReceivedBy")
+  gang_allocations GangAllocation[] @relation("GangAllocatedBy")
+  gang_delay_reports    GangDelayLog[]     @relation("GangDelayReportedBy")
+  gang_substitutions    GangSubstitution[] @relation("SubstitutionCreatedBy")
 }
 
 model Scanner {
@@ -209,4 +214,161 @@ model AgentRequest {
   submittedBy     User      @relation("SubmittedAgentRequests", fields: [submittedById], references: [id])
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+}
+
+// ─── Gang Management ──────────────────────────────────────────────────────────
+
+model Gang {
+  id                   String    @id @default(cuid())
+  gang_code            String    @unique
+  status               String    @default("available")
+  specialization       String?
+  performance_score    Float     @default(100.0)
+  total_jobs_completed Int       @default(0)
+  notes                String?
+  created_by           String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  creator                 User?                   @relation("GangCreatedBy", fields: [created_by], references: [id])
+  members                 GangMember[]
+  allocations             GangAllocation[]        @relation("GangJobAllocations")
+  recommended_allocations GangAllocation[]        @relation("GangEngineRecommended")
+  notifications           GangNotification[]
+  performance_records     GangPerformanceRecord[]
+  substitutions           GangSubstitution[]      @relation("GangSubstitutions")
+}
+
+model GangMember {
+  id          String    @id @default(cuid())
+  gang_id     String
+  role        String
+  full_name   String
+  employee_id String    @unique
+  phone       String?
+  is_active   Boolean   @default(true)
+  joined_date DateTime?
+  status      String    @default("available")
+  created_at  DateTime  @default(now())
+
+  gang                Gang               @relation(fields: [gang_id], references: [id], onDelete: Cascade)
+  absences            GangSubstitution[] @relation("AbsentMember")
+  substituting_for    GangSubstitution[] @relation("SubstituteMember")
+}
+
+model GangRequest {
+  id                 String    @id @default(cuid())
+  request_ref        String    @unique
+  agent_name         String
+  agent_phone        String?
+  agency             String?
+  bay_number         String
+  container_number   String
+  container_number_2 String?
+  is_dual_container  Boolean   @default(false)
+  cargo_type         String?
+  priority           String    @default("normal")
+  status             String    @default("pending")
+  notes              String?
+  received_by        String?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  receiver    User?            @relation("GangRequestReceivedBy", fields: [received_by], references: [id])
+  allocations GangAllocation[]
+}
+
+model GangAllocation {
+  id                        String    @id @default(cuid())
+  request_id                String
+  gang_id                   String
+  allocated_by              String
+  is_override               Boolean   @default(false)
+  override_reason           String?
+  engine_recommended_gang   String?
+  engine_score              Float?
+  expected_start            DateTime?
+  expected_duration_minutes Int       @default(60)
+  allocated_at              DateTime  @default(now())
+  gang_arrived_at           DateTime?
+  work_started_at           DateTime?
+  work_completed_at         DateTime?
+  status                    String    @default("allocated")
+  supervisor_comments       String?
+  agent_rating              Int?
+  agent_feedback            String?
+  created_at                DateTime  @default(now())
+  updated_at                DateTime  @updatedAt
+
+  request          GangRequest            @relation(fields: [request_id], references: [id])
+  gang             Gang                   @relation("GangJobAllocations", fields: [gang_id], references: [id])
+  allocator        User                   @relation("GangAllocatedBy", fields: [allocated_by], references: [id])
+  recommended_gang Gang?                  @relation("GangEngineRecommended", fields: [engine_recommended_gang], references: [id])
+  delay_logs       GangDelayLog[]
+  performance_record GangPerformanceRecord?
+  notifications    GangNotification[]
+}
+
+model GangDelayLog {
+  id            String    @id @default(cuid())
+  allocation_id String
+  delay_type    String
+  delay_minutes Int?
+  description   String
+  reported_by   String?
+  reported_at   DateTime  @default(now())
+
+  allocation    GangAllocation @relation(fields: [allocation_id], references: [id], onDelete: Cascade)
+  reporter      User?          @relation("GangDelayReportedBy", fields: [reported_by], references: [id])
+}
+
+model GangPerformanceRecord {
+  id                        String    @id @default(cuid())
+  gang_id                   String
+  allocation_id             String?   @unique
+  period_date               DateTime
+  actual_duration_minutes   Int?
+  expected_duration_minutes Int?
+  delay_count               Int       @default(0)
+  agent_rating              Int?
+  arrived_on_time           Boolean?
+  duration_score            Float?
+  delay_score               Float?
+  arrival_score             Float?
+  rating_score              Float?
+  total_score               Float?
+  computed_at               DateTime  @default(now())
+
+  gang       Gang            @relation(fields: [gang_id], references: [id], onDelete: Cascade)
+  allocation GangAllocation? @relation(fields: [allocation_id], references: [id], onDelete: Cascade)
+}
+
+model GangNotification {
+  id            String    @id @default(cuid())
+  type          String
+  message       String
+  allocation_id String?
+  gang_id       String?
+  is_read       Boolean   @default(false)
+  created_at    DateTime  @default(now())
+
+  allocation GangAllocation? @relation(fields: [allocation_id], references: [id], onDelete: Cascade)
+  gang       Gang?           @relation(fields: [gang_id], references: [id], onDelete: Cascade)
+}
+
+model GangSubstitution {
+  id               String    @id @default(cuid())
+  gang_id          String
+  absent_member_id String
+  substitute_id    String
+  reason           String?
+  notes            String?
+  created_by       String
+  ended_at         DateTime?
+  created_at       DateTime  @default(now())
+
+  gang          Gang       @relation("GangSubstitutions", fields: [gang_id], references: [id])
+  absent_member GangMember @relation("AbsentMember", fields: [absent_member_id], references: [id])
+  substitute    GangMember @relation("SubstituteMember", fields: [substitute_id], references: [id])
+  creator       User       @relation("SubstitutionCreatedBy", fields: [created_by], references: [id])
 }

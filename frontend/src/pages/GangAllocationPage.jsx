@@ -9,6 +9,7 @@ import {
   ClipboardList, Zap, Activity, RefreshCw, ChevronDown, ChevronUp,
   Phone, Star, AlertCircle, FileText, Pencil, Bell, Search,
   UserCheck, PlayCircle, StopCircle, Timer, TrendingUp, MapPin,
+  ArrowLeftRight,
 } from 'lucide-react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -480,14 +481,115 @@ function MemberStatusSelect({ gangId, member, onDone }) {
   );
 }
 
+// ── Substitute Modal ──────────────────────────────────────────────────────────
+function SubstituteModal({ gang, member, onClose }) {
+  const qc = useQueryClient();
+  const [substituteId, setSubstituteId] = useState('');
+  const [reason, setReason]             = useState(member.status !== 'available' ? member.status : 'sick');
+  const [notes, setNotes]               = useState('');
+
+  const { data: reserves = [], isLoading: reservesLoading } = useQuery(
+    'reserve-members',
+    () => gangApi.getReserves().then(r => r.data),
+    { staleTime: 0 }
+  );
+
+  const mut = useMutation(
+    () => gangApi.createSubstitution(gang.id, {
+      absent_member_id: member.id,
+      substitute_id:    substituteId,
+      reason,
+      notes: notes || undefined,
+    }),
+    {
+      onSuccess: () => {
+        toast.success(`Substitute assigned for ${member.full_name}.`);
+        qc.invalidateQueries('gang-list');
+        onClose();
+      },
+      onError: e => toast.error(e.response?.data?.error || 'Failed to assign substitute.'),
+    }
+  );
+
+  return (
+    <Modal title="Assign Substitute" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <p className="text-xs font-medium text-amber-700 uppercase tracking-wide mb-1">Absent Member</p>
+          <p className="font-semibold text-gray-900">{member.full_name}</p>
+          <p className="text-xs text-gray-500">{member.role === 'head_man' ? 'Head Man' : 'Docker'} · {member.employee_id} · {gang.gang_code}</p>
+        </div>
+
+        <Field label="Reason for Absence" required>
+          <select className={sel} value={reason} onChange={e => setReason(e.target.value)}>
+            <option value="sick">Sick</option>
+            <option value="on_leave">On Leave</option>
+            <option value="off_duty">Off Duty</option>
+            <option value="other">Other</option>
+          </select>
+        </Field>
+
+        <Field label="Select Reserve Member" required>
+          {reservesLoading ? (
+            <p className="text-sm text-gray-400 italic">Loading available reserves…</p>
+          ) : !reserves.length ? (
+            <p className="text-sm text-red-500 italic">No reserve members are available right now.</p>
+          ) : (
+            <div className="max-h-52 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+              {reserves.map(r => (
+                <label key={r.id} className={clsx(
+                  'flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-blue-50 transition-colors',
+                  substituteId === r.id && 'bg-blue-50 border-l-2 border-l-blue-500'
+                )}>
+                  <input
+                    type="radio"
+                    name="substitute"
+                    value={r.id}
+                    checked={substituteId === r.id}
+                    onChange={() => setSubstituteId(r.id)}
+                    className="accent-blue-600"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-gray-900">{r.full_name}</span>
+                    <span className="text-xs text-gray-400 ml-2">{r.gang_code} · {r.employee_id}</span>
+                  </div>
+                  <span className={clsx('w-2 h-2 rounded-full shrink-0', r.role === 'head_man' ? 'bg-amber-400' : 'bg-blue-500')} />
+                </label>
+              ))}
+            </div>
+          )}
+        </Field>
+
+        <Field label="Notes">
+          <textarea rows={2} className={inp} placeholder="Optional notes…"
+            value={notes} onChange={e => setNotes(e.target.value)} />
+        </Field>
+
+        <div className="flex justify-end gap-3 pt-1">
+          <button type="button" onClick={onClose} className="btn-secondary text-sm px-4 py-2">Cancel</button>
+          <button
+            type="button"
+            disabled={!substituteId || mut.isLoading}
+            onClick={() => mut.mutate()}
+            className="btn-primary text-sm px-4 py-2 disabled:opacity-50"
+          >
+            {mut.isLoading ? 'Assigning…' : 'Assign Sub'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Gang Roster Card ──────────────────────────────────────────────────────────
-function GangRosterCard({ gang, onEdit, onAddMember }) {
+function GangRosterCard({ gang, onEdit, onAddMember, substitutions = [], onFindSub }) {
   const qc = useQueryClient();
   const members = gang.members || [];
   const headMan = members.find(m => m.role === 'head_man');
   const dockers  = members.filter(m => m.role === 'docker');
   const availCount = parseInt(gang.available_count) || 0;
   const totalCount = parseInt(gang.total_members) || 0;
+  const isReservePool = gang.specialization === 'Reserve Pool';
 
   const headManAvail = headMan?.status === 'available';
   const readiness = totalCount === 0 ? 'empty'
@@ -506,6 +608,11 @@ function GangRosterCard({ gang, onEdit, onAddMember }) {
 
   const removeMut = useMutation(({ mid }) => gangApi.removeMember(gang.id, mid), {
     onSuccess: () => { toast.success('Member removed.'); qc.invalidateQueries('gang-list'); },
+  });
+
+  const endSubMut = useMutation((subId) => gangApi.endSubstitution(subId), {
+    onSuccess: () => { toast.success('Substitution ended.'); qc.invalidateQueries('gang-list'); },
+    onError:   e  => toast.error(e.response?.data?.error || 'Failed to end substitution.'),
   });
 
   const slots = [
@@ -560,34 +667,63 @@ function GangRosterCard({ gang, onEdit, onAddMember }) {
               </div>
 
               {/* Filled slots */}
-              {roleMembers.map(m => (
-                <div key={m.id} className={clsx(
-                  'flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors',
-                  m.role === 'head_man' && 'bg-amber-50/40'
-                )}>
-                  <StatusDot status={m.status} />
-                  <div className={clsx(
-                    'w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0',
-                    m.role === 'head_man' ? 'bg-amber-500' : 'bg-blue-600'
-                  )}>
-                    {m.full_name?.[0]?.toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-medium text-gray-800">{m.full_name}</span>
-                      {m.role === 'head_man' && (
-                        <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">Gang Leader</span>
+              {roleMembers.map(m => {
+                const activeSub = substitutions.find(s => s.absent_member_id === m.id);
+                const isAbsent  = !['available', 'on_break'].includes(m.status);
+                return (
+                  <React.Fragment key={m.id}>
+                    <div className={clsx(
+                      'flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors',
+                      m.role === 'head_man' && 'bg-amber-50/40',
+                      activeSub && 'opacity-70'
+                    )}>
+                      <StatusDot status={m.status} />
+                      <div className={clsx(
+                        'w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0',
+                        m.role === 'head_man' ? 'bg-amber-500' : 'bg-blue-600'
+                      )}>
+                        {m.full_name?.[0]?.toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium text-gray-800">{m.full_name}</span>
+                          {m.role === 'head_man' && (
+                            <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">Gang Leader</span>
+                          )}
+                        </div>
+                        <span className="text-xs text-gray-400">{m.employee_id}{m.phone ? ` · ${m.phone}` : ''}</span>
+                      </div>
+                      <MemberStatusSelect gangId={gang.id} member={m} />
+                      {!isReservePool && isAbsent && !activeSub && (
+                        <button
+                          onClick={() => onFindSub?.(gang, m)}
+                          title="Find substitute"
+                          className="flex items-center gap-1 text-xs text-orange-600 border border-orange-200 bg-orange-50 hover:bg-orange-100 rounded-lg px-2 py-1 shrink-0">
+                          <ArrowLeftRight size={11} /> Sub
+                        </button>
                       )}
+                      <button onClick={() => removeMut.mutate({ mid: m.id })}
+                        className="p-1 text-gray-300 hover:text-red-500 rounded ml-1 shrink-0">
+                        <X size={13} />
+                      </button>
                     </div>
-                    <span className="text-xs text-gray-400">{m.employee_id}{m.phone ? ` · ${m.phone}` : ''}</span>
-                  </div>
-                  <MemberStatusSelect gangId={gang.id} member={m} />
-                  <button onClick={() => removeMut.mutate({ mid: m.id })}
-                    className="p-1 text-gray-300 hover:text-red-500 rounded ml-1 shrink-0">
-                    <X size={13} />
-                  </button>
-                </div>
-              ))}
+                    {activeSub && (
+                      <div className="flex items-center gap-3 px-4 py-2 bg-blue-50 border-l-4 border-blue-400 text-xs">
+                        <ArrowLeftRight size={12} className="text-blue-500 shrink-0" />
+                        <span className="text-blue-700 font-medium">{activeSub.substitute.full_name}</span>
+                        <span className="text-blue-500">{activeSub.substitute.gang_code}</span>
+                        <span className="text-gray-400 flex-1">covering for {m.full_name}</span>
+                        <button
+                          onClick={() => endSubMut.mutate(activeSub.id)}
+                          disabled={endSubMut.isLoading}
+                          className="text-xs text-gray-500 hover:text-red-600 border border-gray-200 rounded px-2 py-0.5 bg-white hover:border-red-300">
+                          End Sub
+                        </button>
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
 
               {/* Empty slots */}
               {Array.from({ length: emptySlots }).map((_, i) => (
@@ -934,9 +1070,10 @@ function RequestsTab() {
 
 // ── Gangs Tab ─────────────────────────────────────────────────────────────────
 function GangsTab() {
-  const [showGangModal, setShowGangModal] = useState(false);
-  const [editGang, setEditGang]           = useState(null);
-  const [memberModal, setMemberModal]     = useState(null); // { gangId, role? }
+  const [showGangModal, setShowGangModal]   = useState(false);
+  const [editGang, setEditGang]             = useState(null);
+  const [memberModal, setMemberModal]       = useState(null); // { gangId, role? }
+  const [substituteModal, setSubstituteModal] = useState(null); // { gang, member }
 
   const { data: gangs = [], isLoading } = useQuery(
     'gang-list',
@@ -975,8 +1112,10 @@ function GangsTab() {
             <GangRosterCard
               key={g.id}
               gang={g}
+              substitutions={g.active_substitutions || []}
               onEdit={(gang) => { setEditGang(gang); setShowGangModal(true); }}
               onAddMember={(gangId, role) => setMemberModal({ gangId, role })}
+              onFindSub={(gang, member) => setSubstituteModal({ gang, member })}
             />
           ))}
         </div>
@@ -990,6 +1129,13 @@ function GangsTab() {
           gangId={memberModal.gangId}
           member={null}
           onClose={() => setMemberModal(null)}
+        />
+      )}
+      {substituteModal && (
+        <SubstituteModal
+          gang={substituteModal.gang}
+          member={substituteModal.member}
+          onClose={() => setSubstituteModal(null)}
         />
       )}
     </div>
