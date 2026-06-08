@@ -1,0 +1,52 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: scanport
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:password@db:5432/scanport?schema=public
+      JWT_SECRET: change-this-in-production
+      JWT_EXPIRES_IN: 7d
+      PORT: 4000
+      FRONTEND_URL: http://localhost:5173
+    ports:
+      - '4000:4000'
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '5173:80'
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  uploads:

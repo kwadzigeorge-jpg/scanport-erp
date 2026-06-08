@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String           @id @default(cuid())
+  email            String           @unique
+  password         String
+  name             String
+  role             String           @default("VIEWER")
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  reportedTickets  Ticket[]         @relation("ReportedByTickets")
+  assignedTickets  Ticket[]         @relation("AssignedToTickets")
+  ticketActivities TicketActivity[]
+  agentRequests    AgentRequest[]   @relation("SubmittedAgentRequests")
+}
+
+model Scanner {
+  id                String          @id @default(cuid())
+  serialNumber      String          @unique
+  acceleratorSerial String
+  manufacturer      String          @default("Siemens")
+  type              String          @default("Fixed Scanner")
+  location          String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  certifications    Certification[]
+}
+
+model Certification {
+  id                String         @id @default(cuid())
+  scannerId         String
+  scanner           Scanner        @relation(fields: [scannerId], references: [id], onDelete: Cascade)
+  inspectionDate    DateTime
+  expiryDate        DateTime
+  noticeDate        DateTime
+  certificateStatus String         @default("ISSUED")
+  status            String         @default("ACTIVE")
+  documentUrl       String?
+  documentName      String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  notifications     Notification[]
+  alertLogs         AlertLog[]
+}
+
+model Notification {
+  id              String        @id @default(cuid())
+  certificationId String
+  certification   Certification @relation(fields: [certificationId], references: [id], onDelete: Cascade)
+  noticeStatus    String        @default("NOT_SENT")
+  dateSent        DateTime?
+  method          String?
+  referenceNumber String?
+  documentUrl     String?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  userEmail String
+  action    String
+  entity    String
+  entityId  String
+  details   String   @default("")
+  createdAt DateTime @default(now())
+}
+
+model AlertLog {
+  id              String        @id @default(cuid())
+  certificationId String
+  certification   Certification @relation(fields: [certificationId], references: [id], onDelete: Cascade)
+  type            String
+  message         String
+  resolved        Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+}
+
+// ─── Incident Management ─────────────────────────────────────────────────────
+
+model Location {
+  id      String   @id @default(cuid())
+  name    String   @unique
+  code    String   @unique
+  type    String
+  tickets Ticket[]
+}
+
+model Ticket {
+  id              String           @id @default(cuid())
+  ticketNumber    String           @unique
+  title           String
+  description     String
+  locationId      String
+  location        Location         @relation(fields: [locationId], references: [id])
+  equipmentType   String
+  issueType       String
+  severity        String
+  status          String           @default("OPEN")
+  escalationLevel Int              @default(1)
+  reportedById    String
+  reportedBy      User             @relation("ReportedByTickets", fields: [reportedById], references: [id])
+  assignedTo      String?
+  assignedToId    String?
+  assignedToUser  User?            @relation("AssignedToTickets", fields: [assignedToId], references: [id])
+  startTime       DateTime         @default(now())
+  firstResponseAt DateTime?
+  resolvedAt      DateTime?
+  closedAt        DateTime?
+  resolutionNotes String?
+  downtimeMinutes Int?
+  slaBreached     Boolean          @default(false)
+  attachments     Attachment[]
+  activities      TicketActivity[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model TicketActivity {
+  id         String   @id @default(cuid())
+  ticketId   String
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  userEmail  String
+  userName   String
+  action     String
+  fromStatus String?
+  toStatus   String?
+  notes      String?
+  createdAt  DateTime @default(now())
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fileName  String
+  fileUrl   String
+  fileType  String
+  createdAt DateTime @default(now())
+}
+
+// ─── Scanner Status Board ─────────────────────────────────────────────────────
+
+model ScannerBoardEntry {
+  id           String   @id @default(cuid())
+  date         String   // YYYY-MM-DD
+  shift        String   // MORNING | AFTERNOON | NIGHT
+  scanner      String   // IMPORT_1 | IMPORT_2 | IMPORT_3 | EXPORT_1 | EXPORT_2 | EXPORT_3
+  status       String   @default("OPERATIONAL")
+  faultType    String?
+  faultNote    String?
+  updateRemark String?
+  scanCount    Int      @default(0)
+  preparedBy   String?
+  sessionId    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([date, shift, scanner])
+}
+
+model BoardHistory {
+  id        String   @id @default(cuid())
+  date      String
+  shift     String
+  scanner   String
+  changes   String   // JSON array of {field, from, to}
+  updatedBy String
+  sessionId Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+// ─── Agent Requests ───────────────────────────────────────────────────────────
+
+model AgentRequest {
+  id              String    @id @default(cuid())
+  requestNumber   String    @unique                // AGT-2026-0001
+  requestType     String                           // SEAL_CUTTING | GANG_UNSTUFFING
+  status          String    @default("PENDING")    // PENDING | APPROVED | IN_PROGRESS | COMPLETED | REJECTED
+
+  // Container info — required for both request types
+  containerNumber String
+  containerSize   String                           // 20FT | 40FT | 45FT
+  sealNumber      String?
+
+  // Gang-for-unstuffing additional fields
+  bayZone         String?                          // "1-50" | "51-80"
+  bayNumber       String?
+  gangAssigned    String?
+  agencyName      String?
+  agentName       String?
+  agentPhone      String?
+  itemDescription String?
+  completionTime  DateTime?
+
+  notes           String?
+  submittedById   String
+  submittedBy     User      @relation("SubmittedAgentRequests", fields: [submittedById], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
