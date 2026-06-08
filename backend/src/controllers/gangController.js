@@ -259,6 +259,42 @@ async function updateGang(req, res, next) {
   }
 }
 
+async function deleteGang(req, res, next) {
+  try {
+    const { id } = req.params;
+    const gang = await prisma.gang.findUnique({ where: { id }, select: { id: true, gang_code: true } });
+    if (!gang) return res.status(404).json({ error: 'Gang not found.' });
+
+    const activeAlloc = await prisma.gangAllocation.findFirst({
+      where: { gang_id: id, status: { in: ['allocated', 'gang_dispatched', 'in_progress'] } },
+      select: { id: true },
+    });
+    if (activeAlloc) {
+      return res.status(409).json({ error: 'Cannot delete a gang with active allocations. Complete or cancel all jobs first.' });
+    }
+
+    // Delete in FK-safe order
+    const memberIds = await prisma.gangMember.findMany({ where: { gang_id: id }, select: { id: true } }).then(r => r.map(m => m.id));
+    const allocIds  = await prisma.gangAllocation.findMany({ where: { gang_id: id }, select: { id: true } }).then(r => r.map(a => a.id));
+
+    await prisma.$transaction([
+      // Nullify engine_recommended_gang references
+      prisma.gangAllocation.updateMany({ where: { engine_recommended_gang: id }, data: { engine_recommended_gang: null } }),
+      // End/remove substitutions involving this gang's members
+      prisma.gangSubstitution.deleteMany({ where: { OR: [{ gang_id: id }, { absent_member_id: { in: memberIds } }, { substitute_id: { in: memberIds } }] } }),
+      // Delete delay logs attached to this gang's allocations
+      prisma.gangDelayLog.deleteMany({ where: { allocation_id: { in: allocIds } } }),
+      // Delete allocations
+      prisma.gangAllocation.deleteMany({ where: { gang_id: id } }),
+      // Delete gang (cascades members, perf records, notifications)
+      prisma.gang.delete({ where: { id } }),
+    ]);
+
+    await logAudit(req, 'gang:deleted', 'Gang', id, { gang_code: gang.gang_code });
+    return res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
 async function setGangStatus(req, res, next) {
   try {
     const { status } = req.body;
@@ -1099,7 +1135,7 @@ async function runGangAlerts() {
 
 module.exports = {
   getDashboard,
-  listGangs, getGang, createGang, updateGang, setGangStatus,
+  listGangs, getGang, createGang, updateGang, deleteGang, setGangStatus,
   listMembers, addMember, updateMember, removeMember, setMemberStatus,
   listRequests, createRequest, cancelRequest,
   recommendGangs, createAllocation, listAllocations,

@@ -14,6 +14,7 @@ router.get('/:id',                        requirePermission('gang.view'),     gc
 router.post('/',                          requirePermission('gang.manage'),   gc.createGang);
 router.put('/:id',                        requirePermission('gang.manage'),   gc.updateGang);
 router.patch('/:id/status',              requirePermission('gang.manage'),   gc.setGangStatus);
+router.delete('/:id',                    requirePermission('gang.manage'),   gc.deleteGang);
 
 // ── Gang Members ──────────────────────────────────────────────────────────────
 router.get('/:id/members',                requirePermission('gang.view'),     gc.listMembers);
