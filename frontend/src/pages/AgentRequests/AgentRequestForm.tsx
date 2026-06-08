@@ -6,7 +6,7 @@ import {
   ClipboardDocumentListIcon, ClockIcon, ChevronDownIcon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
-import { createAgentRequest } from '../../api/agentRequests';
+import { createAgentRequest, CreateAgentRequestPayload } from '../../api/agentRequests';
 import { useAuth } from '../../contexts/AuthContext';
 
 type RequestType = 'SEAL_CUTTING' | 'GANG_UNSTUFFING' | '';
@@ -77,7 +77,7 @@ export default function AgentRequestForm() {
     if (!isValid) return;
     setSubmitting(true);
     try {
-      const payload: Record<string, string> = {
+      const payload: CreateAgentRequestPayload = {
         requestType:     form.requestType,
         containerNumber: form.containerNumber.trim().toUpperCase(),
         containerSize:   form.containerSize,
