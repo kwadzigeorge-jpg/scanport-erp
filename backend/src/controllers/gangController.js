@@ -67,6 +67,32 @@ function withMemberStats(gang, jobsToday = 0, lastJobCompleted = null) {
   };
 }
 
+// ─── Shift Helpers ────────────────────────────────────────────────────────────
+const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function getShiftWindow(now = new Date()) {
+  const h = now.getHours();
+  const shift = (h >= 6 && h < 18) ? 'day' : 'night';
+  const todayStr = now.toISOString().slice(0, 10);
+
+  if (shift === 'day') {
+    const start = new Date(`${todayStr}T06:00:00`);
+    const end   = new Date(`${todayStr}T18:00:00`);
+    return { shift, start, end, dow: start.getDay() };
+  } else {
+    let shiftStart;
+    if (h < 6) {
+      const prev = new Date(now);
+      prev.setDate(prev.getDate() - 1);
+      shiftStart = new Date(prev.toISOString().slice(0, 10) + 'T18:00:00');
+    } else {
+      shiftStart = new Date(`${todayStr}T18:00:00`);
+    }
+    const end = new Date(shiftStart.getTime() + 12 * 3600000);
+    return { shift, start: shiftStart, end, dow: shiftStart.getDay() };
+  }
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 async function getDashboard(req, res, next) {
   try {
@@ -489,6 +515,24 @@ async function createAllocation(req, res, next) {
     if (gangRequest.status !== 'pending') return res.status(400).json({ error: `Request is already ${gangRequest.status}.` });
     if (!gang) return res.status(404).json({ error: 'Gang not found.' });
 
+    // Shift capacity check
+    const { shift, start: sStart, end: sEnd, dow } = getShiftWindow();
+    const [shiftLimit, shiftUsed] = await Promise.all([
+      prisma.shiftDeploymentLimit.findUnique({ where: { day_of_week_shift: { day_of_week: dow, shift } } }),
+      prisma.gangAllocation.findMany({
+        where: { allocated_at: { gte: sStart, lt: sEnd }, status: { not: 'cancelled' } },
+        select: { gang_id: true },
+        distinct: ['gang_id'],
+      }),
+    ]);
+    if (shiftLimit && shiftUsed.length >= shiftLimit.max_gangs) {
+      return res.status(429).json({
+        error: `${DAY_NAMES[dow]} ${shift} shift is at capacity (${shiftLimit.max_gangs} gangs). No further allocations permitted.`,
+        shift_limit: shiftLimit.max_gangs,
+        shift_used:  shiftUsed.length,
+      });
+    }
+
     const [alloc] = await prisma.$transaction([
       prisma.gangAllocation.create({
         data: {
@@ -836,6 +880,59 @@ async function markNotificationRead(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Shift Deployment Limits ──────────────────────────────────────────────────
+async function getShiftCapacity(req, res, next) {
+  try {
+    const { shift, start, end, dow } = getShiftWindow();
+    const [limit, used] = await Promise.all([
+      prisma.shiftDeploymentLimit.findUnique({ where: { day_of_week_shift: { day_of_week: dow, shift } } }),
+      prisma.gangAllocation.findMany({
+        where: { allocated_at: { gte: start, lt: end }, status: { not: 'cancelled' } },
+        select: { gang_id: true },
+        distinct: ['gang_id'],
+      }),
+    ]);
+    const max_gangs = limit?.max_gangs ?? null;
+    const used_count = used.length;
+    return res.json({
+      shift,
+      shift_start:  start,
+      shift_end:    end,
+      day_of_week:  dow,
+      day_name:     DAY_NAMES[dow],
+      max_gangs,
+      used_count,
+      remaining:    max_gangs !== null ? Math.max(0, max_gangs - used_count) : null,
+      at_limit:     max_gangs !== null && used_count >= max_gangs,
+    });
+  } catch (err) { next(err); }
+}
+
+async function listShiftLimits(req, res, next) {
+  try {
+    const limits = await prisma.shiftDeploymentLimit.findMany({
+      orderBy: [{ day_of_week: 'asc' }, { shift: 'asc' }],
+    });
+    return res.json(limits.map(l => ({ ...l, day_name: DAY_NAMES[l.day_of_week] })));
+  } catch (err) { next(err); }
+}
+
+async function updateShiftLimit(req, res, next) {
+  try {
+    const { day_of_week, shift, max_gangs } = req.body;
+    if (day_of_week === undefined || !shift || max_gangs === undefined) {
+      return res.status(400).json({ error: 'day_of_week, shift, and max_gangs are required.' });
+    }
+    const limit = await prisma.shiftDeploymentLimit.upsert({
+      where:  { day_of_week_shift: { day_of_week: parseInt(day_of_week), shift } },
+      create: { day_of_week: parseInt(day_of_week), shift, max_gangs: parseInt(max_gangs) },
+      update: { max_gangs: parseInt(max_gangs) },
+    });
+    await logAudit(req, 'shift_limit:updated', 'ShiftDeploymentLimit', limit.id, { day_of_week, shift, max_gangs });
+    return res.json({ ...limit, day_name: DAY_NAMES[limit.day_of_week] });
+  } catch (err) { next(err); }
+}
+
 // ─── Substitutions ────────────────────────────────────────────────────────────
 async function getReserveMembers(req, res, next) {
   try {
@@ -1010,6 +1107,7 @@ module.exports = {
   getPerformance,
   getAuditLog,
   getNotifications, markNotificationRead,
+  getShiftCapacity, listShiftLimits, updateShiftLimit,
   getReserveMembers, listActiveSubstitutions, createSubstitution, endSubstitution,
   runGangAlerts,
 };

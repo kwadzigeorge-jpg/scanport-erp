@@ -356,6 +356,15 @@ model GangNotification {
   gang       Gang?           @relation(fields: [gang_id], references: [id], onDelete: Cascade)
 }
 
+model ShiftDeploymentLimit {
+  id          String @id @default(cuid())
+  day_of_week Int    // 0=Sunday … 6=Saturday
+  shift       String // 'day' | 'night'
+  max_gangs   Int
+
+  @@unique([day_of_week, shift])
+}
+
 model GangSubstitution {
   id               String    @id @default(cuid())
   gang_id          String

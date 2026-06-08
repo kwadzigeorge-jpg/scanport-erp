@@ -330,6 +330,11 @@ export const gangApi = {
   getNotifications:   ()        => api.get('/gangs/notifications/list'),
   markRead:           (id)      => api.patch(`/gangs/notifications/${id}/read`),
 
+  // Shift deployment limits
+  getShiftCapacity:  ()        => api.get('/gangs/shift/capacity'),
+  listShiftLimits:   ()        => api.get('/gangs/shift/limits'),
+  updateShiftLimit:  (d)       => api.put('/gangs/shift/limits', d),
+
   // Substitutions
   getReserves:              ()           => api.get('/gangs/reserves/available'),
   listActiveSubstitutions:  ()           => api.get('/gangs/substitutions/active'),

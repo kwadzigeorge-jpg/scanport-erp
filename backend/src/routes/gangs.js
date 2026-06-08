@@ -47,6 +47,11 @@ router.get('/analytics/audit',            requirePermission('gang.view'),     gc
 router.get('/notifications/list',         requirePermission('gang.view'),     gc.getNotifications);
 router.patch('/notifications/:id/read',   requirePermission('gang.view'),     gc.markNotificationRead);
 
+// ── Shift Deployment Limits ───────────────────────────────────────────────────
+router.get('/shift/capacity',              requirePermission('gang.view'),     gc.getShiftCapacity);
+router.get('/shift/limits',                requirePermission('gang.view'),     gc.listShiftLimits);
+router.put('/shift/limits',                requirePermission('gang.manage'),   gc.updateShiftLimit);
+
 // ── Substitutions ─────────────────────────────────────────────────────────────
 router.get('/reserves/available',          requirePermission('gang.view'),     gc.getReserveMembers);
 router.get('/substitutions/active',        requirePermission('gang.view'),     gc.listActiveSubstitutions);

@@ -38,12 +38,13 @@ const ALLOC_STATUS_LABEL = {
 const PRIORITY_STYLE = { normal: 'bg-gray-100 text-gray-600', urgent: 'bg-red-100 text-red-700' };
 
 const TABS = [
-  { key: 'dashboard',   label: 'Dashboard',    icon: BarChart3 },
-  { key: 'requests',    label: 'Requests',      icon: ClipboardList },
-  { key: 'gangs',       label: 'Gangs',         icon: Users },
-  { key: 'jobs',        label: 'Active Jobs',   icon: Activity },
-  { key: 'performance', label: 'Performance',   icon: TrendingUp },
-  { key: 'audit',       label: 'Audit Log',     icon: FileText },
+  { key: 'dashboard',   label: 'Dashboard',       icon: BarChart3 },
+  { key: 'requests',    label: 'Requests',         icon: ClipboardList },
+  { key: 'gangs',       label: 'Gangs',            icon: Users },
+  { key: 'jobs',        label: 'Active Jobs',      icon: Activity },
+  { key: 'performance', label: 'Performance',      icon: TrendingUp },
+  { key: 'audit',       label: 'Audit Log',        icon: FileText },
+  { key: 'schedule',    label: 'Shift Schedule',   icon: Timer },
 ];
 
 // ── Shared UI ─────────────────────────────────────────────────────────────────
@@ -224,6 +225,7 @@ function AllocateModal({ request, onClose }) {
   const [expectedDuration, setExpectedDuration] = useState(60);
 
   const { data: gangs = [], isLoading } = useQuery('gang-recommend', () => gangApi.recommend().then(r => r.data), { refetchOnWindowFocus: false });
+  const { data: shiftCap } = useQuery('shift-capacity', () => gangApi.getShiftCapacity().then(r => r.data), { refetchInterval: 30000 });
 
   const topGang = gangs[0];
 
@@ -294,6 +296,26 @@ function AllocateModal({ request, onClose }) {
             <input type="number" className={inp} value={expectedDuration} min={15} max={480} onChange={e => setExpectedDuration(e.target.value)} />
           </Field>
         </div>
+
+        {/* Shift Capacity */}
+        {shiftCap && (
+          <div className={clsx(
+            'flex items-center gap-3 rounded-lg border px-4 py-2.5 text-sm',
+            shiftCap.at_limit
+              ? 'bg-red-50 border-red-300 text-red-700'
+              : shiftCap.remaining <= 5
+              ? 'bg-amber-50 border-amber-300 text-amber-700'
+              : 'bg-green-50 border-green-200 text-green-700'
+          )}>
+            <span className="font-semibold capitalize">{shiftCap.day_name} · {shiftCap.shift === 'day' ? '☀ Day' : '🌙 Night'} Shift</span>
+            <span className="text-xs">|</span>
+            <span>{shiftCap.used_count} / {shiftCap.max_gangs} gangs deployed</span>
+            {shiftCap.at_limit
+              ? <span className="ml-auto font-bold text-xs uppercase tracking-wide">Shift Full</span>
+              : <span className="ml-auto text-xs">{shiftCap.remaining} slot{shiftCap.remaining !== 1 ? 's' : ''} remaining</span>
+            }
+          </div>
+        )}
 
         {/* Gang Ranking */}
         {isLoading ? <Spinner /> : (
@@ -1466,6 +1488,159 @@ function AuditTab() {
   );
 }
 
+// ── Shift Schedule Tab ────────────────────────────────────────────────────────
+const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function ShiftScheduleTab() {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(null); // { day_of_week, shift, max_gangs }
+  const [value, setValue]     = useState('');
+
+  const { data: limits = [], isLoading } = useQuery(
+    'shift-limits',
+    () => gangApi.listShiftLimits().then(r => r.data)
+  );
+
+  const { data: cap } = useQuery(
+    'shift-capacity',
+    () => gangApi.getShiftCapacity().then(r => r.data),
+    { refetchInterval: 30000 }
+  );
+
+  const mut = useMutation(
+    (d) => gangApi.updateShiftLimit(d),
+    {
+      onSuccess: () => {
+        toast.success('Shift limit updated.');
+        qc.invalidateQueries('shift-limits');
+        qc.invalidateQueries('shift-capacity');
+        setEditing(null);
+      },
+      onError: e => toast.error(e.response?.data?.error || 'Failed to update.'),
+    }
+  );
+
+  const getLimit = (dow, shift) => limits.find(l => l.day_of_week === dow && l.shift === shift);
+
+  const startEdit = (dow, shift, current) => {
+    setEditing({ day_of_week: dow, shift });
+    setValue(String(current));
+  };
+
+  const saveEdit = () => {
+    const n = parseInt(value);
+    if (isNaN(n) || n < 1) return toast.error('Enter a number ≥ 1.');
+    mut.mutate({ day_of_week: editing.day_of_week, shift: editing.shift, max_gangs: n });
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Current shift banner */}
+      {cap && (
+        <div className={clsx(
+          'flex items-center gap-4 rounded-xl border px-5 py-3',
+          cap.at_limit ? 'bg-red-50 border-red-300' : 'bg-blue-50 border-blue-200'
+        )}>
+          <Timer size={20} className={cap.at_limit ? 'text-red-500' : 'text-blue-500'} />
+          <div>
+            <p className="font-semibold text-gray-900 capitalize">
+              Current shift: {cap.day_name} · {cap.shift === 'day' ? 'Day (06:00–18:00)' : 'Night (18:00–06:00)'}
+            </p>
+            <p className="text-sm text-gray-500">
+              {cap.used_count} of {cap.max_gangs} gangs deployed
+              {cap.at_limit ? ' — ' : ' — '}
+              <span className={cap.at_limit ? 'text-red-600 font-semibold' : 'text-green-600 font-medium'}>
+                {cap.at_limit ? 'Shift at capacity' : `${cap.remaining} remaining`}
+              </span>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Schedule grid */}
+      {isLoading ? <Spinner /> : (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-3 bg-gray-50 border-b border-gray-100">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Maximum gangs per shift — click a value to edit</p>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100">
+                <th className="px-5 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Day</th>
+                <th className="px-5 py-2.5 text-center text-xs font-semibold text-yellow-600 uppercase">☀ Day (06:00–18:00)</th>
+                <th className="px-5 py-2.5 text-center text-xs font-semibold text-indigo-600 uppercase">🌙 Night (18:00–06:00)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {DAYS.map((dayName, dow) => {
+                const dayLim   = getLimit(dow, 'day');
+                const nightLim = getLimit(dow, 'night');
+                const isCurrentDay = cap?.day_of_week === dow;
+
+                return (
+                  <tr key={dow} className={clsx('hover:bg-gray-50', isCurrentDay && 'bg-blue-50/40')}>
+                    <td className="px-5 py-3 font-medium text-gray-800">
+                      {dayName}
+                      {isCurrentDay && (
+                        <span className="ml-2 text-xs text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded-full font-medium">Today</span>
+                      )}
+                    </td>
+                    {['day','night'].map(shift => {
+                      const lim = shift === 'day' ? dayLim : nightLim;
+                      const isEditingThis = editing?.day_of_week === dow && editing?.shift === shift;
+                      const isCurrentShift = isCurrentDay && cap?.shift === shift;
+
+                      return (
+                        <td key={shift} className="px-5 py-3 text-center">
+                          {isEditingThis ? (
+                            <div className="flex items-center justify-center gap-2">
+                              <input
+                                type="number"
+                                min={1}
+                                value={value}
+                                onChange={e => setValue(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(null); }}
+                                className="w-20 border border-blue-400 rounded-lg px-2 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                autoFocus
+                              />
+                              <button onClick={saveEdit} disabled={mut.isLoading}
+                                className="text-xs text-white bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded-lg">
+                                {mut.isLoading ? '…' : 'Save'}
+                              </button>
+                              <button onClick={() => setEditing(null)} className="text-xs text-gray-500 hover:text-red-500">✕</button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => startEdit(dow, shift, lim?.max_gangs ?? 0)}
+                              className={clsx(
+                                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors hover:ring-2 hover:ring-blue-300',
+                                isCurrentShift
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                              )}
+                              title="Click to edit"
+                            >
+                              {lim?.max_gangs ?? '—'}
+                              {isCurrentShift && cap && (
+                                <span className="text-xs font-normal opacity-80">({cap.used_count} used)</span>
+                              )}
+                            </button>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-xs text-gray-400">Limits apply per shift window. When a shift reaches its limit, new allocations are blocked.</p>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function GangAllocationPage() {
   const [tab, setTab] = useState('dashboard');
@@ -1503,6 +1678,7 @@ export default function GangAllocationPage() {
         {tab === 'jobs'        && <ActiveJobsTab />}
         {tab === 'performance' && <PerformanceTab />}
         {tab === 'audit'       && <AuditTab />}
+        {tab === 'schedule'    && <ShiftScheduleTab />}
       </div>
     </div>
   );
