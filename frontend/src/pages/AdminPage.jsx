@@ -1,0 +1,1546 @@
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { usersApi, reportsApi, containersApi, permissionsApi } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import toast from 'react-hot-toast';
+import { format } from 'date-fns';
+import clsx from 'clsx';
+import {
+  Settings, UserPlus, Users, Edit, Key, Shield,
+  ToggleLeft, ToggleRight, Search, Filter, X,
+  Lock, Unlock, LogOut, Eye, Activity, RefreshCw,
+  CheckCircle, AlertTriangle, Clock, Monitor, ChevronRight,
+  RotateCcw, Mail, Bell, Send, Plus, Trash2, History,
+  ChevronDown, ChevronUp, Info, ShieldCheck, ShieldOff,
+} from 'lucide-react';
+
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+const TABS = [
+  { key: 'users',     label: 'User Management',    icon: Users },
+  { key: 'sessions',  label: 'Active Sessions',     icon: Monitor },
+  { key: 'roles',     label: 'Roles & Permissions', icon: Shield },
+  { key: 'config',    label: 'System Config',       icon: Settings },
+  { key: 'reinstate', label: 'Reinstate Container', icon: RotateCcw },
+  { key: 'email',     label: 'Email & Alerts',      icon: Mail },
+];
+
+export default function AdminPage() {
+  const [tab, setTab] = useState('users');
+  return (
+    <div className="flex flex-col h-full">
+      {/* Tab bar */}
+      <div className="bg-white border-b border-gray-200 px-4 md:px-6 flex items-center gap-0.5 shrink-0 overflow-x-auto">
+        {TABS.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            className={clsx(
+              'flex items-center gap-2 px-4 py-3.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors',
+              tab === t.key ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-800'
+            )}>
+            <t.icon size={15} />{t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 md:p-6">
+        {tab === 'users'     && <UsersPanel />}
+        {tab === 'sessions'  && <SessionsPanel />}
+        {tab === 'roles'     && <RolesPanel />}
+        {tab === 'config'    && <ConfigPanel />}
+        {tab === 'reinstate' && <ReinstatePanel />}
+        {tab === 'email'     && <EmailPanel />}
+      </div>
+    </div>
+  );
+}
+
+// ─── Stats bar ────────────────────────────────────────────────────────────────
+function StatsBar() {
+  const { data } = useQuery('user-stats', () => usersApi.stats().then(r => r.data), { refetchInterval: 30000 });
+  if (!data) return null;
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      {[
+        { label: 'Total Users',      value: data.total,           color: 'border-gray-300' },
+        { label: 'Active',           value: data.active,          color: 'border-green-400' },
+        { label: 'Inactive',         value: data.inactive,        color: 'border-gray-300' },
+        { label: 'Locked',           value: data.locked,          color: 'border-red-400' },
+        { label: 'Logged in Today',  value: data.logged_in_today, color: 'border-blue-400' },
+        { label: 'Never Logged In',  value: data.never_logged_in, color: 'border-yellow-400' },
+      ].map(s => (
+        <div key={s.label} className={clsx('card p-3 text-center border-t-4', s.color)}>
+          <p className="text-xl font-bold text-gray-900">{s.value ?? 0}</p>
+          <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Users Panel ──────────────────────────────────────────────────────────────
+function UsersPanel() {
+  const qc = useQueryClient();
+  const { user: currentUser } = useAuth();
+  const [showCreate, setShowCreate]   = useState(false);
+  const [editUser,   setEditUser]     = useState(null);
+  const [detailUser, setDetailUser]   = useState(null);
+  const [resetUser,  setResetUser]    = useState(null);
+  const [filters, setFilters]         = useState({ search: '', role: '', is_active: '' });
+
+  const { data, isLoading, refetch } = useQuery(
+    ['admin-users', filters],
+    () => usersApi.list({ ...filters, limit: 100 }).then(r => r.data),
+    { keepPreviousData: true }
+  );
+  const { data: rolesData } = useQuery('roles', () => usersApi.roles().then(r => r.data));
+
+  const toggleMutation = useMutation(
+    ({ id, is_active }) => usersApi.update(id, { is_active }),
+    {
+      onSuccess: (_, vars) => {
+        toast.success(vars.is_active ? 'User activated.' : 'User deactivated. Sessions terminated.');
+        qc.invalidateQueries('admin-users'); qc.invalidateQueries('user-stats');
+      },
+      onError: err => toast.error(err.response?.data?.error || 'Failed.'),
+    }
+  );
+
+  const unlockMutation = useMutation(
+    (id) => usersApi.unlock(id),
+    {
+      onSuccess: () => { toast.success('Account unlocked.'); qc.invalidateQueries('admin-users'); },
+      onError: err => toast.error(err.response?.data?.error || 'Failed.'),
+    }
+  );
+
+  const killSessionsMutation = useMutation(
+    (id) => usersApi.killSessions(id),
+    {
+      onSuccess: (res) => { toast.success(res.data.message); qc.invalidateQueries('admin-users'); },
+      onError: err => toast.error(err.response?.data?.error || 'Failed.'),
+    }
+  );
+
+  const roleBadge = (role) => ({
+    admin:         'bg-red-100 text-red-700',
+    supervisor:    'bg-purple-100 text-purple-700',
+    booth_officer: 'bg-blue-100 text-blue-700',
+    marshal:       'bg-green-100 text-green-700',
+  }[role] || 'bg-gray-100 text-gray-600');
+
+  const isLocked = (u) => u.locked_until && new Date(u.locked_until) > new Date();
+
+  return (
+    <div className="space-y-5">
+      <StatsBar />
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-48">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input className="input pl-9 text-sm" placeholder="Search name, username, email..."
+            value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))} />
+        </div>
+        <select className="input w-auto text-sm" value={filters.role}
+          onChange={e => setFilters(f => ({ ...f, role: e.target.value }))}>
+          <option value="">All Roles</option>
+          {(rolesData || []).map(r => <option key={r.id} value={r.name}>{r.name.replace('_', ' ')}</option>)}
+        </select>
+        <select className="input w-auto text-sm" value={filters.is_active}
+          onChange={e => setFilters(f => ({ ...f, is_active: e.target.value }))}>
+          <option value="">All Status</option>
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </select>
+        <button onClick={() => refetch()} className="btn-secondary text-sm py-2"><RefreshCw size={14} /></button>
+        <button onClick={() => setShowCreate(true)} className="btn-primary text-sm ml-auto">
+          <UserPlus size={15} /> New User
+        </button>
+      </div>
+
+      {/* Table */}
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>{['User', 'Role', 'Status', 'Last Login', 'Sessions', 'Actions'].map(h =>
+                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+              )}</tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {isLoading ? (
+                <tr><td colSpan={6} className="text-center py-12 text-gray-400">Loading...</td></tr>
+              ) : !data?.users?.length ? (
+                <tr><td colSpan={6} className="text-center py-12 text-gray-400">No users found</td></tr>
+              ) : data.users.map(u => (
+                <tr key={u.id} className={clsx('hover:bg-gray-50/50 transition-colors', !u.is_active && 'opacity-60')}>
+                  {/* User */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className={clsx('w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0',
+                        u.is_active ? 'bg-blue-500' : 'bg-gray-400'
+                      )}>
+                        {u.full_name?.[0]?.toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-900">{u.full_name}</p>
+                        <p className="text-xs text-gray-400">@{u.username} · {u.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  {/* Role */}
+                  <td className="px-4 py-3">
+                    <span className={clsx('inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize', roleBadge(u.role))}>
+                      {u.role?.replace('_', ' ')}
+                    </span>
+                  </td>
+                  {/* Status */}
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col gap-0.5">
+                      <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium w-fit',
+                        u.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                      )}>
+                        <span className={clsx('w-1.5 h-1.5 rounded-full', u.is_active ? 'bg-green-500' : 'bg-gray-400')} />
+                        {u.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      {isLocked(u) && (
+                        <span className="inline-flex items-center gap-1 text-xs text-red-600 font-medium">
+                          <Lock size={10} /> Locked
+                        </span>
+                      )}
+                      {parseInt(u.active_sessions) > 0 && (
+                        <span className="inline-flex items-center gap-1 text-xs text-blue-600">
+                          <Monitor size={10} /> Online
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  {/* Last Login */}
+                  <td className="px-4 py-3 text-xs text-gray-500">
+                    {u.last_login ? format(new Date(u.last_login), 'dd MMM yyyy HH:mm') : <span className="text-gray-300">Never</span>}
+                  </td>
+                  {/* Sessions */}
+                  <td className="px-4 py-3 text-center">
+                    <span className={clsx('text-sm font-semibold', parseInt(u.active_sessions) > 0 ? 'text-blue-600' : 'text-gray-300')}>
+                      {u.active_sessions}
+                    </span>
+                  </td>
+                  {/* Actions */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      {/* View detail */}
+                      <ActionBtn title="View Details" icon={Eye} onClick={() => setDetailUser(u)} color="gray" />
+                      {/* Edit */}
+                      <ActionBtn title="Edit User" icon={Edit} onClick={() => setEditUser(u)} color="blue" />
+                      {/* Reset password */}
+                      <ActionBtn title="Reset Password" icon={Key} onClick={() => setResetUser(u)} color="orange" />
+                      {/* Unlock */}
+                      {isLocked(u) && (
+                        <ActionBtn title="Unlock Account" icon={Unlock}
+                          onClick={() => unlockMutation.mutate(u.id)} color="yellow" />
+                      )}
+                      {/* Kill sessions */}
+                      {parseInt(u.active_sessions) > 0 && u.id !== currentUser?.id && (
+                        <ActionBtn title="Terminate Sessions" icon={LogOut}
+                          onClick={() => killSessionsMutation.mutate(u.id)} color="red" />
+                      )}
+                      {/* Toggle active */}
+                      {u.id !== currentUser?.id && (
+                        <ActionBtn
+                          title={u.is_active ? 'Deactivate' : 'Activate'}
+                          icon={u.is_active ? ToggleRight : ToggleLeft}
+                          onClick={() => toggleMutation.mutate({ id: u.id, is_active: !u.is_active })}
+                          color={u.is_active ? 'green' : 'gray'}
+                        />
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {data?.total > 0 && (
+          <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">
+            {data.total} user{data.total !== 1 ? 's' : ''} total
+          </div>
+        )}
+      </div>
+
+      {/* Modals */}
+      {showCreate && (
+        <UserFormModal
+          roles={rolesData || []} mode="create"
+          onClose={() => setShowCreate(false)}
+          onSaved={() => { qc.invalidateQueries('admin-users'); qc.invalidateQueries('user-stats'); setShowCreate(false); }}
+        />
+      )}
+      {editUser && (
+        <UserFormModal
+          roles={rolesData || []} mode="edit" user={editUser}
+          onClose={() => setEditUser(null)}
+          onSaved={() => { qc.invalidateQueries('admin-users'); setEditUser(null); }}
+        />
+      )}
+      {resetUser && <ResetPasswordModal user={resetUser} onClose={() => setResetUser(null)} />}
+      {detailUser && <UserDetailDrawer userId={detailUser.id} onClose={() => setDetailUser(null)} />}
+    </div>
+  );
+}
+
+function ActionBtn({ icon: Icon, title, onClick, color }) {
+  const colors = {
+    gray:   'text-gray-400 hover:text-gray-700 hover:bg-gray-100',
+    blue:   'text-gray-400 hover:text-blue-600 hover:bg-blue-50',
+    orange: 'text-gray-400 hover:text-orange-600 hover:bg-orange-50',
+    yellow: 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50',
+    red:    'text-gray-400 hover:text-red-600 hover:bg-red-50',
+    green:  'text-gray-400 hover:text-green-600 hover:bg-green-50',
+  };
+  return (
+    <button title={title} onClick={onClick}
+      className={clsx('p-1.5 rounded-lg transition-colors', colors[color] || colors.gray)}>
+      <Icon size={15} />
+    </button>
+  );
+}
+
+// ─── Create / Edit User Modal ─────────────────────────────────────────────────
+function UserFormModal({ mode, user, roles, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    fullName: user?.full_name || '',
+    username: user?.username || '',
+    email:    user?.email || '',
+    password: '',
+    role:     user?.role || 'booth_officer',
+  });
+  const [showPw, setShowPw] = useState(false);
+  const [pwStrength, setPwStrength] = useState(null);
+
+  const checkStrength = (pw) => {
+    if (!pw) { setPwStrength(null); return; }
+    const score = [pw.length >= 8, /[A-Z]/.test(pw), /[0-9]/.test(pw), /[^A-Za-z0-9]/.test(pw)].filter(Boolean).length;
+    setPwStrength(score);
+  };
+
+  const mutation = useMutation(
+    (data) => mode === 'create' ? usersApi.create(data) : usersApi.update(user.id, data),
+    {
+      onSuccess: () => { toast.success(mode === 'create' ? 'User created.' : 'User updated.'); onSaved(); },
+      onError: err => toast.error(err.response?.data?.error || 'Failed.'),
+    }
+  );
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (mode === 'create') {
+      mutation.mutate(form);
+    } else {
+      const updates = {};
+      if (form.fullName !== user.full_name) updates.fullName = form.fullName;
+      if (form.email !== user.email)        updates.email = form.email;
+      if (form.role !== user.role)          updates.role = form.role;
+      if (!Object.keys(updates).length) { toast('No changes to save.'); return; }
+      mutation.mutate(updates);
+    }
+  };
+
+  const strengthLabel = ['', 'Weak', 'Fair', 'Good', 'Strong'];
+  const strengthColor = ['', 'bg-red-500', 'bg-yellow-500', 'bg-blue-500', 'bg-green-500'];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b sticky top-0 bg-white">
+          <h2 className="font-semibold text-gray-900">{mode === 'create' ? 'Create New User' : `Edit – ${user.username}`}</h2>
+          <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div>
+            <label className="label">Full Name *</label>
+            <input className="input" value={form.fullName} onChange={e => setForm(f => ({ ...f, fullName: e.target.value }))} required />
+          </div>
+          {mode === 'create' && (
+            <div>
+              <label className="label">Username *</label>
+              <input className="input lowercase" value={form.username}
+                onChange={e => setForm(f => ({ ...f, username: e.target.value.toLowerCase() }))} required />
+            </div>
+          )}
+          <div>
+            <label className="label">Email *</label>
+            <input type="email" className="input" value={form.email}
+              onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required />
+          </div>
+          {mode === 'create' && (
+            <div>
+              <label className="label">Password *</label>
+              <div className="relative">
+                <input type={showPw ? 'text' : 'password'} className="input pr-10"
+                  value={form.password} placeholder="Min 8 chars, 1 uppercase, 1 number"
+                  onChange={e => { setForm(f => ({ ...f, password: e.target.value })); checkStrength(e.target.value); }}
+                  required />
+                <button type="button" onClick={() => setShowPw(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">
+                  {showPw ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {pwStrength !== null && (
+                <div className="mt-1.5">
+                  <div className="flex gap-1 h-1.5">
+                    {[1,2,3,4].map(i => (
+                      <div key={i} className={clsx('flex-1 rounded-full transition-colors', i <= pwStrength ? strengthColor[pwStrength] : 'bg-gray-200')} />
+                    ))}
+                  </div>
+                  <p className={clsx('text-xs mt-1', pwStrength <= 1 ? 'text-red-500' : pwStrength <= 2 ? 'text-yellow-600' : 'text-green-600')}>
+                    {strengthLabel[pwStrength]} password
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          <div>
+            <label className="label">Role *</label>
+            <select className="input" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
+              {roles.map(r => (
+                <option key={r.id} value={r.name}>
+                  {r.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">
+              {roles.find(r => r.name === form.role)?.description}
+            </p>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" disabled={mutation.isLoading} className="btn-primary flex-1 justify-center">
+              {mutation.isLoading
+                ? <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : mode === 'create' ? 'Create User' : 'Save Changes'
+              }
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Reset Password Modal ─────────────────────────────────────────────────────
+function ResetPasswordModal({ user, onClose }) {
+  const [pw, setPw] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [showPw, setShowPw] = useState(false);
+
+  const mutation = useMutation(() => usersApi.resetPassword(user.id, { newPassword: pw }), {
+    onSuccess: () => { toast.success('Password reset. All sessions terminated.'); onClose(); },
+    onError: err => toast.error(err.response?.data?.error || 'Failed.'),
+  });
+
+  const valid = pw.length >= 8 && /[A-Z]/.test(pw) && /[0-9]/.test(pw) && pw === confirm;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <h2 className="font-semibold">Reset Password</h2>
+          <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-sm text-yellow-800 flex items-start gap-2">
+            <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+            <span>Resetting password for <strong>{user.full_name}</strong> will immediately terminate all their active sessions.</span>
+          </div>
+          <div>
+            <label className="label">New Password</label>
+            <div className="relative">
+              <input type={showPw ? 'text' : 'password'} className="input pr-12"
+                value={pw} placeholder="Min 8 chars, 1 uppercase, 1 number"
+                onChange={e => setPw(e.target.value)} />
+              <button type="button" onClick={() => setShowPw(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">
+                {showPw ? 'Hide' : 'Show'}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="label">Confirm Password</label>
+            <input type="password" className={clsx('input', confirm && pw !== confirm ? 'border-red-400' : '')}
+              value={confirm} placeholder="Re-enter password" onChange={e => setConfirm(e.target.value)} />
+            {confirm && pw !== confirm && <p className="text-xs text-red-500 mt-1">Passwords do not match.</p>}
+          </div>
+          <div className="flex gap-3">
+            <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+            <button onClick={() => mutation.mutate()} disabled={!valid || mutation.isLoading}
+              className="flex-1 btn-primary justify-center bg-orange-500 hover:bg-orange-600">
+              {mutation.isLoading
+                ? <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : 'Reset Password'
+              }
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── User Detail Drawer ───────────────────────────────────────────────────────
+function UserDetailDrawer({ userId, onClose }) {
+  const { data, isLoading } = useQuery(['user-detail', userId], () => usersApi.get(userId).then(r => r.data));
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white w-full max-w-md h-full overflow-y-auto shadow-2xl flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b sticky top-0 bg-white">
+          <h2 className="font-semibold text-gray-900">User Details</h2>
+          <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
+        </div>
+
+        {isLoading ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+          </div>
+        ) : data ? (
+          <div className="p-5 space-y-5 flex-1">
+            {/* Profile */}
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-blue-500 rounded-2xl flex items-center justify-center text-white text-xl font-bold">
+                {data.full_name?.[0]?.toUpperCase()}
+              </div>
+              <div>
+                <p className="font-bold text-gray-900 text-lg">{data.full_name}</p>
+                <p className="text-gray-500 text-sm">@{data.username}</p>
+                <p className="text-gray-400 text-xs">{data.email}</p>
+              </div>
+            </div>
+
+            {/* Info grid */}
+            <div className="card p-4 space-y-2 text-sm">
+              {[
+                ['Role',        data.role?.replace(/_/g, ' ')],
+                ['Status',      data.is_active ? 'Active' : 'Inactive'],
+                ['Last Login',  data.last_login ? format(new Date(data.last_login), 'dd MMM yyyy HH:mm') : 'Never'],
+                ['Created',     format(new Date(data.created_at), 'dd MMM yyyy')],
+                ['Created By',  data.created_by_username || 'System'],
+                ['Failed Logins', data.failed_login_attempts || 0],
+                ['Locked Until', data.locked_until && new Date(data.locked_until) > new Date()
+                  ? format(new Date(data.locked_until), 'dd MMM HH:mm') : 'Not locked'],
+              ].map(([label, val]) => (
+                <div key={label} className="flex justify-between">
+                  <span className="text-gray-500">{label}</span>
+                  <span className="font-medium text-gray-900 text-right capitalize">{val}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Permissions */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <Shield size={14} /> Permissions ({data.permissions?.length || 0})
+              </h3>
+              <div className="flex flex-wrap gap-1.5">
+                {(data.permissions || []).map(p => (
+                  <span key={p.name} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
+                    <CheckCircle size={10} /> {p.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Recent Activity */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <Activity size={14} /> Recent Activity
+              </h3>
+              <div className="space-y-1.5">
+                {(data.recent_activity || []).length === 0 ? (
+                  <p className="text-xs text-gray-400">No recent activity</p>
+                ) : data.recent_activity.map((a, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs py-1.5 border-b border-gray-50 last:border-0">
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+                    <span className="text-gray-700 font-medium flex-1">{a.action}</span>
+                    <span className="text-gray-400 shrink-0">{format(new Date(a.created_at), 'dd MMM HH:mm')}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ─── Sessions Panel ───────────────────────────────────────────────────────────
+function SessionsPanel() {
+  const qc = useQueryClient();
+  const { user: me } = useAuth();
+
+  const { data, isLoading, refetch } = useQuery(
+    'active-sessions', () => usersApi.sessions().then(r => r.data), { refetchInterval: 15000 }
+  );
+
+  const killMutation = useMutation(
+    (sid) => usersApi.killSession(sid),
+    {
+      onSuccess: () => { toast.success('Session terminated.'); qc.invalidateQueries('active-sessions'); },
+      onError: err => toast.error(err.response?.data?.error || 'Failed.'),
+    }
+  );
+
+  const roleBadge = (role) => ({
+    admin:         'bg-red-100 text-red-700',
+    supervisor:    'bg-purple-100 text-purple-700',
+    booth_officer: 'bg-blue-100 text-blue-700',
+    marshal:       'bg-green-100 text-green-700',
+  }[role] || 'bg-gray-100 text-gray-600');
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-semibold text-gray-900">Active Sessions</h2>
+          <p className="text-sm text-gray-500">{(data || []).length} user{(data || []).length !== 1 ? 's' : ''} currently logged in</p>
+        </div>
+        <button onClick={() => refetch()} className="btn-secondary text-sm"><RefreshCw size={14} /> Refresh</button>
+      </div>
+
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 border-b">
+            <tr>{['User', 'Role', 'IP Address', 'Last Active', 'Logged In', 'Action'].map(h =>
+              <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
+            )}</tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {isLoading ? (
+              <tr><td colSpan={6} className="text-center py-10 text-gray-400">Loading…</td></tr>
+            ) : !(data || []).length ? (
+              <tr><td colSpan={6} className="text-center py-10 text-gray-400">No active sessions</td></tr>
+            ) : (data || []).map(s => (
+              <tr key={s.id} className={clsx('hover:bg-gray-50/50', s.user_id === me?.id && 'bg-blue-50/40')}>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                    <div>
+                      <p className="font-semibold text-gray-900">{s.full_name}</p>
+                      <p className="text-xs text-gray-400">@{s.username}</p>
+                    </div>
+                    {s.user_id === me?.id && <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">You</span>}
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <span className={clsx('inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize', roleBadge(s.role))}>
+                    {s.role?.replace('_', ' ')}
+                  </span>
+                </td>
+                <td className="px-4 py-3 font-mono text-xs text-gray-600">{s.ip_address || '—'}</td>
+                <td className="px-4 py-3 text-xs text-gray-500">
+                  {format(new Date(s.last_active), 'HH:mm:ss')}
+                </td>
+                <td className="px-4 py-3 text-xs text-gray-500">
+                  {format(new Date(s.created_at), 'dd MMM HH:mm')}
+                </td>
+                <td className="px-4 py-3">
+                  {s.user_id !== me?.id && (
+                    <button onClick={() => killMutation.mutate(s.id)}
+                      className="flex items-center gap-1 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded-lg border border-red-200 transition-colors">
+                      <LogOut size={12} /> Terminate
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Roles & Permissions Panel ────────────────────────────────────────────────
+const ROLE_COLORS = {
+  admin:         { bg: 'bg-red-50',     border: 'border-red-300',    badge: 'bg-red-100 text-red-700',       dot: 'bg-red-500' },
+  supervisor:    { bg: 'bg-purple-50',  border: 'border-purple-300', badge: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
+  booth_officer: { bg: 'bg-blue-50',    border: 'border-blue-300',   badge: 'bg-blue-100 text-blue-700',     dot: 'bg-blue-500' },
+  marshal:       { bg: 'bg-green-50',   border: 'border-green-300',  badge: 'bg-green-100 text-green-700',   dot: 'bg-green-500' },
+};
+const DEFAULT_COLOR = { bg: 'bg-gray-50', border: 'border-gray-300', badge: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' };
+
+function RolesPanel() {
+  const qc = useQueryClient();
+  const [selectedId, setSelectedId] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [editRole,   setEditRole]   = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const { data: roles, isLoading } = useQuery(
+    'rbac-roles', () => permissionsApi.listRoles().then(r => r.data)
+  );
+  const { data: atomicPerms } = useQuery(
+    'rbac-atomic', () => permissionsApi.listAtomic().then(r => r.data)
+  );
+  const { data: groups } = useQuery(
+    'rbac-groups', () => permissionsApi.listGroups().then(r => r.data)
+  );
+
+  const selected = roles?.find(r => r.id === selectedId) || null;
+
+  // Load full detail when a role is selected
+  const { data: roleDetail } = useQuery(
+    ['rbac-role-detail', selectedId],
+    () => permissionsApi.getRole(selectedId).then(r => r.data),
+    { enabled: !!selectedId }
+  );
+
+  const { data: history } = useQuery(
+    ['rbac-role-history', selectedId],
+    () => permissionsApi.getRoleHistory(selectedId).then(r => r.data),
+    { enabled: !!selectedId && showHistory }
+  );
+
+  const deleteMutation = useMutation(
+    (id) => permissionsApi.deleteRole(id),
+    {
+      onSuccess: () => {
+        toast.success('Role deleted.');
+        setSelectedId(null);
+        qc.invalidateQueries('rbac-roles');
+      },
+      onError: err => toast.error(err.response?.data?.error || 'Delete failed.'),
+    }
+  );
+
+  // Group atomic permissions by module
+  const permsByModule = {};
+  (atomicPerms || []).forEach(p => {
+    const mod = p.name.split('.')[0];
+    if (!permsByModule[mod]) permsByModule[mod] = [];
+    permsByModule[mod].push(p);
+  });
+
+  if (isLoading) return <div className="text-center py-12 text-gray-400">Loading roles...</div>;
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2"><Shield size={16} className="text-blue-600" /> Roles &amp; Permissions</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Manage roles, permission groups, and user access rules.</p>
+        </div>
+        <button onClick={() => setShowCreate(true)} className="btn-primary text-sm">
+          <Plus size={15} /> New Role
+        </button>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-5">
+        {/* Role list */}
+        <div className="space-y-2">
+          {(roles || []).map(role => {
+            const c = ROLE_COLORS[role.name] || DEFAULT_COLOR;
+            const isSelected = selectedId === role.id;
+            return (
+              <button key={role.id} onClick={() => { setSelectedId(isSelected ? null : role.id); setShowHistory(false); }}
+                className={clsx(
+                  'w-full text-left rounded-xl border-2 p-4 transition-all',
+                  isSelected ? `${c.bg} ${c.border} shadow-sm` : 'bg-white border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                )}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={clsx('w-2 h-2 rounded-full shrink-0', c.dot)} />
+                    <span className="font-semibold text-gray-900 text-sm capitalize truncate">
+                      {role.name.replace(/_/g, ' ')}
+                    </span>
+                    {role.is_system && (
+                      <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium shrink-0">system</span>
+                    )}
+                  </div>
+                  <ChevronRight size={14} className={clsx('text-gray-400 shrink-0 transition-transform', isSelected && 'rotate-90')} />
+                </div>
+                <p className="text-xs text-gray-500 mt-1.5 leading-snug line-clamp-2">{role.description}</p>
+                <div className="flex gap-3 mt-2 pt-2 border-t border-gray-100 text-xs text-gray-500">
+                  <span><strong className="text-gray-800">{role.user_count}</strong> users</span>
+                  <span><strong className="text-gray-800">{role.groups?.length || 0}</strong> groups</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Role detail */}
+        <div className="lg:col-span-2">
+          {!selected ? (
+            <div className="flex flex-col items-center justify-center h-64 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+              <Shield size={28} className="mb-2 text-gray-300" />
+              <p className="text-sm">Select a role to view details</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Role header */}
+              <div className={clsx('rounded-xl border-2 p-5', (ROLE_COLORS[selected.name] || DEFAULT_COLOR).bg, (ROLE_COLORS[selected.name] || DEFAULT_COLOR).border)}>
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-lg capitalize">{selected.name.replace(/_/g, ' ')}</h3>
+                    <p className="text-sm text-gray-600 mt-0.5">{selected.description}</p>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+                      <span><strong>{selected.user_count}</strong> active users</span>
+                      {selected.is_system && <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded font-medium">System role — cannot be deleted</span>}
+                      {!selected.is_system && <span className="bg-white/70 text-gray-500 px-2 py-0.5 rounded">Custom role</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => setShowHistory(h => !h)}
+                      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/60 rounded-lg transition-colors" title="History">
+                      <History size={16} />
+                    </button>
+                    {!selected.is_system && (
+                      <>
+                        <button onClick={() => setEditRole(roleDetail || selected)}
+                          className="btn-secondary text-xs py-1.5 px-3"><Edit size={13} /> Edit</button>
+                        {selected.user_count === 0 && (
+                          <button onClick={() => { if (window.confirm(`Delete role "${selected.name}"?`)) deleteMutation.mutate(selected.id); }}
+                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete role">
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* History */}
+              {showHistory && (
+                <div className="card overflow-hidden">
+                  <div className="px-4 py-3 border-b bg-gray-50 flex items-center gap-2">
+                    <History size={14} className="text-gray-500" />
+                    <span className="text-sm font-semibold text-gray-700">Change History</span>
+                  </div>
+                  {!history ? (
+                    <p className="px-4 py-6 text-center text-sm text-gray-400">Loading...</p>
+                  ) : history.length === 0 ? (
+                    <p className="px-4 py-6 text-center text-sm text-gray-400">No history recorded.</p>
+                  ) : (
+                    <div className="divide-y divide-gray-50">
+                      {history.map(h => (
+                        <div key={h.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">v{h.version} — {h.change_reason}</p>
+                            <p className="text-xs text-gray-400">by {h.changed_by_username || 'system'}</p>
+                          </div>
+                          <span className="text-xs text-gray-400 shrink-0">{format(new Date(h.changed_at), 'dd MMM yyyy HH:mm')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Permission groups */}
+              {roleDetail?.groups?.length > 0 && (
+                <div className="card p-4 space-y-2">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Permission Groups</p>
+                  <div className="flex flex-wrap gap-2">
+                    {roleDetail.groups.map(g => (
+                      <span key={g.id} className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-200 text-xs font-medium px-2.5 py-1 rounded-full">
+                        <ShieldCheck size={11} /> {g.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Direct grants & denies */}
+              {(roleDetail?.direct_grants?.length > 0 || roleDetail?.direct_denies?.length > 0) && (
+                <div className="card p-4 space-y-3">
+                  {roleDetail.direct_grants?.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Direct Grants</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {roleDetail.direct_grants.map(code => (
+                          <span key={code} className="inline-flex items-center gap-1 bg-green-50 text-green-700 border border-green-200 font-mono text-xs px-2 py-0.5 rounded">
+                            <CheckCircle size={10} /> {code}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {roleDetail.direct_denies?.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Explicit Denies</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {roleDetail.direct_denies.map(code => (
+                          <span key={code} className="inline-flex items-center gap-1 bg-red-50 text-red-600 border border-red-200 font-mono text-xs px-2 py-0.5 rounded">
+                            <ShieldOff size={10} /> {code}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Effective permission matrix */}
+              <EffectivePermMatrix roleId={selectedId} permsByModule={permsByModule} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modals */}
+      {showCreate && (
+        <RoleFormModal
+          groups={groups || []} atomicPerms={atomicPerms || []}
+          onClose={() => setShowCreate(false)}
+          onSaved={() => { qc.invalidateQueries('rbac-roles'); setShowCreate(false); }}
+        />
+      )}
+      {editRole && (
+        <RoleFormModal
+          role={editRole} groups={groups || []} atomicPerms={atomicPerms || []}
+          onClose={() => setEditRole(null)}
+          onSaved={() => { qc.invalidateQueries('rbac-roles'); qc.invalidateQueries(['rbac-role-detail', selectedId]); setEditRole(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Effective Permission Matrix ──────────────────────────────────────────────
+function EffectivePermMatrix({ roleId, permsByModule }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data: effective } = useQuery(
+    ['rbac-effective-role', roleId],
+    async () => {
+      // Get a user in this role to compute effective perms — or use role detail grants
+      // We approximate by fetching role detail grants + group members
+      const r = await permissionsApi.getRole(roleId);
+      return r.data;
+    },
+    { enabled: !!roleId }
+  );
+
+  // Build effective set from groups + direct_grants minus direct_denies
+  const effectiveSet = new Set();
+  if (effective) {
+    (effective.direct_grants || []).forEach(p => effectiveSet.add(p));
+    (effective.direct_denies || []).forEach(p => effectiveSet.delete(p));
+  }
+  const totalModules = Object.keys(permsByModule).length;
+  if (totalModules === 0) return null;
+
+  return (
+    <div className="card overflow-hidden">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full px-5 py-3 bg-gray-50 border-b flex items-center justify-between hover:bg-gray-100 transition-colors"
+      >
+        <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+          <Shield size={14} className="text-blue-500" /> Effective Permissions
+        </span>
+        {expanded ? <ChevronUp size={15} className="text-gray-400" /> : <ChevronDown size={15} className="text-gray-400" />}
+      </button>
+      {expanded && (
+        <div className="p-4 space-y-4">
+          {Object.entries(permsByModule).map(([mod, perms]) => (
+            <div key={mod}>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{mod}</p>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+                {perms.map(p => {
+                  const has = effectiveSet.has(p.name);
+                  return (
+                    <div key={p.name} className={clsx(
+                      'flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs',
+                      has ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100 opacity-40'
+                    )}>
+                      {has ? <CheckCircle size={11} className="text-green-600 shrink-0" /> : <X size={11} className="text-gray-400 shrink-0" />}
+                      <span className={clsx('font-mono truncate', has ? 'text-green-800' : 'text-gray-400')}>{p.name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Role Create / Edit Modal ─────────────────────────────────────────────────
+function RoleFormModal({ role, groups, atomicPerms, onClose, onSaved }) {
+  const isEdit = !!role;
+  const [form, setForm] = useState({
+    name:        role?.name        || '',
+    description: role?.description || '',
+    selectedGroups: (role?.groups || []).map(g => g.id || g),
+    grants:      role?.direct_grants || [],
+    denies:      role?.direct_denies || [],
+    changeReason: '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  // Group atomic perms by module for easier selection
+  const permsByModule = {};
+  atomicPerms.forEach(p => {
+    const mod = p.name.split('.')[0];
+    if (!permsByModule[mod]) permsByModule[mod] = [];
+    permsByModule[mod].push(p);
+  });
+
+  const toggleGroup = (id) => setForm(f => ({
+    ...f,
+    selectedGroups: f.selectedGroups.includes(id)
+      ? f.selectedGroups.filter(g => g !== id)
+      : [...f.selectedGroups, id],
+  }));
+
+  const togglePerm = (code, type) => setForm(f => {
+    const key = type === 'grant' ? 'grants' : 'denies';
+    const other = type === 'grant' ? 'denies' : 'grants';
+    return {
+      ...f,
+      [key]: f[key].includes(code) ? f[key].filter(p => p !== code) : [...f[key], code],
+      [other]: f[other].filter(p => p !== code), // can't be both
+    };
+  });
+
+  const handleSave = async () => {
+    if (!form.name.trim() && !isEdit) return toast.error('Role name is required.');
+    setSaving(true);
+    try {
+      const payload = {
+        name: form.name.trim(),
+        description: form.description.trim(),
+        groups: form.selectedGroups,
+        grants: form.grants,
+        denies: form.denies,
+        changeReason: form.changeReason || undefined,
+      };
+      if (isEdit) {
+        await permissionsApi.updateRole(role.id, payload);
+        toast.success('Role updated.');
+      } else {
+        await permissionsApi.createRole(payload);
+        toast.success('Role created.');
+      }
+      onSaved();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Save failed.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
+          <h2 className="font-bold text-gray-900 flex items-center gap-2">
+            <Shield size={18} className="text-blue-600" />
+            {isEdit ? `Edit Role: ${role.name}` : 'Create New Role'}
+          </h2>
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 p-6 space-y-5">
+          {/* Name & description */}
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Role Name *</label>
+              <input className="input" value={form.name} disabled={isEdit && role?.is_system}
+                placeholder="e.g. gate_supervisor"
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Description</label>
+              <input className="input" value={form.description}
+                placeholder="Brief description of this role's purpose"
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+            </div>
+          </div>
+
+          {/* Permission groups */}
+          <div>
+            <label className="label mb-2">Permission Groups</label>
+            <div className="flex flex-wrap gap-2">
+              {groups.map(g => {
+                const active = form.selectedGroups.includes(g.id);
+                return (
+                  <button key={g.id} type="button" onClick={() => toggleGroup(g.id)}
+                    className={clsx('flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors',
+                      active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
+                    )}>
+                    <ShieldCheck size={11} /> {g.name}
+                    <span className={clsx('ml-1 opacity-60', active ? 'text-blue-200' : 'text-gray-400')}>
+                      ({g.permissions?.length || 0})
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Additional grants & denies */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <label className="label mb-0">Fine-tuned Permissions</label>
+              <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
+                Green = grant override · Red = explicit deny
+              </span>
+            </div>
+            {Object.entries(permsByModule).map(([mod, perms]) => (
+              <div key={mod}>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">{mod}</p>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+                  {perms.map(p => {
+                    const isGrant = form.grants.includes(p.name);
+                    const isDeny  = form.denies.includes(p.name);
+                    return (
+                      <div key={p.name} className={clsx(
+                        'flex items-center justify-between gap-1 px-2.5 py-1.5 rounded-lg border text-xs cursor-default',
+                        isGrant ? 'bg-green-50 border-green-300' : isDeny ? 'bg-red-50 border-red-300' : 'bg-gray-50 border-gray-200'
+                      )}>
+                        <span className={clsx('font-mono truncate', isGrant ? 'text-green-800' : isDeny ? 'text-red-700' : 'text-gray-500')}>
+                          {p.name.split('.')[1]}
+                        </span>
+                        <div className="flex gap-0.5 shrink-0">
+                          <button type="button" title="Grant" onClick={() => togglePerm(p.name, 'grant')}
+                            className={clsx('p-0.5 rounded transition-colors', isGrant ? 'text-green-600 bg-green-100' : 'text-gray-300 hover:text-green-500')}>
+                            <CheckCircle size={12} />
+                          </button>
+                          <button type="button" title="Deny" onClick={() => togglePerm(p.name, 'deny')}
+                            className={clsx('p-0.5 rounded transition-colors', isDeny ? 'text-red-600 bg-red-100' : 'text-gray-300 hover:text-red-500')}>
+                            <ShieldOff size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Change reason (edit only) */}
+          {isEdit && (
+            <div>
+              <label className="label">Change Reason <span className="text-gray-400 font-normal">(optional, recorded in history)</span></label>
+              <input className="input" value={form.changeReason} placeholder="e.g. Added report export access"
+                onChange={e => setForm(f => ({ ...f, changeReason: e.target.value }))} />
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t bg-gray-50 shrink-0">
+          <button onClick={onClose} className="btn-secondary">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="btn-primary">
+            {saving
+              ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
+              : isEdit ? 'Save Changes' : 'Create Role'
+            }
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Config Panel ─────────────────────────────────────────────────────────────
+function ConfigPanel() {
+  const qc = useQueryClient();
+  const { data } = useQuery('system-config', () => reportsApi.config().then(r => r.data));
+  const [editing, setEditing] = useState({});
+
+  const mutation = useMutation(reportsApi.updateConfig, {
+    onSuccess: () => { toast.success('Config saved.'); qc.invalidateQueries('system-config'); setEditing({}); },
+    onError: err => toast.error(err.response?.data?.error || 'Failed.'),
+  });
+
+  const configGroups = {
+    'Session & Security': ['overstay_threshold_hours', 'session_inactivity_minutes', 'prevent_concurrent_sessions', 'max_failed_logins', 'lockout_minutes'],
+  };
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <div>
+        <h2 className="font-semibold text-gray-900">System Configuration</h2>
+        <p className="text-sm text-gray-500 mt-0.5">Changes take effect immediately for new sessions.</p>
+      </div>
+      <div className="card overflow-hidden divide-y divide-gray-50">
+        {(data || []).map(cfg => (
+          <div key={cfg.key} className="px-5 py-4 flex items-start gap-4">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-mono font-semibold text-gray-900">{cfg.key}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{cfg.description}</p>
+            </div>
+            {editing[cfg.key] !== undefined ? (
+              <div className="flex items-center gap-2 shrink-0">
+                <input className="input w-28 text-center text-sm py-1.5"
+                  value={editing[cfg.key]}
+                  onChange={e => setEditing(ed => ({ ...ed, [cfg.key]: e.target.value }))} />
+                <button onClick={() => mutation.mutate({ key: cfg.key, value: editing[cfg.key] })}
+                  className="btn-primary text-xs px-3 py-1.5">Save</button>
+                <button onClick={() => setEditing(ed => { const n = { ...ed }; delete n[cfg.key]; return n; })}
+                  className="btn-secondary text-xs px-2 py-1.5"><X size={12} /></button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={clsx('text-sm font-bold font-mono px-2.5 py-0.5 rounded',
+                  cfg.value === 'true' ? 'bg-green-100 text-green-700' :
+                  cfg.value === 'false' ? 'bg-gray-100 text-gray-500' : 'bg-blue-50 text-blue-700'
+                )}>{cfg.value}</span>
+                <button onClick={() => setEditing(ed => ({ ...ed, [cfg.key]: cfg.value }))}
+                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                  <Edit size={14} />
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Reinstate Container Panel ────────────────────────────────────────────────
+const REINSTATE_STATUSES = [
+  { value: 'EXAMINATION_COMPLETED', label: 'Examination Completed' },
+  { value: 'UNDER_EXAMINATION',     label: 'Under Examination' },
+  { value: 'ARRIVED_AT_BAY',        label: 'Arrived at Bay' },
+  { value: 'ARRIVED_AT_BOOTH',      label: 'Arrived at Booth' },
+];
+
+function ReinstatePanel() {
+  const queryClient = useQueryClient();
+  const [search, setSearch]   = useState('');
+  const [selected, setSelected] = useState(null);
+  const [reason, setReason]   = useState('');
+  const [targetStatus, setTargetStatus] = useState('EXAMINATION_COMPLETED');
+  const [confirmed, setConfirmed] = useState(false);
+
+  const { data, isLoading, refetch } = useQuery(
+    ['exited-containers', search],
+    () => containersApi.list({ status: 'EXITED,CANCELLED', containerNumber: search || undefined, page: 1, limit: 30 }),
+    { select: r => r.data }
+  );
+
+  const mutation = useMutation(
+    () => containersApi.reinstate(selected.id, { reinstateToStatus: targetStatus, reason }),
+    {
+      onSuccess: (res) => {
+        toast.success(`${res.data.containerNumber} reinstated to ${res.data.currentStatus}`);
+        setSelected(null); setReason(''); setConfirmed(false);
+        queryClient.invalidateQueries('exited-containers');
+        refetch();
+      },
+      onError: (err) => toast.error(err.response?.data?.error || 'Reinstate failed'),
+    }
+  );
+
+  const rows = data?.transactions || [];
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3">
+        <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+        <div className="text-sm text-amber-800">
+          <p className="font-semibold mb-1">Admin action — use with care</p>
+          <p>Reinstating a container reverses its exit and returns it to an active status. All reinstatements are logged in the audit trail.</p>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <h3 className="font-semibold text-gray-800">Find Exited / Cancelled Container</h3>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              className="input pl-8 w-full"
+              placeholder="Container number, waybill, or transaction ID"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <button onClick={() => refetch()} className="btn-secondary flex items-center gap-1.5 px-3">
+            <RefreshCw size={14} />
+          </button>
+        </div>
+
+        {isLoading && <p className="text-sm text-gray-500 py-2">Searching...</p>}
+
+        {rows.length > 0 && (
+          <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden">
+            {rows.map(row => (
+              <button key={row.id} onClick={() => { setSelected(row); setReason(''); setConfirmed(false); }}
+                className={clsx(
+                  'w-full text-left px-4 py-3 flex items-center justify-between hover:bg-blue-50 transition-colors',
+                  selected?.id === row.id && 'bg-blue-50 border-l-4 border-blue-500'
+                )}>
+                <div>
+                  <p className="text-sm font-semibold text-gray-800">{row.container_number}</p>
+                  <p className="text-xs text-gray-500">{row.transaction_id} · {row.waybill_number} · {row.agent_name}</p>
+                </div>
+                <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full',
+                  row.status === 'EXITED' ? 'bg-gray-100 text-gray-600' : 'bg-red-100 text-red-600'
+                )}>{row.status}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!isLoading && rows.length === 0 && search && (
+          <p className="text-sm text-gray-500 py-2">No exited or cancelled containers found.</p>
+        )}
+      </div>
+
+      {/* Reinstate form */}
+      {selected && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+            <RotateCcw size={16} className="text-blue-600" />
+            Reinstate: {selected.container_number}
+          </h3>
+
+          <div className="grid grid-cols-2 gap-3 text-sm bg-gray-50 rounded-lg p-3">
+            <div><span className="text-gray-500">Transaction:</span> <span className="font-mono font-medium">{selected.transaction_id}</span></div>
+            <div><span className="text-gray-500">Waybill:</span> <span className="font-medium">{selected.waybill_number}</span></div>
+            <div><span className="text-gray-500">Agent:</span> <span className="font-medium">{selected.agent_name}</span></div>
+            <div><span className="text-gray-500">Current status:</span> <span className="font-medium text-red-600">{selected.status}</span></div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Reinstate to status</label>
+            <select className="input w-full" value={targetStatus} onChange={e => setTargetStatus(e.target.value)}>
+              {REINSTATE_STATUSES.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Reason <span className="text-red-500">*</span></label>
+            <textarea
+              className="input w-full h-20 resize-none"
+              placeholder="Explain why this container is being reinstated..."
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+            />
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)}
+              className="rounded border-gray-300 text-blue-600" />
+            <span className="text-sm text-gray-700">I confirm this reinstatement is authorised and will be audited</span>
+          </label>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => mutation.mutate()}
+              disabled={!reason.trim() || !confirmed || mutation.isLoading}
+              className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+              <RotateCcw size={15} />
+              {mutation.isLoading ? 'Reinstating...' : 'Reinstate Container'}
+            </button>
+            <button onClick={() => setSelected(null)} className="btn-secondary">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Email & Alerts Panel ─────────────────────────────────────────────────────
+function EmailPanel() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery('email-config', () => reportsApi.emailConfig().then(r => r.data));
+
+  const [form, setForm] = useState(null);
+  const [testTo, setTestTo] = useState('');
+  const [testing, setTesting] = useState(false);
+
+  // Sync form from fetched data
+  React.useEffect(() => {
+    if (data && !form) {
+      setForm({
+        alert_enabled: data.alert_enabled,
+        alert_recipients: (data.alert_recipients || []).join(', '),
+        daily_report_enabled: data.daily_report_enabled,
+        daily_report_time: data.daily_report_time || '17:00',
+        daily_report_recipients: (data.daily_report_recipients || []).join(', '),
+      });
+    }
+  }, [data]);
+
+  const saveMutation = useMutation(
+    (d) => reportsApi.updateEmailConfig(d),
+    {
+      onSuccess: () => { toast.success('Email settings saved.'); qc.invalidateQueries('email-config'); },
+      onError: (err) => toast.error(err.response?.data?.error || 'Save failed.'),
+    }
+  );
+
+  const handleSave = () => {
+    const parseEmails = (str) => str.split(',').map(s => s.trim()).filter(Boolean);
+    saveMutation.mutate({
+      alert_enabled: form.alert_enabled,
+      alert_recipients: parseEmails(form.alert_recipients),
+      daily_report_enabled: form.daily_report_enabled,
+      daily_report_time: form.daily_report_time,
+      daily_report_recipients: parseEmails(form.daily_report_recipients),
+    });
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      const res = await reportsApi.testEmail({ to: testTo || undefined });
+      toast.success(res.data.message);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Test failed.');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  if (isLoading || !form) return <div className="text-center py-12 text-gray-400">Loading...</div>;
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      {/* SMTP status banner */}
+      <div className={clsx('rounded-xl border p-4 flex items-start gap-3',
+        data.smtp_configured
+          ? 'bg-green-50 border-green-200'
+          : 'bg-amber-50 border-amber-200'
+      )}>
+        <Mail size={18} className={clsx('mt-0.5 shrink-0', data.smtp_configured ? 'text-green-600' : 'text-amber-600')} />
+        <div className="text-sm">
+          <p className={clsx('font-semibold', data.smtp_configured ? 'text-green-800' : 'text-amber-800')}>
+            {data.smtp_configured ? 'SMTP is configured' : 'SMTP not configured'}
+          </p>
+          <p className={clsx('mt-0.5', data.smtp_configured ? 'text-green-700' : 'text-amber-700')}>
+            {data.smtp_configured
+              ? 'Email sending is active. Alerts and reports will be delivered.'
+              : 'Add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM to your .env file on the server, then rebuild.'
+            }
+          </p>
+        </div>
+      </div>
+
+      {/* SLA Breach Alerts */}
+      <div className="card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bell size={16} className="text-red-500" />
+            <h3 className="font-semibold text-gray-900">SLA Breach Alerts</h3>
+          </div>
+          <button
+            onClick={() => setForm(f => ({ ...f, alert_enabled: !f.alert_enabled }))}
+            className={clsx('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              form.alert_enabled
+                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            )}>
+            {form.alert_enabled ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+            {form.alert_enabled ? 'Enabled' : 'Disabled'}
+          </button>
+        </div>
+        <p className="text-sm text-gray-500">
+          Sends an email the moment a container crosses the SLA threshold. Each container is alerted only once.
+        </p>
+        <div>
+          <label className="label">Alert Recipients <span className="text-gray-400 font-normal">(comma-separated emails)</span></label>
+          <textarea
+            className="input w-full h-20 resize-none font-mono text-sm"
+            placeholder="supervisor@port.com, manager@port.com"
+            value={form.alert_recipients}
+            onChange={e => setForm(f => ({ ...f, alert_recipients: e.target.value }))}
+          />
+        </div>
+      </div>
+
+      {/* Daily Report */}
+      <div className="card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Mail size={16} className="text-blue-500" />
+            <h3 className="font-semibold text-gray-900">Daily Operations Report</h3>
+          </div>
+          <button
+            onClick={() => setForm(f => ({ ...f, daily_report_enabled: !f.daily_report_enabled }))}
+            className={clsx('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              form.daily_report_enabled
+                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            )}>
+            {form.daily_report_enabled ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+            {form.daily_report_enabled ? 'Enabled' : 'Disabled'}
+          </button>
+        </div>
+        <p className="text-sm text-gray-500">
+          Sends a daily summary with throughput KPIs, area performance, and SLA exceptions.
+          Time is in <strong>UTC</strong> — adjust for your timezone (Ghana / GMT+0 is same as UTC).
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">Send Time (UTC)</label>
+            <input
+              type="time"
+              className="input"
+              value={form.daily_report_time}
+              onChange={e => setForm(f => ({ ...f, daily_report_time: e.target.value }))}
+            />
+          </div>
+        </div>
+        <div>
+          <label className="label">Report Recipients <span className="text-gray-400 font-normal">(comma-separated emails)</span></label>
+          <textarea
+            className="input w-full h-20 resize-none font-mono text-sm"
+            placeholder="manager@port.com, director@port.com"
+            value={form.daily_report_recipients}
+            onChange={e => setForm(f => ({ ...f, daily_report_recipients: e.target.value }))}
+          />
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          onClick={handleSave}
+          disabled={saveMutation.isLoading}
+          className="btn-primary">
+          {saveMutation.isLoading
+            ? <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            : 'Save Settings'
+          }
+        </button>
+
+        <div className="flex items-center gap-2 ml-auto">
+          <input
+            className="input text-sm py-2 w-52"
+            placeholder="test@example.com (optional)"
+            value={testTo}
+            onChange={e => setTestTo(e.target.value)}
+          />
+          <button
+            onClick={handleTest}
+            disabled={testing || !data.smtp_configured}
+            title={!data.smtp_configured ? 'Configure SMTP first' : 'Send a test email'}
+            className="btn-secondary flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+            <Send size={14} />
+            {testing ? 'Sending...' : 'Test Email'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
