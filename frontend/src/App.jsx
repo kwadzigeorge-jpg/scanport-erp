@@ -14,6 +14,7 @@ import BaysPage         from './pages/BaysPage';
 import ReportsPage      from './pages/ReportsPage';
 import AdminPage        from './pages/AdminPage';
 import LeavePage        from './pages/LeavePage';
+import TrainingPage     from './pages/TrainingPage';
 import InventoryPage    from './pages/InventoryPage';
 import StockPage        from './pages/StockPage';
 import CompliancePage   from './pages/CompliancePage';
@@ -57,6 +58,7 @@ function AppRoutes() {
         <Route path="grievances"        element={<ProtectedRoute><GrievancePage /></ProtectedRoute>} />
         <Route path="service-feedback" element={<ProtectedRoute permission="feedback.view"><ServiceFeedbackPage /></ProtectedRoute>} />
         <Route path="gang-allocation"  element={<ProtectedRoute roles={['admin', 'supervisor']}><GangAllocationPage /></ProtectedRoute>} />
+        <Route path="training"         element={<ProtectedRoute permission="training.view"><TrainingPage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

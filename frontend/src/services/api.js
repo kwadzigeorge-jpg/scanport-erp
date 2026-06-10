@@ -358,4 +358,18 @@ export const grievanceApi = {
   deleteConfig: (id)      => api.delete(`/grievances/config/${id}`).then(r => r.data),
 };
 
+export const trainingApi = {
+  dashboard:     ()           => api.get('/training/dashboard').then(r => r.data),
+  listTypes:     ()           => api.get('/training/types').then(r => r.data),
+  createType:    (data)       => api.post('/training/types', data).then(r => r.data),
+  updateType:    (id, data)   => api.put(`/training/types/${id}`, data).then(r => r.data),
+  getMatrix:     (params)     => api.get('/training/matrix', { params }).then(r => r.data),
+  getUpcoming:   (days)       => api.get('/training/upcoming', { params: { days } }).then(r => r.data),
+  listTeams:     ()           => api.get('/training/teams').then(r => r.data),
+  listRecords:   (params)     => api.get('/training/records', { params }).then(r => r.data),
+  createRecord:  (data)       => api.post('/training/records', data).then(r => r.data),
+  updateRecord:  (id, data)   => api.put(`/training/records/${id}`, data).then(r => r.data),
+  deleteRecord:  (id)         => api.delete(`/training/records/${id}`).then(r => r.data),
+};
+
 export default api;
