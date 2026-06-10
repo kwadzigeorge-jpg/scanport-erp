@@ -58,7 +58,7 @@ function AppRoutes() {
         <Route path="grievances"        element={<ProtectedRoute><GrievancePage /></ProtectedRoute>} />
         <Route path="service-feedback" element={<ProtectedRoute permission="feedback.view"><ServiceFeedbackPage /></ProtectedRoute>} />
         <Route path="gang-allocation"  element={<ProtectedRoute roles={['admin', 'supervisor']}><GangAllocationPage /></ProtectedRoute>} />
-        <Route path="training"         element={<ProtectedRoute permission="training.view"><TrainingPage /></ProtectedRoute>} />
+        <Route path="training"         element={<ProtectedRoute roles={['admin', 'supervisor']}><TrainingPage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />
