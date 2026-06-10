@@ -27,7 +27,7 @@ const navItems = [
   { to: '/service-feedback', icon: MessageSquare,  label: 'Svc Feedback', permission: 'feedback.view' },
   { to: '/admin',        icon: Settings,        label: 'Admin',         role: 'admin' },
   { to: '/leave',        icon: CalendarDays,    label: 'Leave Mgmt',    roles: ['admin', 'supervisor'] },
-  { to: '/training',     icon: GraduationCap,   label: 'Staff Training', permission: 'training.view' },
+  { to: '/training',     icon: GraduationCap,   label: 'Staff Training', roles: ['admin', 'supervisor'] },
 ];
 
 // ─── Change Password Modal ────────────────────────────────────────────────────
