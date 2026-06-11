@@ -11,12 +11,10 @@ UPDATE training_types SET validity_months = 36 WHERE code = 'RPST';
 
 DO $$
 DECLARE
-  v_type_id  INT;
-  v_admin_id INT;
-  v_count    INT;
+  v_type_id INT;
+  v_count   INT;
 BEGIN
-  SELECT id INTO v_type_id  FROM training_types WHERE code = 'RPST';
-  SELECT id INTO v_admin_id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1;
+  SELECT id INTO v_type_id FROM training_types WHERE code = 'RPST';
 
   IF v_type_id IS NULL THEN
     RAISE NOTICE '030: RPST training type not found — skipping import';
@@ -25,9 +23,9 @@ BEGIN
 
   -- ── Batch 1 ── Nov 15–17, 2022 | Expires Oct 31, 2025 ──────────────────────
   INSERT INTO staff_training_records
-    (staff_id, training_type_id, completion_date, expiry_date, notes, recorded_by)
+    (staff_id, training_type_id, completion_date, expiry_date, notes)
   SELECT s.id, v_type_id, '2022-11-17', '2025-10-31',
-         'NRA Radiation Safety Training – Batch 1', v_admin_id
+         'NRA Radiation Safety Training – Batch 1'
   FROM   lms_staff s
   WHERE  s.is_active = TRUE
     AND (
@@ -59,9 +57,9 @@ BEGIN
 
   -- ── Batch 2 ── Jan 17–19, 2023 | Expires Dec 31, 2025 ──────────────────────
   INSERT INTO staff_training_records
-    (staff_id, training_type_id, completion_date, expiry_date, notes, recorded_by)
+    (staff_id, training_type_id, completion_date, expiry_date, notes)
   SELECT s.id, v_type_id, '2023-01-19', '2025-12-31',
-         'NRA Radiation Safety Training – Batch 2', v_admin_id
+         'NRA Radiation Safety Training – Batch 2'
   FROM   lms_staff s
   WHERE  s.is_active = TRUE
     AND (
@@ -97,32 +95,32 @@ BEGIN
 
   -- ── Batch 3 ── Jan 23–25, 2023 | Expires Dec 31, 2025 ──────────────────────
   INSERT INTO staff_training_records
-    (staff_id, training_type_id, completion_date, expiry_date, notes, recorded_by)
+    (staff_id, training_type_id, completion_date, expiry_date, notes)
   SELECT s.id, v_type_id, '2023-01-25', '2025-12-31',
-         'NRA Radiation Safety Training – Batch 3', v_admin_id
+         'NRA Radiation Safety Training – Batch 3'
   FROM   lms_staff s
   WHERE  s.is_active = TRUE
     AND (
-      (s.name ILIKE '%ampartey%'  AND s.name ILIKE '%boateng%')
-   OR (s.name ILIKE '%andrew%'    AND s.name ILIKE '%nsowah%')
-   OR (s.name ILIKE '%charles%'   AND s.name ILIKE '%osafo%')
-   OR (s.name ILIKE '%dabuq%'     OR s.name ILIKE '%dabug%')
-   OR (s.name ILIKE '%justina%'   AND s.name ILIKE '%fosu%')
+      (s.name ILIKE '%ampartey%'   AND s.name ILIKE '%boateng%')
+   OR (s.name ILIKE '%andrew%'     AND s.name ILIKE '%nsowah%')
+   OR (s.name ILIKE '%charles%'    AND s.name ILIKE '%osafo%')
+   OR (s.name ILIKE '%dabuq%'      OR  s.name ILIKE '%dabug%')
+   OR (s.name ILIKE '%justina%'    AND s.name ILIKE '%fosu%')
    OR (s.name ILIKE '%kusark%')
-   OR (s.name ILIKE '%kwadwo%'    AND s.name ILIKE '%asah%')
-   OR (s.name ILIKE '%kwadzi%'    OR  s.name ILIKE '%gameli%')
-   OR (s.name ILIKE '%kwesi%'     AND s.name ILIKE '%ofori%')
-   OR (s.name ILIKE '%linda%'     AND s.name ILIKE '%debrah%')
-   OR (s.name ILIKE '%linda%'     AND s.name ILIKE '%otwey%')
-   OR (s.name ILIKE '%maxwell%'   AND s.name ILIKE '%forson%')
-   OR (s.name ILIKE '%nii%'       AND s.name ILIKE '%decardi%')
-   OR (s.name ILIKE '%paul%'      AND s.name ILIKE '%essien%')
-   OR (s.name ILIKE '%raymond%'   AND s.name ILIKE '%parkoh%')
-   OR (s.name ILIKE '%richard%'   AND s.name ILIKE '%ampadu%')
-   OR (s.name ILIKE '%roland%'    AND s.name ILIKE '%egyir%')
+   OR (s.name ILIKE '%kwadwo%'     AND s.name ILIKE '%asah%')
+   OR (s.name ILIKE '%kwadzi%'     OR  s.name ILIKE '%gameli%')
+   OR (s.name ILIKE '%kwesi%'      AND s.name ILIKE '%ofori%')
+   OR (s.name ILIKE '%linda%'      AND s.name ILIKE '%debrah%')
+   OR (s.name ILIKE '%linda%'      AND s.name ILIKE '%otwey%')
+   OR (s.name ILIKE '%maxwell%'    AND s.name ILIKE '%forson%')
+   OR (s.name ILIKE '%nii%'        AND s.name ILIKE '%decardi%')
+   OR (s.name ILIKE '%paul%'       AND s.name ILIKE '%essien%')
+   OR (s.name ILIKE '%raymond%'    AND s.name ILIKE '%parkoh%')
+   OR (s.name ILIKE '%richard%'    AND s.name ILIKE '%ampadu%')
+   OR (s.name ILIKE '%roland%'     AND s.name ILIKE '%egyir%')
    OR (s.name ILIKE '%sahanun%')
    OR (s.name ILIKE '%sitsope%')
-   OR (s.name ILIKE '%wendy%'     AND s.name ILIKE '%lartey%')
+   OR (s.name ILIKE '%wendy%'      AND s.name ILIKE '%lartey%')
     )
     AND NOT EXISTS (
       SELECT 1 FROM staff_training_records r
