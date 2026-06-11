@@ -4,6 +4,7 @@
 -- Batch 2: Jan 17-19 2023 | Expires Dec 2025  (21 staff)
 -- Batch 3: Jan 23-25 2023 | Expires Dec 2025  (20 staff)
 -- All records expired as of June 2026 — staff require renewal
+-- Uses ILIKE fragment matching to handle abbreviated/reordered names in lms_staff
 
 -- NRA certifies for 3 years; update validity accordingly
 UPDATE training_types SET validity_months = 36 WHERE code = 'RPST';
@@ -28,29 +29,30 @@ BEGIN
   SELECT s.id, v_type_id, '2022-11-17', '2025-10-31',
          'NRA Radiation Safety Training – Batch 1', v_admin_id
   FROM   lms_staff s
-  WHERE  LOWER(TRIM(s.name)) IN (
-    'abdul-malik osumanu',
-    'bismack acheampong',
-    'carl selassie tsatsu',
-    'derrick adjei',
-    'ebenezer kweku mensah',
-    'enoch adjei agyapong',
-    'esther dabier',
-    'evelyn ashitey',
-    'janet ofosua agyei-gyane',
-    'joseph kang-kpiinuu dabuo',
-    'kwabena akosa',
-    'michael fiawoyife',
-    'nana yaw mantey',
-    'nunnisun miniyelibu',
-    'priscilla baaba ouagraine',
-    'samuel kwabena agyemang',
-    'seth ampem'
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM staff_training_records r
-    WHERE r.staff_id = s.id AND r.training_type_id = v_type_id
-  );
+  WHERE  s.is_active = TRUE
+    AND (
+      (s.name ILIKE '%abdul%'    AND s.name ILIKE '%osumanu%')
+   OR (s.name ILIKE '%bismack%')
+   OR (s.name ILIKE '%carl%'     AND s.name ILIKE '%tsatsu%')
+   OR (s.name ILIKE '%derrick%'  AND s.name ILIKE '%adjei%')
+   OR (s.name ILIKE '%ebenezer%' AND s.name ILIKE '%mensah%')
+   OR (s.name ILIKE '%enoch%'    AND s.name ILIKE '%agyapong%')
+   OR (s.name ILIKE '%esther%'   AND s.name ILIKE '%dabier%')
+   OR (s.name ILIKE '%evelyn%'   AND s.name ILIKE '%ashitey%')
+   OR (s.name ILIKE '%janet%'    AND s.name ILIKE '%agyei%')
+   OR (s.name ILIKE '%joseph%'   AND s.name ILIKE '%dabuo%')
+   OR (s.name ILIKE '%kwabena%'  AND s.name ILIKE '%akosa%')
+   OR (s.name ILIKE '%michael%'  AND s.name ILIKE '%fiawoyife%')
+   OR (s.name ILIKE '%nana%'     AND s.name ILIKE '%mantey%')
+   OR (s.name ILIKE '%nunnisun%')
+   OR (s.name ILIKE '%priscilla%' AND s.name ILIKE '%ouagraine%')
+   OR (s.name ILIKE '%samuel%'   AND s.name ILIKE '%agyemang%')
+   OR (s.name ILIKE '%seth%'     AND s.name ILIKE '%ampem%')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM staff_training_records r
+      WHERE r.staff_id = s.id AND r.training_type_id = v_type_id
+    );
 
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RAISE NOTICE '030: Batch 1 — % records inserted', v_count;
@@ -61,35 +63,34 @@ BEGIN
   SELECT s.id, v_type_id, '2023-01-19', '2025-12-31',
          'NRA Radiation Safety Training – Batch 2', v_admin_id
   FROM   lms_staff s
-  WHERE  LOWER(TRIM(s.name)) IN (
-    'alex danquah-smith',
-    'bridget fatima malik',
-    'dennis gardiner',
-    'elsie nana amanua ankrah',
-    'emmanuel adjei',
-    'eric wiafe agyekum',
-    'eugenia ewura adjoa abbeo',
-    'evelyn sackey',
-    'frederick ankrah',
-    'gifty d. ampaabeng',
-    'gifty ampaabeng',
-    'isaac kofi ohene',
-    'jasper frimpong',
-    'jessica ama budu',
-    'juliana kessewah affum',
-    'kristopher ohene-sam',
-    'kwaku amoako-atta',
-    'mary abalo',
-    'pamela lamptey-mills',
-    'paul yirebaare continua',
-    'sarah m. adjabeng',
-    'sarah adjabeng',
-    'seth ampofo'
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM staff_training_records r
-    WHERE r.staff_id = s.id AND r.training_type_id = v_type_id
-  );
+  WHERE  s.is_active = TRUE
+    AND (
+      (s.name ILIKE '%alex%'      AND s.name ILIKE '%danquah%')
+   OR (s.name ILIKE '%bridget%'   AND s.name ILIKE '%malik%')
+   OR (s.name ILIKE '%dennis%'    AND s.name ILIKE '%gardiner%')
+   OR (s.name ILIKE '%elsie%'     AND s.name ILIKE '%ankrah%')
+   OR (s.name ILIKE '%emmanuel%'  AND s.name ILIKE '%adjei%')
+   OR (s.name ILIKE '%eric%'      AND s.name ILIKE '%wiafe%')
+   OR (s.name ILIKE '%eugenia%'   AND s.name ILIKE '%abbeo%')
+   OR (s.name ILIKE '%evelyn%'    AND s.name ILIKE '%sackey%')
+   OR (s.name ILIKE '%frederick%' AND s.name ILIKE '%ankrah%')
+   OR (s.name ILIKE '%gifty%'     AND s.name ILIKE '%ampaabeng%')
+   OR (s.name ILIKE '%isaac%'     AND s.name ILIKE '%ohene%')
+   OR (s.name ILIKE '%jasper%'    AND s.name ILIKE '%frimpong%')
+   OR (s.name ILIKE '%jessica%'   AND s.name ILIKE '%budu%')
+   OR (s.name ILIKE '%juliana%'   AND s.name ILIKE '%affum%')
+   OR (s.name ILIKE '%kristopher%' AND s.name ILIKE '%ohene%')
+   OR (s.name ILIKE '%kwaku%'     AND s.name ILIKE '%amoako%')
+   OR (s.name ILIKE '%mary%'      AND s.name ILIKE '%abalo%')
+   OR (s.name ILIKE '%pamela%'    AND s.name ILIKE '%lamptey%')
+   OR (s.name ILIKE '%paul%'      AND s.name ILIKE '%yirebaare%')
+   OR (s.name ILIKE '%sarah%'     AND s.name ILIKE '%adjabeng%')
+   OR (s.name ILIKE '%seth%'      AND s.name ILIKE '%ampofo%')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM staff_training_records r
+      WHERE r.staff_id = s.id AND r.training_type_id = v_type_id
+    );
 
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RAISE NOTICE '030: Batch 2 — % records inserted', v_count;
@@ -100,33 +101,33 @@ BEGIN
   SELECT s.id, v_type_id, '2023-01-25', '2025-12-31',
          'NRA Radiation Safety Training – Batch 3', v_admin_id
   FROM   lms_staff s
-  WHERE  LOWER(TRIM(s.name)) IN (
-    'ampartey boateng',
-    'andrew okyere agyekum nsowah',
-    'charles osafo',
-    'dabuq david',
-    'david dabuq',
-    'justina sarfowaa fosu',
-    'kusark emmanuel yaw',
-    'kwadwo aboagye asah-opoku',
-    'kwadzi george gameli',
-    'kwesi ofori-boateng',
-    'linda debrah',
-    'linda mokoah otwey',
-    'maxwell forson adjei',
-    'nii dodoo decardi-nelson',
-    'paul essien',
-    'raymond adu parkoh',
-    'richard ampadu ofori',
-    'roland abeiku egyir',
-    'sahanun mubarik',
-    'sitsope cudjoe',
-    'wendy nako lartey'
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM staff_training_records r
-    WHERE r.staff_id = s.id AND r.training_type_id = v_type_id
-  );
+  WHERE  s.is_active = TRUE
+    AND (
+      (s.name ILIKE '%ampartey%'  AND s.name ILIKE '%boateng%')
+   OR (s.name ILIKE '%andrew%'    AND s.name ILIKE '%nsowah%')
+   OR (s.name ILIKE '%charles%'   AND s.name ILIKE '%osafo%')
+   OR (s.name ILIKE '%dabuq%'     OR s.name ILIKE '%dabug%')
+   OR (s.name ILIKE '%justina%'   AND s.name ILIKE '%fosu%')
+   OR (s.name ILIKE '%kusark%')
+   OR (s.name ILIKE '%kwadwo%'    AND s.name ILIKE '%asah%')
+   OR (s.name ILIKE '%kwadzi%'    OR  s.name ILIKE '%gameli%')
+   OR (s.name ILIKE '%kwesi%'     AND s.name ILIKE '%ofori%')
+   OR (s.name ILIKE '%linda%'     AND s.name ILIKE '%debrah%')
+   OR (s.name ILIKE '%linda%'     AND s.name ILIKE '%otwey%')
+   OR (s.name ILIKE '%maxwell%'   AND s.name ILIKE '%forson%')
+   OR (s.name ILIKE '%nii%'       AND s.name ILIKE '%decardi%')
+   OR (s.name ILIKE '%paul%'      AND s.name ILIKE '%essien%')
+   OR (s.name ILIKE '%raymond%'   AND s.name ILIKE '%parkoh%')
+   OR (s.name ILIKE '%richard%'   AND s.name ILIKE '%ampadu%')
+   OR (s.name ILIKE '%roland%'    AND s.name ILIKE '%egyir%')
+   OR (s.name ILIKE '%sahanun%')
+   OR (s.name ILIKE '%sitsope%')
+   OR (s.name ILIKE '%wendy%'     AND s.name ILIKE '%lartey%')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM staff_training_records r
+      WHERE r.staff_id = s.id AND r.training_type_id = v_type_id
+    );
 
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RAISE NOTICE '030: Batch 3 — % records inserted', v_count;
