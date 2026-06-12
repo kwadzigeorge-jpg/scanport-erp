@@ -218,7 +218,7 @@ BEGIN
     );
 
   GET DIAGNOSTICS v_count = ROW_COUNT;
-  RAISE NOTICE '033 HCVPIO: inserted (partial list — add remaining via UI)', v_count;
+  RAISE NOTICE '033 HCVPIO: % record(s) inserted (partial list — add remaining via UI)', v_count;
 
 END;
 $$;
