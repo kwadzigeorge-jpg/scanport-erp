@@ -714,13 +714,49 @@ function CompleteJobModal({ allocation, onClose }) {
   );
 }
 
+// ── Shift Targets Edit Modal ──────────────────────────────────────────────────
+function ShiftTargetModal({ day, onClose }) {
+  const qc = useQueryClient();
+  const [morning, setMorning] = useState(day.morning);
+  const [night,   setNight]   = useState(day.night);
+  const mut = useMutation(
+    () => gangApi.updateShiftTarget(day.day_of_week, { morning: Number(morning), night: Number(night) }),
+    {
+      onSuccess: () => { toast.success(`${day.day_name} targets updated.`); qc.invalidateQueries('gang-shift-targets'); onClose(); },
+      onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+    }
+  );
+  return (
+    <Modal title={`Edit Deployment — ${day.day_name}`} onClose={onClose}>
+      <div className="space-y-4">
+        <Field label="Morning Shift Target">
+          <input type="number" min="0" className={inp} value={morning} onChange={e => setMorning(e.target.value)} />
+        </Field>
+        <Field label="Night Shift Target">
+          <input type="number" min="0" className={inp} value={night} onChange={e => setNight(e.target.value)} />
+        </Field>
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="flex-1 btn-secondary text-sm py-2">Cancel</button>
+          <button onClick={() => mut.mutate()} disabled={mut.isLoading} className="flex-1 btn-primary text-sm py-2">Save</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Dashboard Tab ─────────────────────────────────────────────────────────────
 function DashboardTab() {
   const { data, isLoading, refetch } = useQuery('gang-dashboard', () => gangApi.dashboard().then(r => r.data), { refetchInterval: 30000 });
+  const { data: shiftTargets = [] } = useQuery('gang-shift-targets', gangApi.getShiftTargets);
+  const [editDay, setEditDay] = useState(null);
   const qc = useQueryClient();
 
   if (isLoading) return <Spinner />;
   const g = data?.gangs || {}; const r = data?.requests || {};
+
+  const todayDow = new Date().getDay(); // 0=Sun ... 6=Sat
+  const todayTarget = shiftTargets.find(t => t.day_of_week === todayDow);
+  const DAY_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   return (
     <div className="space-y-6">
@@ -742,6 +778,70 @@ function DashboardTab() {
         <KPICard label="Allocated Today"  value={r.allocated}   icon={CheckCircle}     accent="green" />
         <KPICard label="Jobs Today"       value={r.today}       icon={BarChart3}       sub="all statuses" />
       </div>
+
+      {/* Deployment Schedule */}
+      {shiftTargets.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-700">Weekly Deployment Schedule</h3>
+            {todayTarget && (
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-gray-500">Today:</span>
+                <span className="font-semibold text-blue-700">Morning — {todayTarget.morning}</span>
+                <span className="font-semibold text-indigo-700">Night — {todayTarget.night}</span>
+              </div>
+            )}
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Shift</th>
+                  {DAY_SHORT.map((d, i) => (
+                    <th key={d} className={clsx('px-3 py-2.5 text-center text-xs font-semibold uppercase',
+                      i === todayDow ? 'text-blue-700 bg-blue-50' : 'text-gray-500')}>
+                      {d}
+                    </th>
+                  ))}
+                  <th className="px-3 py-2.5 text-xs font-semibold text-gray-400 uppercase text-center">Edit</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {['morning','night'].map(shift => (
+                  <tr key={shift}>
+                    <td className="px-4 py-2.5 font-medium text-gray-700 capitalize">{shift}</td>
+                    {DAY_SHORT.map((_, i) => {
+                      const t = shiftTargets.find(x => x.day_of_week === i);
+                      return (
+                        <td key={i} className={clsx('px-3 py-2.5 text-center font-semibold',
+                          i === todayDow ? 'bg-blue-50 text-blue-800' : 'text-gray-800')}>
+                          {t ? t[shift] : '—'}
+                        </td>
+                      );
+                    })}
+                    {shift === 'morning' && (
+                      <td rowSpan={2} className="px-3 py-2.5 text-center align-middle">
+                        <div className="flex flex-col gap-1 items-center">
+                          {shiftTargets.map(t => (
+                            <button key={t.day_of_week}
+                              onClick={() => setEditDay(t)}
+                              className={clsx('text-xs px-2 py-0.5 rounded hover:bg-blue-50 hover:text-blue-600 text-gray-400',
+                                t.day_of_week === todayDow && 'text-blue-500 font-semibold')}>
+                              {DAY_SHORT[t.day_of_week]}
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {editDay && <ShiftTargetModal day={editDay} onClose={() => setEditDay(null)} />}
 
       {/* Active Jobs */}
       {data?.active_jobs?.length > 0 && (

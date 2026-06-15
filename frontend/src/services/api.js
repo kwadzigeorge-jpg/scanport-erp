@@ -329,6 +329,10 @@ export const gangApi = {
   // Notifications
   getNotifications:   ()        => api.get('/gangs/notifications/list'),
   markRead:           (id)      => api.patch(`/gangs/notifications/${id}/read`),
+
+  // Shift deployment targets
+  getShiftTargets:    ()        => api.get('/gangs/shift-targets').then(r => r.data),
+  updateShiftTarget:  (dow, d)  => api.put(`/gangs/shift-targets/${dow}`, d).then(r => r.data),
 };
 
 // ─── Service Feedback ─────────────────────────────────────────────────────────

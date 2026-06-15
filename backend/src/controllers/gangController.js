@@ -811,6 +811,29 @@ async function runGangAlerts() {
   } catch (_) { /* non-fatal scheduler */ }
 }
 
+// ─── Shift Deployment Targets ─────────────────────────────────────────────────
+async function getShiftTargets(req, res, next) {
+  try {
+    const { rows } = await db.query('SELECT * FROM gang_shift_targets ORDER BY day_of_week');
+    res.json(rows);
+  } catch (err) { next(err); }
+}
+
+async function updateShiftTarget(req, res, next) {
+  try {
+    const { dayOfWeek } = req.params;
+    const { morning, night } = req.body;
+    if (morning == null || night == null) return res.status(400).json({ error: 'morning and night are required.' });
+    const { rows } = await db.query(
+      `UPDATE gang_shift_targets SET morning=$1, night=$2, updated_at=NOW()
+       WHERE day_of_week=$3 RETURNING *`,
+      [morning, night, dayOfWeek]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Day not found.' });
+    res.json(rows[0]);
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   getDashboard,
   listGangs, getGang, createGang, updateGang, setGangStatus,
@@ -821,5 +844,6 @@ module.exports = {
   getPerformance,
   getAuditLog,
   getNotifications, markNotificationRead,
+  getShiftTargets, updateShiftTarget,
   runGangAlerts,
 };

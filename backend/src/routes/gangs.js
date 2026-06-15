@@ -8,6 +8,10 @@ router.use(authenticate);
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 router.get('/dashboard',                  requirePermission('gang.view'),     gc.getDashboard);
 
+// ── Shift Deployment Targets ──────────────────────────────────────────────────
+router.get('/shift-targets',              requirePermission('gang.view'),     gc.getShiftTargets);
+router.put('/shift-targets/:dayOfWeek',   requirePermission('gang.manage'),   gc.updateShiftTarget);
+
 // ── Gangs ─────────────────────────────────────────────────────────────────────
 router.get('/',                           requirePermission('gang.view'),     gc.listGangs);
 router.get('/:id',                        requirePermission('gang.view'),     gc.getGang);
