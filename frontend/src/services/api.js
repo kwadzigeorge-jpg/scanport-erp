@@ -296,6 +296,7 @@ export const gangApi = {
   getGang:            (id)      => api.get(`/gangs/${id}`),
   createGang:         (d)       => api.post('/gangs', d),
   updateGang:         (id, d)   => api.put(`/gangs/${id}`, d),
+  deleteGang:         (id)      => api.delete(`/gangs/${id}`).then(r => r.data),
   setStatus:          (id, s)   => api.patch(`/gangs/${id}/status`, { status: s }),
 
   // Members

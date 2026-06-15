@@ -8,7 +8,7 @@ import {
   Users, Plus, X, Clock, CheckCircle, AlertTriangle, BarChart3,
   ClipboardList, Zap, Activity, RefreshCw, ChevronDown, ChevronUp,
   Phone, Star, AlertCircle, FileText, Pencil, Bell, Search,
-  UserCheck, PlayCircle, StopCircle, Timer, TrendingUp, MapPin,
+  UserCheck, PlayCircle, StopCircle, Timer, TrendingUp, MapPin, Trash2,
 } from 'lucide-react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -501,11 +501,17 @@ function MemberStatusSelect({ gangId, member, onDone }) {
 // ── Gang Roster Card ──────────────────────────────────────────────────────────
 function GangRosterCard({ gang, onEdit, onAddMember }) {
   const qc = useQueryClient();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const members = gang.members || [];
   const headMan = members.find(m => m.role === 'head_man');
   const dockers  = members.filter(m => m.role === 'docker');
   const availCount = parseInt(gang.available_count) || 0;
   const totalCount = parseInt(gang.total_members) || 0;
+
+  const deleteMut = useMutation(() => gangApi.deleteGang(gang.id), {
+    onSuccess: (d) => { toast.success(d.message); qc.invalidateQueries('gang-list'); },
+    onError:   (e) => { toast.error(e.response?.data?.error || 'Delete failed.'); setConfirmDelete(false); },
+  });
 
   const headManAvail = headMan?.status === 'available';
   const readiness = totalCount === 0 ? 'empty'
@@ -550,15 +556,35 @@ function GangRosterCard({ gang, onEdit, onAddMember }) {
             {totalCount}/5 members · {gang.jobs_today || 0} job(s) today · Perf: {parseFloat(gang.performance_score || 0).toFixed(1)}
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
-          <button onClick={() => onAddMember(gang.id, 'head_man')}
-            className="text-xs text-blue-600 border border-blue-200 rounded-lg px-2.5 py-1.5 hover:bg-blue-50 flex items-center gap-1">
-            <Plus size={11} /> Add Member
-          </button>
-          <button onClick={() => onEdit(gang)}
-            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg">
-            <Pencil size={14} />
-          </button>
+        <div className="flex gap-2 shrink-0 items-center">
+          {confirmDelete ? (
+            <div className="flex items-center gap-1.5 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+              <span className="text-xs text-red-700 font-medium">Delete?</span>
+              <button onClick={() => deleteMut.mutate()} disabled={deleteMut.isLoading}
+                className="text-xs bg-red-600 text-white rounded px-1.5 py-0.5 hover:bg-red-700 font-semibold">
+                {deleteMut.isLoading ? '…' : 'Yes'}
+              </button>
+              <button onClick={() => setConfirmDelete(false)}
+                className="text-xs text-gray-500 hover:text-gray-700 rounded px-1 py-0.5">
+                No
+              </button>
+            </div>
+          ) : (
+            <>
+              <button onClick={() => onAddMember(gang.id, 'head_man')}
+                className="text-xs text-blue-600 border border-blue-200 rounded-lg px-2.5 py-1.5 hover:bg-blue-50 flex items-center gap-1">
+                <Plus size={11} /> Add Member
+              </button>
+              <button onClick={() => onEdit(gang)}
+                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg">
+                <Pencil size={14} />
+              </button>
+              <button onClick={() => setConfirmDelete(true)}
+                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                <Trash2 size={14} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 

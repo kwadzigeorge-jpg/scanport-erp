@@ -855,6 +855,35 @@ async function runGangAlerts() {
   } catch (_) { /* non-fatal scheduler */ }
 }
 
+// ─── Delete Gang ─────────────────────────────────────────────────────────────
+async function deleteGang(req, res, next) {
+  try {
+    const { id } = req.params;
+
+    // Block deletion if the gang has any job history (preserve audit trail)
+    const { rows: check } = await db.query(
+      'SELECT COUNT(*) AS cnt FROM gang_allocations WHERE gang_id = $1', [id]
+    );
+    if (parseInt(check[0].cnt) > 0) {
+      return res.status(409).json({
+        error: 'This gang has job history and cannot be deleted. Set it to Off Duty to remove it from active rotation.',
+      });
+    }
+
+    // Remove notifications (no FK cascade on gang_id)
+    await db.query('DELETE FROM gang_notifications WHERE gang_id = $1', [id]);
+
+    // Delete gang — gang_members cascade via ON DELETE CASCADE
+    const { rows } = await db.query(
+      'DELETE FROM gangs WHERE id = $1 RETURNING gang_code', [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Gang not found.' });
+
+    await logAudit(req, 'gang:deleted', 'gangs', id, { gang_code: rows[0].gang_code });
+    return res.json({ message: `Gang ${rows[0].gang_code} deleted.` });
+  } catch (err) { next(err); }
+}
+
 // ─── Shift Deployment Targets ─────────────────────────────────────────────────
 async function getShiftTargets(req, res, next) {
   try {
@@ -880,7 +909,7 @@ async function updateShiftTarget(req, res, next) {
 
 module.exports = {
   getDashboard,
-  listGangs, getGang, createGang, updateGang, setGangStatus,
+  listGangs, getGang, createGang, updateGang, setGangStatus, deleteGang,
   listMembers, addMember, updateMember, removeMember, setMemberStatus,
   listRequests, createRequest, cancelRequest,
   recommendGangs, createAllocation, listAllocations,
