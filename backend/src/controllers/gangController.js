@@ -43,6 +43,47 @@ async function logAudit(req, action, entity, entityId, details) {
   } catch (_) { /* non-fatal */ }
 }
 
+// ─── Shift Deployment Status ──────────────────────────────────────────────────
+async function getShiftDeploymentStatus() {
+  try {
+    const { rows } = await db.query(`
+      WITH shift_info AS (
+        SELECT
+          CASE WHEN EXTRACT(HOUR FROM NOW()) BETWEEN 6 AND 17 THEN 'morning' ELSE 'night' END AS shift,
+          CASE
+            WHEN EXTRACT(HOUR FROM NOW()) BETWEEN 6 AND 17
+              THEN DATE_TRUNC('day', NOW()) + INTERVAL '6 hours'
+            WHEN EXTRACT(HOUR FROM NOW()) >= 18
+              THEN DATE_TRUNC('day', NOW()) + INTERVAL '18 hours'
+            ELSE DATE_TRUNC('day', NOW()) - INTERVAL '6 hours'
+          END AS shift_start,
+          EXTRACT(DOW FROM NOW())::INT AS day_of_week
+      ),
+      active_count AS (
+        SELECT COUNT(DISTINCT ga.gang_id) AS active_gangs
+        FROM gang_allocations ga
+        CROSS JOIN shift_info si
+        WHERE ga.status IN ('allocated','gang_dispatched','in_progress')
+          AND ga.allocated_at >= si.shift_start
+      )
+      SELECT si.shift, si.day_of_week,
+             (ac.active_gangs * 5)::INT AS deployed,
+             CASE si.shift WHEN 'morning' THEN gst.morning ELSE gst.night END AS target
+      FROM shift_info si
+      CROSS JOIN active_count ac
+      LEFT JOIN gang_shift_targets gst ON gst.day_of_week = si.day_of_week
+    `);
+    const row      = rows[0] || {};
+    const deployed = parseInt(row.deployed) || 0;
+    const target   = row.target != null ? parseInt(row.target) : null;
+    return { shift: row.shift || 'morning', deployed, target,
+             at_limit:   target != null && deployed >= target,
+             over_limit: target != null && deployed >  target };
+  } catch (_) {
+    return { shift: 'morning', deployed: 0, target: null, at_limit: false, over_limit: false };
+  }
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 async function getDashboard(req, res, next) {
   try {
@@ -96,6 +137,7 @@ async function getDashboard(req, res, next) {
       `),
     ]);
 
+    const deployment = await getShiftDeploymentStatus();
     return res.json({
       gangs:         gangStats.rows[0],
       requests:      requestStats.rows[0],
@@ -103,6 +145,7 @@ async function getDashboard(req, res, next) {
       pending_queue: pendingQueue.rows,
       top_gangs:     topGangs.rows,
       notifications: recentNotifs.rows,
+      deployment,
     });
   } catch (err) { next(err); }
 }
@@ -414,7 +457,8 @@ async function recommendGangs(req, res, next) {
     });
 
     scored.sort((a,b) => b.allocation_score - a.allocation_score);
-    return res.json(scored);
+    const deployment = await getShiftDeploymentStatus();
+    return res.json({ gangs: scored, deployment });
   } catch (err) { next(err); }
 }
 

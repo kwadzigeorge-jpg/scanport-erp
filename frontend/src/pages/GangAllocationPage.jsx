@@ -222,7 +222,9 @@ function AllocateModal({ request, onClose }) {
   const [expectedStart, setExpectedStart] = useState('');
   const [expectedDuration, setExpectedDuration] = useState(60);
 
-  const { data: gangs = [], isLoading } = useQuery('gang-recommend', () => gangApi.recommend().then(r => r.data), { refetchOnWindowFocus: false });
+  const { data: recommendData, isLoading } = useQuery('gang-recommend', () => gangApi.recommend().then(r => r.data), { refetchOnWindowFocus: false });
+  const gangs      = recommendData?.gangs       || [];
+  const deployment = recommendData?.deployment;
 
   const topGang = gangs[0];
 
@@ -283,6 +285,22 @@ function AllocateModal({ request, onClose }) {
             <div><span className="text-gray-400 text-xs block">Cargo Type</span><span className="text-gray-700">{request.cargo_type || '—'}</span></div>
           </div>
         </div>
+
+        {/* Soft-cap deployment warning */}
+        {deployment?.at_limit && (
+          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+            <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-semibold text-amber-700">
+                {deployment.over_limit ? 'Deployment target exceeded' : 'Deployment target reached'}
+              </p>
+              <p className="text-xs text-amber-600 mt-0.5">
+                {deployment.deployed}/{deployment.target} workers deployed this {deployment.shift} shift.
+                You can still allocate — this is a soft cap only.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Scheduling */}
         <div className="grid grid-cols-2 gap-3">
@@ -778,6 +796,53 @@ function DashboardTab() {
         <KPICard label="Allocated Today"  value={r.allocated}   icon={CheckCircle}     accent="green" />
         <KPICard label="Jobs Today"       value={r.today}       icon={BarChart3}       sub="all statuses" />
       </div>
+
+      {/* Current shift deployment meter */}
+      {data?.deployment && (
+        <div className={clsx('rounded-xl border p-4',
+          data.deployment.over_limit ? 'bg-red-50 border-red-200' :
+          data.deployment.at_limit   ? 'bg-amber-50 border-amber-200' :
+                                       'bg-white border-gray-200')}>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-700">
+              <span className="capitalize">{data.deployment.shift}</span> Shift Deployment
+            </h3>
+            {data.deployment.at_limit ? (
+              <span className={clsx('text-xs font-semibold px-2 py-0.5 rounded-full',
+                data.deployment.over_limit
+                  ? 'bg-red-100 text-red-700'
+                  : 'bg-amber-100 text-amber-700')}>
+                {data.deployment.over_limit ? 'Over Target' : 'Target Reached'}
+              </span>
+            ) : (
+              <span className="text-xs text-gray-400">
+                {data.deployment.target != null ? `${data.deployment.target - data.deployment.deployed} remaining` : 'No target set'}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 bg-gray-100 rounded-full h-2.5 overflow-hidden">
+              <div
+                className={clsx('h-2.5 rounded-full transition-all',
+                  data.deployment.over_limit ? 'bg-red-500' :
+                  data.deployment.at_limit   ? 'bg-amber-500' : 'bg-green-500')}
+                style={{ width: `${Math.min(100, data.deployment.target
+                  ? Math.round((data.deployment.deployed / data.deployment.target) * 100)
+                  : 0)}%` }}
+              />
+            </div>
+            <span className="text-sm font-bold text-gray-700 whitespace-nowrap">
+              {data.deployment.deployed} / {data.deployment.target ?? '—'}
+              <span className="text-xs font-normal text-gray-400 ml-1">workers</span>
+            </span>
+          </div>
+          {data.deployment.at_limit && (
+            <p className="text-xs text-amber-600 mt-1.5">
+              Further allocations are still possible — supervisor can override.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Deployment Schedule */}
       {shiftTargets.length > 0 && (
