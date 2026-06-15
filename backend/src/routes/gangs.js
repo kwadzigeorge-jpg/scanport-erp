@@ -12,6 +12,9 @@ router.get('/dashboard',                  requirePermission('gang.view'),     gc
 router.get('/shift-targets',              requirePermission('gang.view'),     gc.getShiftTargets);
 router.put('/shift-targets/:dayOfWeek',   requirePermission('gang.manage'),   gc.updateShiftTarget);
 
+// ── Reserve Pool ──────────────────────────────────────────────────────────────
+router.get('/reserve-members',            requirePermission('gang.view'),     gc.getReserveMembers);
+
 // ── Gangs ─────────────────────────────────────────────────────────────────────
 router.get('/',                           requirePermission('gang.view'),     gc.listGangs);
 router.get('/:id',                        requirePermission('gang.view'),     gc.getGang);

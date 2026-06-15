@@ -180,7 +180,10 @@ async function listGangs(req, res, next) {
       LEFT JOIN gang_members m ON m.gang_id = g.id AND m.is_active = TRUE
       ${where ? where.replace('g.status', 'g.status') : ''}
       GROUP BY g.id
-      ORDER BY g.performance_score DESC, g.gang_code
+      ORDER BY
+        g.is_reserve ASC,
+        NULLIF(regexp_replace(g.gang_code, '[^0-9]', '', 'g'), '')::INT NULLS LAST,
+        g.gang_code
     `, params);
     return res.json(rows);
   } catch (err) { next(err); }
@@ -438,7 +441,7 @@ async function recommendGangs(req, res, next) {
          FROM gang_allocations WHERE gang_id=g.id AND status='completed') AS hours_since_last_job
       FROM gangs g
       LEFT JOIN gang_members m ON m.gang_id = g.id
-      WHERE g.status != 'busy'
+      WHERE g.status != 'busy' AND g.is_reserve = FALSE
       GROUP BY g.id
     `);
 
@@ -469,6 +472,7 @@ async function createAllocation(req, res, next) {
       request_id, gang_id, is_override, override_reason,
       expected_start, expected_duration_minutes,
       engine_recommended_gang, engine_score,
+      substitutes,
     } = req.body;
 
     if (!request_id || !gang_id) return res.status(400).json({ error: 'request_id and gang_id are required.' });
@@ -502,6 +506,19 @@ async function createAllocation(req, res, next) {
 
       // Update gang status to busy
       await db.query(`UPDATE gangs SET status='busy', updated_at=NOW() WHERE id=$1`, [gang_id]);
+
+      // Store substitute members if any were used
+      if (Array.isArray(substitutes) && substitutes.length) {
+        for (const s of substitutes) {
+          if (s.absent_member_id && s.substitute_member_id) {
+            await db.query(
+              `INSERT INTO gang_allocation_substitutes (allocation_id, absent_member_id, substitute_member_id)
+               VALUES ($1, $2, $3)`,
+              [alloc.id, s.absent_member_id, s.substitute_member_id]
+            );
+          }
+        }
+      }
 
       // Create notification
       await db.query(`
@@ -907,6 +924,21 @@ async function updateShiftTarget(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Reserve Pool ────────────────────────────────────────────────────────────
+async function getReserveMembers(req, res, next) {
+  try {
+    const { rows } = await db.query(`
+      SELECT m.id, m.full_name, m.role, m.employee_id, m.phone, m.status, m.is_active,
+             g.gang_code, g.id AS gang_id
+      FROM gang_members m
+      JOIN gangs g ON g.id = m.gang_id
+      WHERE g.is_reserve = TRUE AND m.is_active = TRUE
+      ORDER BY g.gang_code, CASE m.role WHEN 'head_man' THEN 1 ELSE 2 END, m.full_name
+    `);
+    return res.json(rows);
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   getDashboard,
   listGangs, getGang, createGang, updateGang, setGangStatus, deleteGang,
@@ -918,5 +950,6 @@ module.exports = {
   getAuditLog,
   getNotifications, markNotificationRead,
   getShiftTargets, updateShiftTarget,
+  getReserveMembers,
   runGangAlerts,
 };

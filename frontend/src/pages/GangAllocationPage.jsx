@@ -216,15 +216,33 @@ function NewRequestModal({ onClose }) {
 // ── Allocation Engine Modal ───────────────────────────────────────────────────
 function AllocateModal({ request, onClose }) {
   const qc = useQueryClient();
-  const [selectedGang, setSelectedGang] = useState(null);
-  const [isOverride, setIsOverride] = useState(false);
+  const [selectedGang, setSelectedGang]   = useState(null);
+  const [isOverride, setIsOverride]       = useState(false);
   const [overrideReason, setOverrideReason] = useState('');
   const [expectedStart, setExpectedStart] = useState('');
   const [expectedDuration, setExpectedDuration] = useState(60);
+  const [absentIds, setAbsentIds]         = useState(new Set());
+  const [substitutes, setSubstitutes]     = useState({});
 
   const { data: recommendData, isLoading } = useQuery('gang-recommend', () => gangApi.recommend().then(r => r.data), { refetchOnWindowFocus: false });
   const gangs      = recommendData?.gangs       || [];
   const deployment = recommendData?.deployment;
+
+  const { data: gangDetail } = useQuery(
+    ['gang-detail', selectedGang?.id],
+    () => gangApi.getGang(selectedGang.id).then(r => r.data),
+    { enabled: !!selectedGang?.id, refetchOnWindowFocus: false }
+  );
+  const { data: reserveMembers = [] } = useQuery('reserve-members', gangApi.getReserveMembers, { refetchOnWindowFocus: false });
+
+  const toggleAbsent = (memberId) => {
+    setAbsentIds(prev => {
+      const next = new Set(prev);
+      if (next.has(memberId)) { next.delete(memberId); setSubstitutes(s => { const n={...s}; delete n[memberId]; return n; }); }
+      else next.add(memberId);
+      return next;
+    });
+  };
 
   const topGang = gangs[0];
 
@@ -239,7 +257,9 @@ function AllocateModal({ request, onClose }) {
       setIsOverride(false);
       setOverrideReason('');
     }
-  }, [selectedGang, topGang]);
+    setAbsentIds(new Set());
+    setSubstitutes({});
+  }, [selectedGang?.id]);
 
   const mut = useMutation(gangApi.createAllocation, {
     onSuccess: () => {
@@ -255,6 +275,9 @@ function AllocateModal({ request, onClose }) {
   const handleConfirm = () => {
     if (!selectedGang) return toast.error('Please select a gang.');
     if (isOverride && !overrideReason.trim()) return toast.error('Please provide a reason for the override.');
+    const substitutePairs = Array.from(absentIds)
+      .filter(id => substitutes[id])
+      .map(absent_member_id => ({ absent_member_id, substitute_member_id: substitutes[absent_member_id] }));
     mut.mutate({
       request_id: request.id,
       gang_id: selectedGang.id,
@@ -264,6 +287,7 @@ function AllocateModal({ request, onClose }) {
       engine_score: topGang?.allocation_score,
       expected_start: expectedStart || null,
       expected_duration_minutes: parseInt(expectedDuration),
+      substitutes: substitutePairs,
     });
   };
 
@@ -344,6 +368,64 @@ function AllocateModal({ request, onClose }) {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Team composition — absent members & substitutes */}
+        {selectedGang && gangDetail && (
+          <div className="border border-gray-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Team — Mark Absent & Pick Substitutes</p>
+              {reserveMembers.length === 0 && (
+                <span className="text-xs text-gray-400">No reserve members available</span>
+              )}
+            </div>
+            <div className="divide-y divide-gray-50">
+              {(gangDetail.members || []).map(m => {
+                const isAbsent = absentIds.has(m.id);
+                const availableReserves = reserveMembers.filter(r => r.status === 'available');
+                return (
+                  <div key={m.id} className={clsx('px-4 py-2.5 flex items-center gap-3', isAbsent && 'bg-red-50')}>
+                    <input type="checkbox" id={`absent-${m.id}`} checked={isAbsent}
+                      onChange={() => toggleAbsent(m.id)}
+                      className="rounded border-gray-300 text-red-500 focus:ring-red-400" />
+                    <div className={clsx('w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0',
+                      m.role === 'head_man' ? 'bg-amber-500' : 'bg-blue-600')}>
+                      {m.full_name?.[0]?.toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <label htmlFor={`absent-${m.id}`} className="text-sm font-medium text-gray-800 cursor-pointer">
+                        {m.full_name}
+                        {m.role === 'head_man' && <span className="ml-1.5 text-xs text-amber-600 font-semibold">Gang Leader</span>}
+                      </label>
+                      {isAbsent && <p className="text-xs text-red-500 font-medium">Marked absent</p>}
+                    </div>
+                    {isAbsent && (
+                      <select
+                        className={clsx(sel, 'w-48 text-xs')}
+                        value={substitutes[m.id] || ''}
+                        onChange={e => setSubstitutes(s => ({ ...s, [m.id]: e.target.value || undefined }))}
+                      >
+                        <option value="">— No substitute —</option>
+                        {availableReserves.map(r => (
+                          <option key={r.id} value={r.id}>
+                            {r.full_name} ({r.gang_code})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {absentIds.size > 0 && (
+              <div className="px-4 py-2 bg-amber-50 border-t border-amber-100 text-xs text-amber-700">
+                {absentIds.size} member{absentIds.size > 1 ? 's' : ''} absent
+                {Object.keys(substitutes).filter(k => substitutes[k]).length > 0
+                  ? ` · ${Object.keys(substitutes).filter(k => substitutes[k]).length} substitute${Object.keys(substitutes).filter(k => substitutes[k]).length > 1 ? 's' : ''} assigned`
+                  : ' · no substitutes assigned'}
+              </div>
+            )}
           </div>
         )}
 
@@ -537,16 +619,26 @@ function GangRosterCard({ gang, onEdit, onAddMember }) {
     { role: 'docker',   label: 'Docker',     count: 4 },
   ];
 
+  const isReserve = !!gang.is_reserve;
+  const avatarLabel = isReserve
+    ? (gang.gang_code?.match(/[A-Za-z]$/)?.[0]?.toUpperCase() || gang.gang_code?.[0]?.toUpperCase() || 'R')
+    : (gang.gang_code?.replace(/[^0-9]/g, '') || gang.gang_code?.[0]?.toUpperCase() || 'G');
+
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    <div className={clsx('bg-white rounded-xl border overflow-hidden', isReserve ? 'border-purple-200' : 'border-gray-200')}>
       {/* Gang header */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 border-b border-gray-100">
-        <div className="w-9 h-9 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0">
-          {gang.gang_code?.replace(/[^0-9]/g,'') || gang.gang_code?.[0] || 'G'}
+      <div className={clsx('flex items-center gap-3 px-4 py-3 border-b', isReserve ? 'bg-purple-50 border-purple-100' : 'bg-gray-50 border-gray-100')}>
+        <div className={clsx('w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0', isReserve ? 'bg-purple-600' : 'bg-blue-600')}>
+          {avatarLabel}
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-gray-900">{gang.gang_code}</span>
+            {isReserve && (
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full border bg-purple-100 text-purple-700 border-purple-200">
+                Reserve Pool
+              </span>
+            )}
             <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full border', readinessBadge.cls)}>
               {readinessBadge.label}
             </span>
@@ -1160,18 +1252,34 @@ function GangsTab() {
 
       {isLoading ? <Spinner /> : !gangs.length ? (
         <EmptyState message="No gangs registered yet. Register a gang to begin building rosters." />
-      ) : (
-        <div className="space-y-4">
-          {gangs.map(g => (
-            <GangRosterCard
-              key={g.id}
-              gang={g}
-              onEdit={(gang) => { setEditGang(gang); setShowGangModal(true); }}
-              onAddMember={(gangId, role) => setMemberModal({ gangId, role })}
-            />
-          ))}
-        </div>
-      )}
+      ) : (() => {
+        const regular  = gangs.filter(g => !g.is_reserve);
+        const reserves = gangs.filter(g =>  g.is_reserve);
+        const cardProps = g => ({
+          key: g.id, gang: g,
+          onEdit: (gang) => { setEditGang(gang); setShowGangModal(true); },
+          onAddMember: (gangId, role) => setMemberModal({ gangId, role }),
+        });
+        return (
+          <div className="space-y-6">
+            {regular.length > 0 && (
+              <div className="space-y-4">
+                {regular.map(g => <GangRosterCard {...cardProps(g)} />)}
+              </div>
+            )}
+            {reserves.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-px flex-1 bg-purple-100" />
+                  <span className="text-xs font-semibold text-purple-500 uppercase tracking-widest px-2">Reserve Pools</span>
+                  <div className="h-px flex-1 bg-purple-100" />
+                </div>
+                {reserves.map(g => <GangRosterCard {...cardProps(g)} />)}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {showGangModal && (
         <GangModal gang={editGang} onClose={() => { setShowGangModal(false); setEditGang(null); }} />

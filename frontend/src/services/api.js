@@ -334,6 +334,9 @@ export const gangApi = {
   // Shift deployment targets
   getShiftTargets:    ()        => api.get('/gangs/shift-targets').then(r => r.data),
   updateShiftTarget:  (dow, d)  => api.put(`/gangs/shift-targets/${dow}`, d).then(r => r.data),
+
+  // Reserve pool
+  getReserveMembers:  ()        => api.get('/gangs/reserve-members').then(r => r.data),
 };
 
 // ─── Service Feedback ─────────────────────────────────────────────────────────
