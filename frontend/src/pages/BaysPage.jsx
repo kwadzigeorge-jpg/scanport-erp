@@ -511,13 +511,14 @@ export default function BaysPage() {
   const handlePrint = (truck, bayCode, areaName) => {
     setPrintChit({
       transaction_id:   truck.allocation_ref || '—',
+      containers:       truck.containers || [],
       container_number: truck.containers?.[0]?.container_number || truck.truck_number,
       agent_name:       truck.agent_name,
       agent_phone:      truck.agent_phone,
       truck_number:     truck.truck_number,
       area_name:        areaName,
       bay_code:         bayCode,
-      qr_code_token:    truck.qr_token || null,
+      qr_code_token:    truck.containers?.[0]?.qr_code_token || truck.qr_token || null,
       created_at:       new Date().toISOString(),
     });
   };

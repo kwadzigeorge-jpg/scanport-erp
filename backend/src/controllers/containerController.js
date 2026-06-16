@@ -724,6 +724,7 @@ async function baysView(req, res, next) {
               ct.agent_name, ct.agent_phone,
               ct.bay_id, ct.holding_area_id, ct.status,
               ct.bay_assigned_time, ct.bay_entry_time, ct.created_at,
+              ct.qr_code_token,
               ROUND(EXTRACT(EPOCH FROM (NOW() - COALESCE(ct.bay_entry_time, ct.bay_assigned_time, ct.created_at)))/60) AS dwell_minutes
        FROM container_transactions ct
        WHERE ct.status IN ('BAY_ASSIGNED','ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED')
@@ -772,6 +773,7 @@ async function baysView(req, res, next) {
             container_number: ct.container_number,
             container_size:   ct.container_size,
             waybill_number:   ct.waybill_number,
+            qr_code_token:    ct.qr_code_token,
             status:           ct.status,
           }],
         };
@@ -781,6 +783,7 @@ async function baysView(req, res, next) {
           container_number: ct.container_number,
           container_size:   ct.container_size,
           waybill_number:   ct.waybill_number,
+          qr_code_token:    ct.qr_code_token,
           status:           ct.status,
         });
       }
