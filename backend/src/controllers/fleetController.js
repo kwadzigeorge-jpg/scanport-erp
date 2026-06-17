@@ -145,7 +145,7 @@ async function listVehicles(req, res, next) {
     if (search) { p.push(`%${search}%`); cond.push(`(v.registration_number ILIKE $${p.length} OR v.make ILIKE $${p.length} OR v.model ILIKE $${p.length})`); }
 
     const { rows } = await db.query(`
-      SELECT v.*, t.label AS department_name,
+      SELECT v.*, t.name AS department_name,
         (SELECT COALESCE(SUM(distance_km),0)::FLOAT FROM fleet_mileage_logs
          WHERE vehicle_id=v.id AND trip_date >= DATE_TRUNC('month',NOW())) AS km_this_month,
         (SELECT json_agg(json_build_object('id',d.id,'full_name',d.full_name,'is_primary',vd.is_primary))
@@ -167,7 +167,7 @@ async function listVehicles(req, res, next) {
 async function getVehicle(req, res, next) {
   try {
     const { rows } = await db.query(`
-      SELECT v.*, t.label AS department_name
+      SELECT v.*, t.name AS department_name
       FROM fleet_vehicles v LEFT JOIN lms_teams t ON t.id=v.department_id
       WHERE v.id=$1
     `, [req.params.id]);
@@ -282,7 +282,7 @@ async function listDrivers(req, res, next) {
     if (status) { p.push(status); cond.push(`d.status=$${p.length}`); }
     if (search) { p.push(`%${search}%`); cond.push(`(d.full_name ILIKE $${p.length} OR d.license_number ILIKE $${p.length} OR d.employee_number ILIKE $${p.length})`); }
     const { rows } = await db.query(`
-      SELECT d.*, t.label AS department_name,
+      SELECT d.*, t.name AS department_name,
         (SELECT json_agg(json_build_object('id',v.id,'registration_number',v.registration_number,'make',v.make,'model',v.model,'is_primary',vd.is_primary))
          FROM fleet_vehicle_drivers vd JOIN fleet_vehicles v ON v.id=vd.vehicle_id
          WHERE vd.driver_id=d.id AND vd.unassigned_date IS NULL) AS assigned_vehicles,
