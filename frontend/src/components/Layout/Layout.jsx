@@ -8,7 +8,7 @@ import {
   LayoutDashboard, ClipboardList,
   BarChart3, Settings, LogOut, Menu, X, Bell, LayoutGrid,
   FlaskConical, MapPin, CalendarDays, Package, Boxes, ShieldCheck, Scale,
-  Sun, Moon, MessageSquare, KeyRound, Eye, EyeOff, Users, GraduationCap,
+  Sun, Moon, MessageSquare, KeyRound, Eye, EyeOff, Users, GraduationCap, Truck,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -28,6 +28,7 @@ const navItems = [
   { to: '/admin',        icon: Settings,        label: 'Admin',         role: 'admin' },
   { to: '/leave',        icon: CalendarDays,    label: 'Leave Mgmt',    roles: ['admin', 'supervisor'] },
   { to: '/training',     icon: GraduationCap,   label: 'Staff Training', roles: ['admin', 'supervisor'] },
+  { to: '/fleet',        icon: Truck,           label: 'Fleet Mgmt',     permission: 'fleet.view' },
 ];
 
 // ─── Change Password Modal ────────────────────────────────────────────────────

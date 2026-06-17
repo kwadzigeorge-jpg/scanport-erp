@@ -339,6 +339,32 @@ export const gangApi = {
   getReserveMembers:  ()        => api.get('/gangs/reserve-members').then(r => r.data),
 };
 
+// ─── Fleet Management ─────────────────────────────────────────────────────────
+export const fleetApi = {
+  dashboard:          ()        => api.get('/fleet/dashboard').then(r => r.data),
+  listVehicles:       (p)       => api.get('/fleet', { params: p }).then(r => r.data),
+  getVehicle:         (id)      => api.get(`/fleet/${id}`).then(r => r.data),
+  createVehicle:      (d)       => api.post('/fleet', d).then(r => r.data),
+  updateVehicle:      (id, d)   => api.put(`/fleet/${id}`, d).then(r => r.data),
+  setVehicleStatus:   (id, s)   => api.patch(`/fleet/${id}/status`, { status: s }).then(r => r.data),
+  assignDriver:       (id, d)   => api.post(`/fleet/${id}/drivers`, d).then(r => r.data),
+  unassignDriver:     (id, did) => api.delete(`/fleet/${id}/drivers/${did}`).then(r => r.data),
+  listDrivers:        (p)       => api.get('/fleet/drivers/list', { params: p }).then(r => r.data),
+  createDriver:       (d)       => api.post('/fleet/drivers', d).then(r => r.data),
+  updateDriver:       (id, d)   => api.put(`/fleet/drivers/${id}`, d).then(r => r.data),
+  listMileage:        (p)       => api.get('/fleet/mileage/list', { params: p }).then(r => r.data),
+  createMileage:      (d)       => api.post('/fleet/mileage', d).then(r => r.data),
+  approveMileage:     (id)      => api.patch(`/fleet/mileage/${id}/approve`).then(r => r.data),
+  rejectMileage:      (id, d)   => api.patch(`/fleet/mileage/${id}/reject`, d).then(r => r.data),
+  listFuel:           (p)       => api.get('/fleet/fuel/list', { params: p }).then(r => r.data),
+  createFuel:         (d)       => api.post('/fleet/fuel', d).then(r => r.data),
+  listMaintenance:    (p)       => api.get('/fleet/maintenance/list', { params: p }).then(r => r.data),
+  createMaintenance:  (d)       => api.post('/fleet/maintenance', d).then(r => r.data),
+  updateMaintenance:  (id, d)   => api.put(`/fleet/maintenance/${id}`, d).then(r => r.data),
+  listAlerts:         ()        => api.get('/fleet/alerts').then(r => r.data),
+  dismissAlert:       (id)      => api.patch(`/fleet/alerts/${id}/dismiss`).then(r => r.data),
+};
+
 // ─── Service Feedback ─────────────────────────────────────────────────────────
 export const feedbackApi = {
   submit:       (d)        => api.post('/feedback', d).then(r => r.data),

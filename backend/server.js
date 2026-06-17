@@ -59,6 +59,7 @@ app.use('/api/grievances',  require('./src/routes/grievances'));
 app.use('/api/feedback',    require('./src/routes/feedback'));
 app.use('/api/gangs',       require('./src/routes/gangs'));
 app.use('/api/training',    require('./src/routes/training'));
+app.use('/api/fleet',       require('./src/routes/fleet'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
