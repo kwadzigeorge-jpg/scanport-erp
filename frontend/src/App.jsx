@@ -60,7 +60,7 @@ function AppRoutes() {
         <Route path="service-feedback" element={<ProtectedRoute permission="feedback.view"><ServiceFeedbackPage /></ProtectedRoute>} />
         <Route path="gang-allocation"  element={<ProtectedRoute roles={['admin', 'supervisor']}><GangAllocationPage /></ProtectedRoute>} />
         <Route path="training"         element={<ProtectedRoute roles={['admin', 'supervisor']}><TrainingPage /></ProtectedRoute>} />
-        <Route path="fleet"            element={<ProtectedRoute permission="fleet.view"><FleetPage /></ProtectedRoute>} />
+        <Route path="fleet"            element={<ProtectedRoute roles={['admin', 'supervisor']}><FleetPage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

@@ -28,7 +28,7 @@ const navItems = [
   { to: '/admin',        icon: Settings,        label: 'Admin',         role: 'admin' },
   { to: '/leave',        icon: CalendarDays,    label: 'Leave Mgmt',    roles: ['admin', 'supervisor'] },
   { to: '/training',     icon: GraduationCap,   label: 'Staff Training', roles: ['admin', 'supervisor'] },
-  { to: '/fleet',        icon: Truck,           label: 'Fleet Mgmt',     permission: 'fleet.view' },
+  { to: '/fleet',        icon: Truck,           label: 'Fleet Mgmt',     roles: ['admin', 'supervisor'] },
 ];
 
 // ─── Change Password Modal ────────────────────────────────────────────────────
