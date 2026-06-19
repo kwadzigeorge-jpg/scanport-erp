@@ -21,4 +21,9 @@ router.put('/:id',            requirePermission('grievance.manage'), gc.updateGr
 router.post('/:id/status',    requirePermission('grievance.manage'), gc.changeStatus);
 router.post('/:id/note',      requirePermission('grievance.view'),   gc.addNote);
 
+// Statements
+router.get('/:id/statements',          requirePermission('grievance.view'),   gc.listStatements);
+router.post('/:id/statements',         requirePermission('grievance.manage'), gc.requestStatement);
+router.delete('/:id/statements/:sid',  requirePermission('grievance.manage'), gc.deleteStatement);
+
 module.exports = router;

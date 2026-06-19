@@ -290,10 +290,107 @@ async function deleteConfig(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Statements ───────────────────────────────────────────────────────────────
+async function listStatements(req, res, next) {
+  try {
+    const { rows } = await db.query(`
+      SELECT s.*, u.full_name AS requested_by_name
+      FROM grievance_statements s
+      LEFT JOIN users u ON u.id = s.requested_by
+      WHERE s.grievance_id = $1
+      ORDER BY s.created_at ASC
+    `, [req.params.id]);
+    return res.json(rows);
+  } catch (err) { next(err); }
+}
+
+async function requestStatement(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { staff_name, staff_designation, department, statement_type, due_date } = req.body;
+    if (!staff_name?.trim()) return res.status(400).json({ error: 'Staff name is required.' });
+
+    const { rows: gv } = await db.query('SELECT ref FROM grievances WHERE id=$1', [id]);
+    if (!gv.length) return res.status(404).json({ error: 'Grievance not found.' });
+
+    const { rows } = await db.query(`
+      INSERT INTO grievance_statements
+        (grievance_id, staff_name, staff_designation, department, statement_type, due_date, requested_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING *
+    `, [id, staff_name.trim(), staff_designation?.trim() || null, department?.trim() || null,
+        statement_type || 'witness', due_date || null, req.user.id]);
+
+    await db.query(`
+      INSERT INTO grievance_activities (grievance_id, activity_type, note, created_by)
+      VALUES ($1,'note',$2,$3)
+    `, [id, `Statement requested from ${staff_name.trim()} (${(statement_type || 'witness').replace(/_/g,' ')}).`, req.user.id]);
+
+    return res.status(201).json(rows[0]);
+  } catch (err) { next(err); }
+}
+
+async function deleteStatement(req, res, next) {
+  try {
+    const { rowCount } = await db.query(
+      'DELETE FROM grievance_statements WHERE id=$1 AND grievance_id=$2',
+      [req.params.sid, req.params.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Statement not found.' });
+    return res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+// Public — no auth, token-based
+async function getStatementByToken(req, res, next) {
+  try {
+    const { rows } = await db.query(`
+      SELECT s.id, s.grievance_id, s.statement_type, s.staff_name,
+             s.staff_designation, s.department, s.due_date,
+             s.is_submitted, s.submitted_at, s.statement_text,
+             g.ref AS grievance_ref
+      FROM grievance_statements s
+      JOIN grievances g ON g.id = s.grievance_id
+      WHERE s.token = $1
+    `, [req.params.token]);
+    if (!rows.length) return res.status(404).json({ error: 'Invalid or expired link.' });
+    return res.json(rows[0]);
+  } catch (err) { next(err); }
+}
+
+async function submitStatementByToken(req, res, next) {
+  try {
+    const { statement_text } = req.body;
+    if (!statement_text?.trim()) return res.status(400).json({ error: 'Statement text is required.' });
+
+    const { rows: existing } = await db.query(
+      'SELECT * FROM grievance_statements WHERE token=$1', [req.params.token]
+    );
+    if (!existing.length) return res.status(404).json({ error: 'Invalid or expired link.' });
+    if (existing[0].is_submitted) return res.status(409).json({ error: 'Statement already submitted.' });
+
+    const { rows } = await db.query(`
+      UPDATE grievance_statements
+      SET statement_text=$1, is_submitted=TRUE, submitted_at=NOW(), updated_at=NOW()
+      WHERE token=$2
+      RETURNING *
+    `, [statement_text.trim(), req.params.token]);
+
+    await db.query(`
+      INSERT INTO grievance_activities (grievance_id, activity_type, note)
+      VALUES ($1,'note',$2)
+    `, [existing[0].grievance_id, `Statement submitted by ${existing[0].staff_name} (${existing[0].statement_type.replace(/_/g,' ')}).`]);
+
+    return res.json(rows[0]);
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   getDashboard, listGrievances, getGrievance,
   createGrievance, updateGrievance,
   changeStatus, addNote,
   checkOverdue, exportGrievances,
   listConfig, createConfig, deleteConfig,
+  listStatements, requestStatement, deleteStatement,
+  getStatementByToken, submitStatementByToken,
 };

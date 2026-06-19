@@ -60,6 +60,7 @@ app.use('/api/feedback',    require('./src/routes/feedback'));
 app.use('/api/gangs',       require('./src/routes/gangs'));
 app.use('/api/training',    require('./src/routes/training'));
 app.use('/api/fleet',       require('./src/routes/fleet'));
+app.use('/api/statements',  require('./src/routes/statements'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));

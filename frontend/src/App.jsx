@@ -23,6 +23,7 @@ import ServiceFeedbackPage   from './pages/ServiceFeedbackPage';
 import FeedbackFormPage      from './pages/FeedbackFormPage';
 import GangAllocationPage    from './pages/GangAllocationPage';
 import FleetPage             from './pages/FleetPage';
+import StatementPage         from './pages/StatementPage';
 import NotFoundPage          from './pages/NotFoundPage';
 
 function ProtectedRoute({ children, roles, permission }) {
@@ -40,6 +41,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/feedback" element={<FeedbackFormPage />} />
+      <Route path="/statement/:token" element={<StatementPage />} />
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
 
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>

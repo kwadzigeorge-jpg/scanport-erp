@@ -7,7 +7,8 @@ import toast from 'react-hot-toast';
 import {
   FolderOpen, CircleDot, Search, CheckCircle2, AlertTriangle,
   XCircle, Clock, Download, Plus, ChevronRight, MinusCircle,
-  BarChart2, Building2, X, Settings, Trash2,
+  BarChart2, Building2, X, Settings, Trash2, FileText, Link,
+  ChevronDown, ChevronUp, UserCheck, Hourglass,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -300,6 +301,198 @@ function NewGrievanceModal({ onClose }) {
   );
 }
 
+// ─── Statement TYPE config ────────────────────────────────────────────────────
+const STMT_TYPES = [
+  { value: 'complainant', label: 'Complainant' },
+  { value: 'respondent',  label: 'Respondent'  },
+  { value: 'witness',     label: 'Witness'     },
+  { value: 'other',       label: 'Other Party' },
+];
+const STMT_TYPE_COLORS = {
+  complainant: 'bg-blue-100 text-blue-700',
+  respondent:  'bg-red-100 text-red-700',
+  witness:     'bg-purple-100 text-purple-700',
+  other:       'bg-gray-100 text-gray-600',
+};
+
+// ─── Request Statement Modal ──────────────────────────────────────────────────
+function RequestStatementModal({ grievanceId, onClose }) {
+  const qc = useQueryClient();
+  const [f, setF] = useState({ staff_name: '', staff_designation: '', department: '', statement_type: 'witness', due_date: '' });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+
+  const mut = useMutation(d => grievanceApi.requestStatement(grievanceId, d), {
+    onSuccess: () => {
+      toast.success('Statement requested.');
+      qc.invalidateQueries(['grievance-statements', grievanceId]);
+      qc.invalidateQueries(['grievance', grievanceId]);
+      onClose();
+    },
+    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+  });
+
+  return (
+    <Modal title="Request Statement" onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Staff Name" required>
+          <input className={inp} value={f.staff_name} onChange={e => set('staff_name', e.target.value)} placeholder="Full name" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Designation / Role">
+            <input className={inp} value={f.staff_designation} onChange={e => set('staff_designation', e.target.value)} placeholder="e.g. Scanner Officer" />
+          </Field>
+          <Field label="Department">
+            <input className={inp} value={f.department} onChange={e => set('department', e.target.value)} placeholder="e.g. Security" />
+          </Field>
+          <Field label="Statement Type" required>
+            <select className={sel} value={f.statement_type} onChange={e => set('statement_type', e.target.value)}>
+              {STMT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Due Date">
+            <input type="date" className={inp} value={f.due_date} onChange={e => set('due_date', e.target.value)} />
+          </Field>
+        </div>
+        <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+          <button onClick={() => mut.mutate(f)} disabled={!f.staff_name.trim() || mut.isLoading}
+            className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50">
+            {mut.isLoading ? 'Requesting…' : 'Request Statement'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Statements Section ───────────────────────────────────────────────────────
+function StatementsSection({ grievanceId }) {
+  const qc = useQueryClient();
+  const [showRequest, setShowRequest] = useState(false);
+  const [expanded, setExpanded] = useState({});
+
+  const { data: statements = [], isLoading } = useQuery(
+    ['grievance-statements', grievanceId],
+    () => grievanceApi.listStatements(grievanceId)
+  );
+
+  const deleteMut = useMutation(sid => grievanceApi.deleteStatement(grievanceId, sid), {
+    onSuccess: () => { toast.success('Statement request removed.'); qc.invalidateQueries(['grievance-statements', grievanceId]); },
+    onError: () => toast.error('Failed to remove.'),
+  });
+
+  const copyLink = (token) => {
+    const url = `${window.location.origin}/statement/${token}`;
+    navigator.clipboard.writeText(url).then(() => toast.success('Link copied to clipboard.')).catch(() => toast.error('Copy failed.'));
+  };
+
+  const toggleExpand = (id) => setExpanded(e => ({ ...e, [id]: !e[id] }));
+
+  const pending   = statements.filter(s => !s.is_submitted);
+  const submitted = statements.filter(s =>  s.is_submitted);
+
+  return (
+    <div className="border-t border-gray-100 pt-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <FileText size={13} className="text-gray-400" />
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Statements
+          </p>
+          {statements.length > 0 && (
+            <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full font-medium">
+              {submitted.length}/{statements.length} received
+            </span>
+          )}
+        </div>
+        <button onClick={() => setShowRequest(true)}
+          className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-medium border border-blue-200 px-2.5 py-1 rounded-lg hover:bg-blue-50 transition-colors">
+          <Plus size={12} /> Request Statement
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="text-xs text-gray-400 py-3 text-center">Loading…</div>
+      ) : statements.length === 0 ? (
+        <div className="text-xs text-gray-400 bg-gray-50 rounded-xl p-4 text-center">
+          No statements requested yet. Click "Request Statement" to begin collecting statements from involved parties.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {statements.map(s => (
+            <div key={s.id} className="border border-gray-100 rounded-xl overflow-hidden">
+              {/* Statement header */}
+              <div className="flex items-center gap-3 px-4 py-3 bg-gray-50/60">
+                <div className={clsx('shrink-0 p-1.5 rounded-lg', s.is_submitted ? 'bg-green-100' : 'bg-amber-100')}>
+                  {s.is_submitted
+                    ? <UserCheck size={13} className="text-green-600" />
+                    : <Hourglass size={13} className="text-amber-500" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-gray-800">{s.staff_name}</span>
+                    <span className={clsx('text-xs px-2 py-0.5 rounded-full font-medium', STMT_TYPE_COLORS[s.statement_type] || 'bg-gray-100 text-gray-600')}>
+                      {STMT_TYPES.find(t => t.value === s.statement_type)?.label || s.statement_type}
+                    </span>
+                    {s.is_submitted
+                      ? <span className="text-xs text-green-600 font-medium">✓ Submitted</span>
+                      : <span className="text-xs text-amber-600 font-medium">Pending</span>}
+                  </div>
+                  {(s.staff_designation || s.department) && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {[s.staff_designation, s.department].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                  {s.due_date && !s.is_submitted && (
+                    <p className={clsx('text-xs mt-0.5', new Date(s.due_date) < new Date() ? 'text-red-500 font-medium' : 'text-gray-400')}>
+                      Due {new Date(s.due_date).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })}
+                      {new Date(s.due_date) < new Date() && ' (overdue)'}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {!s.is_submitted && (
+                    <button onClick={() => copyLink(s.token)}
+                      title="Copy statement link"
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                      <Link size={13} />
+                    </button>
+                  )}
+                  {s.is_submitted && (
+                    <button onClick={() => toggleExpand(s.id)}
+                      className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+                      {expanded[s.id] ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                  )}
+                  {!s.is_submitted && (
+                    <button onClick={() => deleteMut.mutate(s.id)}
+                      title="Remove request"
+                      className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Expanded statement text */}
+              {s.is_submitted && expanded[s.id] && (
+                <div className="px-4 py-3 border-t border-gray-100 bg-white">
+                  <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-2">
+                    Statement — submitted {s.submitted_at ? new Date(s.submitted_at).toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : ''}
+                  </p>
+                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{s.statement_text}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showRequest && <RequestStatementModal grievanceId={grievanceId} onClose={() => setShowRequest(false)} />}
+    </div>
+  );
+}
+
 // ─── Case Detail Modal ────────────────────────────────────────────────────────
 function CaseDetailModal({ grievance, onClose }) {
   const qc = useQueryClient();
@@ -458,6 +651,8 @@ function CaseDetailModal({ grievance, onClose }) {
               </div>
             </div>
           )}
+
+          <StatementsSection grievanceId={grievance.id} />
 
           <div className="border-t border-gray-100 pt-4">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Add Note</p>
