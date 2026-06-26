@@ -33,6 +33,7 @@ router.delete('/:id/members/:memberId',        requirePermission('gang.manage'),
 // ── Agent Requests ────────────────────────────────────────────────────────────
 router.get('/requests/list',              requirePermission('gang.view'),     gc.listRequests);
 router.post('/requests',                  requirePermission('gang.view'),     gc.createRequest);
+router.put('/requests/:id',               requirePermission('gang.view'),     gc.updateRequest);
 router.patch('/requests/:id/cancel',      requirePermission('gang.allocate'), gc.cancelRequest);
 
 // ── Allocation Engine ─────────────────────────────────────────────────────────
@@ -48,8 +49,10 @@ router.get('/allocations/:id/delays',     requirePermission('gang.view'),     gc
 router.post('/allocations/:id/feedback',  requirePermission('gang.view'),     gc.submitFeedback);
 
 // ── Performance ───────────────────────────────────────────────────────────────
-router.get('/analytics/performance',      requirePermission('gang.view'),     gc.getPerformance);
-router.get('/analytics/audit',            requirePermission('gang.view'),     gc.getAuditLog);
+router.get('/analytics/performance',         requirePermission('gang.view'), gc.getPerformance);
+router.get('/analytics/performance/export',  requirePermission('gang.view'), gc.exportPerformance);
+router.get('/analytics/audit',               requirePermission('gang.view'), gc.getAuditLog);
+router.get('/analytics/audit/export',        requirePermission('gang.view'), gc.exportAudit);
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 router.get('/notifications/list',         requirePermission('gang.view'),     gc.getNotifications);

@@ -1,4 +1,5 @@
-const db = require('../config/database');
+const db   = require('../config/database');
+const XLSX = require('xlsx');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function genRef() {
@@ -414,14 +415,40 @@ async function createRequest(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function updateRequest(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { agent_name, agent_phone, agency, bay_number, container_number, container_number_2, cargo_type, priority, notes } = req.body;
+    const cnum  = container_number?.trim().toUpperCase();
+    const cnum2 = container_number_2?.trim().toUpperCase() || null;
+    const containerRe = /^[A-Z]{4}\d{7}$/;
+    if (!cnum || !containerRe.test(cnum)) return res.status(400).json({ error: 'container_number must be 4 letters + 7 digits.' });
+    if (cnum2 && !containerRe.test(cnum2)) return res.status(400).json({ error: 'container_number_2 must be 4 letters + 7 digits.' });
+    if (cnum2 && cnum === cnum2) return res.status(400).json({ error: 'container_number_2 must differ from container_number.' });
+    const { rows } = await db.query(`
+      UPDATE gang_requests SET
+        agent_name=$1, agent_phone=$2, agency=$3, bay_number=$4,
+        container_number=$5, container_number_2=$6, is_dual_container=$7,
+        cargo_type=$8, priority=$9, notes=$10, updated_at=NOW()
+      WHERE id=$11 AND status='pending' RETURNING *
+    `, [agent_name, agent_phone||null, agency||null, bay_number,
+        cnum, cnum2, !!cnum2, cargo_type||null, priority||'normal', notes||null, id]);
+    if (!rows[0]) return res.status(400).json({ error: 'Request not found or no longer pending.' });
+    await logAudit(req, 'gang:request_updated', 'gang_requests', id, req.body);
+    return res.json(rows[0]);
+  } catch (err) { next(err); }
+}
+
 async function cancelRequest(req, res, next) {
   try {
     const { id } = req.params;
+    const { cancel_reason } = req.body;
     const { rows } = await db.query(
-      `UPDATE gang_requests SET status='cancelled', updated_at=NOW() WHERE id=$1 AND status='pending' RETURNING *`, [id]
+      `UPDATE gang_requests SET status='cancelled', cancel_reason=$1, updated_at=NOW() WHERE id=$2 AND status='pending' RETURNING *`,
+      [cancel_reason || null, id]
     );
     if (!rows[0]) return res.status(400).json({ error: 'Request not found or not in pending status.' });
-    await logAudit(req, 'gang:request_cancelled', 'gang_requests', id, {});
+    await logAudit(req, 'gang:request_cancelled', 'gang_requests', id, { cancel_reason });
     return res.json(rows[0]);
   } catch (err) { next(err); }
 }
@@ -939,15 +966,127 @@ async function getReserveMembers(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function exportAudit(req, res, next) {
+  try {
+    const { from, to } = req.query;
+    const fromDate = from || new Date(Date.now() - 30*24*60*60*1000).toISOString().slice(0,10);
+    const toDate   = to   || new Date().toISOString().slice(0,10);
+    const { rows } = await db.query(`
+      SELECT r.request_ref, g.gang_code, r.bay_number,
+             r.container_number, r.container_number_2, r.priority, r.cargo_type,
+             r.agent_name, r.agency,
+             u.full_name AS allocated_by,
+             CASE WHEN a.is_override THEN 'Yes' ELSE 'No' END AS override,
+             a.override_reason,
+             COUNT(dl.id)::INT AS delay_count,
+             a.status, a.allocated_at, a.gang_arrived_at,
+             a.work_started_at, a.work_completed_at,
+             a.expected_duration_minutes, a.agent_rating, a.supervisor_comments
+      FROM gang_allocations a
+      JOIN gang_requests r ON r.id = a.request_id
+      JOIN gangs g         ON g.id = a.gang_id
+      LEFT JOIN users u    ON u.id = a.allocated_by
+      LEFT JOIN gang_delay_logs dl ON dl.allocation_id = a.id
+      WHERE DATE(a.allocated_at) BETWEEN $1 AND $2
+      GROUP BY a.id, r.id, g.gang_code, u.full_name
+      ORDER BY a.allocated_at DESC
+    `, [fromDate, toDate]);
+
+    const fmt = v => v ? new Date(v).toLocaleString('en-GB') : '';
+    const wsData = rows.map(r => ({
+      'Ref':                   r.request_ref,
+      'Gang':                  r.gang_code,
+      'Bay':                   r.bay_number,
+      'Container 1':           r.container_number,
+      'Container 2':           r.container_number_2 || '',
+      'Priority':              r.priority,
+      'Cargo Type':            r.cargo_type || '',
+      'Agent':                 r.agent_name,
+      'Agency':                r.agency || '',
+      'Allocated By':          r.allocated_by || '',
+      'Override':              r.override,
+      'Override Reason':       r.override_reason || '',
+      'Delays':                r.delay_count,
+      'Status':                r.status,
+      'Allocated At':          fmt(r.allocated_at),
+      'Gang Arrived':          fmt(r.gang_arrived_at),
+      'Work Started':          fmt(r.work_started_at),
+      'Completed At':          fmt(r.work_completed_at),
+      'Expected Duration(min)': r.expected_duration_minutes || '',
+      'Agent Rating':          r.agent_rating || '',
+      'Supervisor Comments':   r.supervisor_comments || '',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(wsData);
+    ws['!cols'] = [10,10,6,14,14,8,12,16,16,16,8,22,8,12,20,20,20,20,20,12,30].map(w=>({wch:w}));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Allocation Audit');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="GangAudit-${fromDate}-to-${toDate}.xlsx"`);
+    return res.send(buf);
+  } catch (err) { next(err); }
+}
+
+async function exportPerformance(req, res, next) {
+  try {
+    const { from, to } = req.query;
+    const fromDate = from || new Date(Date.now() - 30*24*60*60*1000).toISOString().slice(0,10);
+    const toDate   = to   || new Date().toISOString().slice(0,10);
+    const { rows } = await db.query(`
+      SELECT g.gang_code, g.status, g.specialization, g.total_jobs_completed,
+             g.performance_score AS rolling_score,
+             COUNT(pr.id)::INT AS jobs_in_period,
+             ROUND(AVG(pr.actual_duration_minutes)::NUMERIC,1) AS avg_duration_min,
+             ROUND(AVG(pr.total_score)::NUMERIC,2)             AS avg_score,
+             SUM(pr.delay_count)::INT                          AS total_delays,
+             ROUND(AVG(pr.agent_rating)::NUMERIC,2)            AS avg_rating,
+             SUM(CASE WHEN pr.arrived_on_time THEN 1 ELSE 0 END)::INT AS on_time_count,
+             CASE WHEN COUNT(pr.id)>0
+               THEN ROUND(100.0*SUM(CASE WHEN pr.arrived_on_time THEN 1 ELSE 0 END)/COUNT(pr.id),1)
+               ELSE NULL END AS on_time_pct
+      FROM gangs g
+      LEFT JOIN gang_performance_records pr
+        ON pr.gang_id=g.id AND pr.period_date BETWEEN $1 AND $2
+      GROUP BY g.id, g.gang_code, g.status, g.specialization, g.total_jobs_completed, g.performance_score
+      ORDER BY avg_score DESC NULLS LAST
+    `, [fromDate, toDate]);
+
+    const wsData = rows.map(r => ({
+      'Gang':                   r.gang_code,
+      'Status':                 r.status,
+      'Specialization':         r.specialization || '',
+      'Jobs in Period':         r.jobs_in_period,
+      'Total Jobs (All Time)':  r.total_jobs_completed,
+      'Avg Duration (min)':     r.avg_duration_min || '',
+      'Avg Score':              r.avg_score || '',
+      'Rolling Score':          r.rolling_score || '',
+      'Total Delays':           r.total_delays || 0,
+      'Avg Agent Rating':       r.avg_rating || '',
+      'On-Time Count':          r.on_time_count || 0,
+      'On-Time %':              r.on_time_pct || '',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(wsData);
+    ws['!cols'] = [12,10,16,14,20,18,10,14,14,18,14,10].map(w=>({wch:w}));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Gang Performance');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="GangPerformance-${fromDate}-to-${toDate}.xlsx"`);
+    return res.send(buf);
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   getDashboard,
   listGangs, getGang, createGang, updateGang, setGangStatus, deleteGang,
   listMembers, addMember, updateMember, removeMember, setMemberStatus,
-  listRequests, createRequest, cancelRequest,
+  listRequests, createRequest, updateRequest, cancelRequest,
   recommendGangs, createAllocation, listAllocations,
   logTimestamp, completeJob, logDelay, getDelays, submitFeedback,
-  getPerformance,
-  getAuditLog,
+  getPerformance, exportPerformance,
+  getAuditLog, exportAudit,
   getNotifications, markNotificationRead,
   getShiftTargets, updateShiftTarget,
   getReserveMembers,

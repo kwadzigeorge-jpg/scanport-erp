@@ -9,6 +9,7 @@ import {
   ClipboardList, Zap, Activity, RefreshCw, ChevronDown, ChevronUp,
   Phone, Star, AlertCircle, FileText, Pencil, Bell, Search,
   UserCheck, PlayCircle, StopCircle, Timer, TrendingUp, MapPin, Trash2,
+  Download, Printer,
 } from 'lucide-react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -31,7 +32,7 @@ const ALLOC_STATUS = {
   cancelled:       'bg-red-100 text-red-600',
 };
 const ALLOC_STATUS_LABEL = {
-  allocated: 'Allocated', gang_dispatched: 'Dispatched',
+  allocated: 'Allocated', gang_dispatched: 'Arrived at Bay',
   in_progress: 'In Progress', completed: 'Completed', cancelled: 'Cancelled',
 };
 const PRIORITY_STYLE = { normal: 'bg-gray-100 text-gray-600', urgent: 'bg-red-100 text-red-700' };
@@ -120,6 +121,186 @@ function ScoreBar({ score, max=100 }) {
       </div>
       <span className="text-xs font-semibold text-gray-700 w-8 text-right">{score}</span>
     </div>
+  );
+}
+
+// ── Cancel Request Modal ──────────────────────────────────────────────────────
+function CancelRequestModal({ request, onClose }) {
+  const qc = useQueryClient();
+  const [reason, setReason] = useState('');
+  const mut = useMutation(d => gangApi.cancelRequest(request.id, d), {
+    onSuccess: () => { toast.success('Request cancelled.'); qc.invalidateQueries('gang-requests'); qc.invalidateQueries('gang-dashboard'); onClose(); },
+    onError: e => toast.error(e.response?.data?.error || 'Cancel failed.'),
+  });
+  return (
+    <Modal title="Cancel Request" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="bg-red-50 border border-red-100 rounded-xl p-3 text-sm text-gray-700">
+          <p className="font-semibold text-red-700 mb-1">Cancel {request.request_ref}?</p>
+          <p className="text-xs text-gray-500">Bay {request.bay_number} · {request.container_number} · {request.agent_name}</p>
+        </div>
+        <Field label="Reason (optional)">
+          <textarea className={inp} rows={2} value={reason} onChange={e => setReason(e.target.value)} placeholder="Why is this request being cancelled?" />
+        </Field>
+        <div className="flex justify-end gap-3 pt-2">
+          <button onClick={onClose} className="btn-secondary text-sm py-2 px-4">Keep Request</button>
+          <button onClick={() => mut.mutate({ cancel_reason: reason || undefined })} disabled={mut.isLoading}
+            className="text-sm py-2 px-4 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-60 font-medium">
+            {mut.isLoading ? 'Cancelling…' : 'Yes, Cancel'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Edit Request Modal ────────────────────────────────────────────────────────
+function EditRequestModal({ request, onClose }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    agent_name: request.agent_name || '', agent_phone: request.agent_phone || '', agency: request.agency || '',
+    bay_number: request.bay_number || '', container_number: request.container_number || '',
+    container_number_2: request.container_number_2 || '', cargo_type: request.cargo_type || '',
+    priority: request.priority || 'normal', notes: request.notes || '',
+  });
+  const [dualContainer, setDualContainer] = useState(!!request.container_number_2);
+  const set = (k,v) => setForm(f => ({ ...f, [k]: v }));
+
+  const mut = useMutation(d => gangApi.updateRequest(request.id, d), {
+    onSuccess: () => { toast.success('Request updated.'); qc.invalidateQueries('gang-requests'); onClose(); },
+    onError: e => toast.error(e.response?.data?.error || 'Update failed.'),
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const payload = { ...form };
+    if (!dualContainer) payload.container_number_2 = '';
+    mut.mutate(payload);
+  };
+
+  return (
+    <Modal title={`Edit Request — ${request.request_ref}`} onClose={onClose} wide>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Agent Name" required>
+            <input className={inp} value={form.agent_name} onChange={e => set('agent_name', e.target.value)} required />
+          </Field>
+          <Field label="Agent Phone">
+            <input className={inp} value={form.agent_phone} onChange={e => set('agent_phone', e.target.value)} />
+          </Field>
+          <Field label="Agency / Company" required>
+            <input className={inp} value={form.agency} onChange={e => set('agency', e.target.value)} required />
+          </Field>
+          <Field label="Priority">
+            <select className={sel} value={form.priority} onChange={e => set('priority', e.target.value)}>
+              <option value="normal">Normal</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </Field>
+          <Field label="Bay Number" required>
+            <input className={inp} value={form.bay_number} onChange={e => set('bay_number', e.target.value)} required />
+          </Field>
+          <Field label="Container 1" required hint="4 letters + 7 digits">
+            <input className={inp} value={form.container_number} onChange={e => set('container_number', e.target.value.toUpperCase())} required placeholder="MSCU1234567" />
+          </Field>
+          <Field label="Cargo Type">
+            <input className={inp} value={form.cargo_type} onChange={e => set('cargo_type', e.target.value)} />
+          </Field>
+          <div className="flex items-end pb-0.5">
+            <button type="button" onClick={() => { setDualContainer(d => { if (d) set('container_number_2',''); return !d; }); }}
+              className={clsx('w-full flex items-center justify-center gap-2 text-xs font-medium border rounded-lg px-3 py-2 transition-colors',
+                dualContainer ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-dashed border-gray-300 text-gray-500 hover:border-blue-300 hover:text-blue-600')}>
+              {dualContainer ? <><X size={12}/> Remove 2nd container</> : <><Plus size={12}/> Add 2nd container</>}
+            </button>
+          </div>
+        </div>
+        {dualContainer && (
+          <Field label="Container 2" required hint="Must differ from Container 1">
+            <input className={inp} value={form.container_number_2} onChange={e => set('container_number_2', e.target.value.toUpperCase())} required={dualContainer} placeholder="MSCU1234568" />
+          </Field>
+        )}
+        <Field label="Notes">
+          <textarea className={inp} rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} />
+        </Field>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" onClick={onClose} className="btn-secondary text-sm py-2 px-4">Cancel</button>
+          <button type="submit" disabled={mut.isLoading} className="btn-primary text-sm py-2 px-4">
+            {mut.isLoading ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// ── Print Chit Modal ──────────────────────────────────────────────────────────
+function PrintChitModal({ allocation, onClose }) {
+  const printRef = React.useRef();
+  const handlePrint = () => {
+    const content = printRef.current.innerHTML;
+    const win = window.open('', '_blank', 'width=700,height=600');
+    win.document.write(`<!DOCTYPE html><html><head><title>Bay Chit — ${allocation.request_ref}</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 24px; color: #111; font-size: 13px; }
+        h1 { font-size: 18px; margin-bottom: 4px; }
+        .sub { color: #666; font-size: 12px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        td { padding: 8px 10px; border: 1px solid #ddd; vertical-align: top; }
+        .label { font-weight: 600; background: #f5f5f5; width: 35%; }
+        .priority-urgent { color: #dc2626; font-weight: 700; text-transform: uppercase; }
+        .sig { margin-top: 40px; display: flex; gap: 80px; }
+        .sig-box { flex: 1; }
+        .sig-line { border-top: 1px solid #aaa; padding-top: 4px; margin-top: 32px; font-size: 11px; color: #666; }
+        @media print { body { padding: 8px; } }
+      </style>
+    </head><body>${content}</body></html>`);
+    win.document.close();
+    win.print();
+  };
+
+  const now = new Date().toLocaleString('en-GB');
+  return (
+    <Modal title="Bay Chit Preview" onClose={onClose} wide>
+      <div ref={printRef} className="text-sm">
+        <h1 className="text-lg font-bold text-gray-900">Gang Allocation Chit</h1>
+        <p className="text-xs text-gray-500 mb-4">{allocation.request_ref} · Generated {now}</p>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <tbody>
+            {[
+              ['Gang Assigned', <span className="font-bold text-lg">{allocation.gang_code}</span>],
+              ['Bay Number', <span className="font-bold">{allocation.bay_number}</span>],
+              ['Container(s)', <span className="font-mono">{allocation.container_number}{allocation.container_number_2 ? ` / ${allocation.container_number_2} (2×20ft)` : ''}</span>],
+              ['Cargo Type', allocation.cargo_type || '—'],
+              ['Priority', <span className={allocation.priority === 'urgent' ? 'text-red-600 font-bold uppercase' : ''}>{allocation.priority}</span>],
+              ['Agent', `${allocation.agent_name}${allocation.agency ? ` (${allocation.agency})` : ''}`],
+              ['Status', ALLOC_STATUS_LABEL[allocation.status] || allocation.status],
+              ['Allocated At', fmtTime(allocation.allocated_at)],
+              ['Expected Start', allocation.expected_start ? fmtTime(allocation.expected_start) : '—'],
+              ['Expected Duration', allocation.expected_duration_minutes ? `${allocation.expected_duration_minutes} min` : '—'],
+            ].map(([lbl, val]) => (
+              <tr key={lbl} style={{ border: '1px solid #ddd' }}>
+                <td style={{ padding: '7px 10px', fontWeight: 600, background: '#f5f5f5', width: '35%' }}>{lbl}</td>
+                <td style={{ padding: '7px 10px' }}>{val}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 40, display: 'flex', gap: 80 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ borderTop: '1px solid #aaa', paddingTop: 4, marginTop: 32, fontSize: 11, color: '#666' }}>Gang Head Man Signature</div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ borderTop: '1px solid #aaa', paddingTop: 4, marginTop: 32, fontSize: 11, color: '#666' }}>Supervisor Signature</div>
+          </div>
+        </div>
+      </div>
+      <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-4">
+        <button onClick={onClose} className="btn-secondary text-sm py-2 px-4">Close</button>
+        <button onClick={handlePrint} className="btn-primary flex items-center gap-2 text-sm py-2 px-4">
+          <Printer size={14} /> Print Chit
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -584,6 +765,7 @@ function MemberStatusSelect({ gangId, member, onDone }) {
 function GangRosterCard({ gang, onEdit, onAddMember }) {
   const qc = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editMember, setEditMember] = useState(null);
   const members = gang.members || [];
   const headMan = members.find(m => m.role === 'head_man');
   const dockers  = members.filter(m => m.role === 'docker');
@@ -680,6 +862,10 @@ function GangRosterCard({ gang, onEdit, onAddMember }) {
         </div>
       </div>
 
+      {editMember && (
+        <MemberModal gangId={gang.id} member={editMember} onClose={() => setEditMember(null)} />
+      )}
+
       {/* Roster */}
       <div className="divide-y divide-gray-50">
         {slots.map(({ role, label, count }) => {
@@ -718,8 +904,12 @@ function GangRosterCard({ gang, onEdit, onAddMember }) {
                     <span className="text-xs text-gray-400">{m.employee_id}{m.phone ? ` · ${m.phone}` : ''}</span>
                   </div>
                   <MemberStatusSelect gangId={gang.id} member={m} />
+                  <button onClick={() => setEditMember(m)}
+                    className="p-1 text-gray-300 hover:text-blue-500 rounded shrink-0" title="Edit member">
+                    <Pencil size={13} />
+                  </button>
                   <button onClick={() => removeMut.mutate({ mid: m.id })}
-                    className="p-1 text-gray-300 hover:text-red-500 rounded ml-1 shrink-0">
+                    className="p-1 text-gray-300 hover:text-red-500 rounded shrink-0">
                     <X size={13} />
                   </button>
                 </div>
@@ -884,7 +1074,8 @@ function ShiftTargetModal({ day, onClose }) {
 function DashboardTab() {
   const { data, isLoading, refetch } = useQuery('gang-dashboard', () => gangApi.dashboard().then(r => r.data), { refetchInterval: 30000 });
   const { data: shiftTargets = [] } = useQuery('gang-shift-targets', gangApi.getShiftTargets);
-  const [editDay, setEditDay] = useState(null);
+  const [editDay, setEditDay]   = useState(null);
+  const [allocate, setAllocate] = useState(null);
   const qc = useQueryClient();
 
   if (isLoading) return <Spinner />;
@@ -1024,7 +1215,8 @@ function DashboardTab() {
         </div>
       )}
 
-      {editDay && <ShiftTargetModal day={editDay} onClose={() => setEditDay(null)} />}
+      {editDay  && <ShiftTargetModal day={editDay} onClose={() => setEditDay(null)} />}
+      {allocate && <AllocateModal request={allocate} onClose={() => setAllocate(null)} />}
 
       {/* Active Jobs */}
       {data?.active_jobs?.length > 0 && (
@@ -1072,7 +1264,7 @@ function DashboardTab() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  {['Ref','Agent','Agency','Bay','Container','Priority','Waiting'].map(h => (
+                  {['Ref','Agent','Agency','Bay','Container','Priority','Waiting',''].map(h => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -1090,6 +1282,12 @@ function DashboardTab() {
                     </td>
                     <td className="px-4 py-2.5"><Badge map={PRIORITY_STYLE} value={r.priority} /></td>
                     <td className="px-4 py-2.5 text-gray-600">{elapsed(r.created_at)}</td>
+                    <td className="px-4 py-2.5">
+                      <button onClick={() => setAllocate(r)}
+                        className="text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1 hover:bg-blue-100 whitespace-nowrap">
+                        Allocate →
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1122,8 +1320,10 @@ function DashboardTab() {
 
 // ── Requests Tab ──────────────────────────────────────────────────────────────
 function RequestsTab() {
-  const [showNew, setShowNew] = useState(false);
-  const [allocate, setAllocate] = useState(null);
+  const [showNew, setShowNew]     = useState(false);
+  const [allocate, setAllocate]   = useState(null);
+  const [editReq, setEditReq]     = useState(null);
+  const [cancelReq, setCancelReq] = useState(null);
   const [filters, setFilters] = useState({ status: '', priority: '', search: '' });
   const flt = (k,v) => setFilters(f => ({ ...f, [k]: v }));
   const fSel = 'border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500';
@@ -1132,11 +1332,6 @@ function RequestsTab() {
     ['gang-requests', filters],
     () => gangApi.listRequests({ status: filters.status||undefined, priority: filters.priority||undefined, search: filters.search||undefined }).then(r => r.data)
   );
-
-  const qc = useQueryClient();
-  const cancelMut = useMutation(gangApi.cancelRequest, {
-    onSuccess: () => { toast.success('Request cancelled.'); qc.invalidateQueries('gang-requests'); },
-  });
 
   return (
     <div className="space-y-4">
@@ -1198,7 +1393,8 @@ function RequestsTab() {
                       {r.status === 'pending' && (
                         <>
                           <button onClick={() => setAllocate(r)} className="text-xs text-blue-600 font-medium hover:underline">Allocate</button>
-                          <button onClick={() => cancelMut.mutate(r.id)} className="text-xs text-red-500 hover:underline">Cancel</button>
+                          <button onClick={() => setEditReq(r)} className="text-xs text-gray-500 font-medium hover:underline">Edit</button>
+                          <button onClick={() => setCancelReq(r)} className="text-xs text-red-500 hover:underline">Cancel</button>
                         </>
                       )}
                     </div>
@@ -1211,6 +1407,8 @@ function RequestsTab() {
       )}
       {showNew && <NewRequestModal onClose={() => setShowNew(false)} />}
       {allocate && <AllocateModal request={allocate} onClose={() => setAllocate(null)} />}
+      {editReq && <EditRequestModal request={editReq} onClose={() => setEditReq(null)} />}
+      {cancelReq && <CancelRequestModal request={cancelReq} onClose={() => setCancelReq(null)} />}
     </div>
   );
 }
@@ -1299,8 +1497,9 @@ function GangsTab() {
 function ActiveJobsTab() {
   const [filters, setFilters] = useState({ status: '', from: '', to: '' });
   const flt = (k,v) => setFilters(f => ({ ...f, [k]: v }));
-  const [delayModal, setDelayModal]  = useState(null);
+  const [delayModal, setDelayModal]       = useState(null);
   const [completeModal, setCompleteModal] = useState(null);
+  const [printChit, setPrintChit]         = useState(null);
   const fSel = 'border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500';
 
   const { data: rows = [], isLoading } = useQuery(
@@ -1379,7 +1578,7 @@ function ActiveJobsTab() {
 
                   {/* Actions */}
                   {isActive && (
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       {a.status === 'allocated' && (
                         <button onClick={() => tsMut.mutate({ id: a.id, ev: 'arrived' })}
                           className="flex items-center gap-1.5 text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-1.5 hover:bg-purple-100">
@@ -1398,10 +1597,16 @@ function ActiveJobsTab() {
                           <StopCircle size={13} /> Complete Job
                         </button>
                       )}
-                      <button onClick={() => setDelayModal(a.id)}
-                        className="flex items-center gap-1.5 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5 hover:bg-orange-100">
-                        <AlertTriangle size={13} /> Log Delay
-                        {a.delay_count > 0 && <span className="bg-orange-600 text-white rounded-full px-1.5 text-xs">{a.delay_count}</span>}
+                      {a.status === 'in_progress' && (
+                        <button onClick={() => setDelayModal(a.id)}
+                          className="flex items-center gap-1.5 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5 hover:bg-orange-100">
+                          <AlertTriangle size={13} /> Log Delay
+                          {a.delay_count > 0 && <span className="bg-orange-600 text-white rounded-full px-1.5 text-xs">{a.delay_count}</span>}
+                        </button>
+                      )}
+                      <button onClick={() => setPrintChit(a)}
+                        className="flex items-center gap-1.5 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-100">
+                        <Printer size={13} /> Print Chit
                       </button>
                     </div>
                   )}
@@ -1423,6 +1628,7 @@ function ActiveJobsTab() {
       )}
       {delayModal && <DelayModal allocationId={delayModal} onClose={() => setDelayModal(null)} />}
       {completeModal && <CompleteJobModal allocation={completeModal} onClose={() => setCompleteModal(null)} />}
+      {printChit && <PrintChitModal allocation={printChit} onClose={() => setPrintChit(null)} />}
     </div>
   );
 }
@@ -1445,13 +1651,27 @@ function PerformanceTab() {
     documentation: 'Documentation', other: 'Other',
   };
 
+  const handleExport = async () => {
+    try {
+      const blob = await gangApi.exportPerformance({ from, to });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url;
+      a.download = `GangPerformance-${from}-to-${to}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Export failed.'); }
+  };
+
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <span className="text-sm text-gray-500">Period:</span>
         <input type="date" className={fSel} value={from} onChange={e => setFrom(e.target.value)} />
         <span className="text-gray-400">→</span>
         <input type="date" className={fSel} value={to} onChange={e => setTo(e.target.value)} />
+        <button onClick={handleExport}
+          className="ml-auto flex items-center gap-2 text-sm border border-gray-200 rounded-lg px-3 py-2 hover:bg-gray-50 text-gray-600">
+          <Download size={14} /> Export Excel
+        </button>
       </div>
 
       {isLoading ? <Spinner /> : !data ? null : (
@@ -1560,13 +1780,27 @@ function AuditTab() {
     () => gangApi.getAudit({ from, to }).then(r => r.data)
   );
 
+  const handleExport = async () => {
+    try {
+      const blob = await gangApi.exportAudit({ from, to });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url;
+      a.download = `GangAudit-${from}-to-${to}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Export failed.'); }
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <span className="text-sm text-gray-500">Period:</span>
         <input type="date" className={fSel} value={from} onChange={e => setFrom(e.target.value)} />
         <span className="text-gray-400">→</span>
         <input type="date" className={fSel} value={to} onChange={e => setTo(e.target.value)} />
+        <button onClick={handleExport}
+          className="ml-auto flex items-center gap-2 text-sm border border-gray-200 rounded-lg px-3 py-2 hover:bg-gray-50 text-gray-600">
+          <Download size={14} /> Export Excel
+        </button>
       </div>
 
       {isLoading ? <Spinner /> : !rows.length ? <EmptyState message="No audit records." /> : (

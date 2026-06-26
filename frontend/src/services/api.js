@@ -309,7 +309,8 @@ export const gangApi = {
   // Requests
   listRequests:       (p)       => api.get('/gangs/requests/list', { params: p }),
   createRequest:      (d)       => api.post('/gangs/requests', d),
-  cancelRequest:      (id)      => api.patch(`/gangs/requests/${id}/cancel`),
+  updateRequest:      (id, d)   => api.put(`/gangs/requests/${id}`, d),
+  cancelRequest:      (id, d)   => api.patch(`/gangs/requests/${id}/cancel`, d),
 
   // Allocation engine
   recommend:          ()        => api.get('/gangs/engine/recommend'),
@@ -325,7 +326,9 @@ export const gangApi = {
 
   // Analytics
   getPerformance:     (p)       => api.get('/gangs/analytics/performance', { params: p }),
+  exportPerformance:  (p)       => api.get('/gangs/analytics/performance/export', { params: p, responseType: 'blob' }).then(r => r.data),
   getAudit:           (p)       => api.get('/gangs/analytics/audit', { params: p }),
+  exportAudit:        (p)       => api.get('/gangs/analytics/audit/export', { params: p, responseType: 'blob' }).then(r => r.data),
 
   // Notifications
   getNotifications:   ()        => api.get('/gangs/notifications/list'),
