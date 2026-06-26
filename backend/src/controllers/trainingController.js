@@ -1,4 +1,5 @@
-const db = require('../config/database');
+const db   = require('../config/database');
+const XLSX = require('xlsx');
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 async function getDashboard(req, res, next) {
@@ -324,6 +325,170 @@ async function getUpcoming(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Export ───────────────────────────────────────────────────────────────────
+// Exports a filtered list: one row per staff × training type combination
+async function exportRecords(req, res, next) {
+  try {
+    const { training_type_id, status, team_id } = req.query;
+
+    // Build the latest-record-per-staff-per-type CTE
+    const conds = ['s.is_active = TRUE'];
+    const params = [];
+
+    if (team_id) { params.push(team_id); conds.push(`s.team_id = $${params.length}`); }
+    if (training_type_id) { params.push(training_type_id); conds.push(`tt.id = $${params.length}`); }
+
+    // Status filter applied after computing the status from expiry_date
+    const statusFilter = {
+      current:  `lr.expiry_date > CURRENT_DATE`,
+      expired:  `lr.expiry_date <= CURRENT_DATE`,
+      due_soon: `lr.expiry_date > CURRENT_DATE AND lr.expiry_date <= CURRENT_DATE + INTERVAL '30 days'`,
+      never:    `lr.expiry_date IS NULL`,
+    }[status] || null;
+
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+
+    const { rows } = await db.query(`
+      SELECT
+        s.name                                              AS "Staff Name",
+        tm.name                                             AS "Team",
+        s.role                                              AS "Role",
+        tt.name                                             AS "Training",
+        tt.code                                             AS "Code",
+        tt.validity_months                                  AS "Validity (months)",
+        TO_CHAR(lr.completion_date, 'DD Mon YYYY')          AS "Completion Date",
+        TO_CHAR(lr.expiry_date, 'DD Mon YYYY')              AS "Expiry Date",
+        CASE
+          WHEN lr.expiry_date IS NULL                       THEN 'Never Done'
+          WHEN lr.expiry_date <= CURRENT_DATE               THEN 'Expired'
+          WHEN lr.expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 'Due Soon'
+          ELSE 'Current'
+        END                                                 AS "Status",
+        CASE
+          WHEN lr.expiry_date IS NULL THEN NULL
+          ELSE (lr.expiry_date - CURRENT_DATE)::int
+        END                                                 AS "Days Until Expiry",
+        lr.certificate_ref                                  AS "Certificate Ref",
+        lr.notes                                            AS "Notes"
+      FROM lms_staff s
+      CROSS JOIN training_types tt
+      LEFT JOIN LATERAL (
+        SELECT completion_date, expiry_date, certificate_ref, notes
+        FROM staff_training_records
+        WHERE staff_id = s.id AND training_type_id = tt.id
+        ORDER BY completion_date DESC
+        LIMIT 1
+      ) lr ON TRUE
+      LEFT JOIN lms_teams tm ON tm.id = s.team_id
+      ${where}
+      ${statusFilter ? `AND (${statusFilter})` : ''}
+      ORDER BY tm.name NULLS LAST, s.name, tt.id
+    `, params);
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'No records match the selected filters.' });
+    }
+
+    // Build workbook
+    const wb  = XLSX.utils.book_new();
+    const ws  = XLSX.utils.json_to_sheet(rows);
+
+    // Column widths
+    ws['!cols'] = [
+      { wch: 28 }, { wch: 22 }, { wch: 18 }, { wch: 36 }, { wch: 8 },
+      { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 14 }, { wch: 18 },
+      { wch: 20 }, { wch: 30 },
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Training Records');
+
+    // Build a descriptive filename
+    const { rows: typeRow } = training_type_id
+      ? await db.query(`SELECT code FROM training_types WHERE id=$1`, [training_type_id])
+      : { rows: [] };
+    const typeCode  = typeRow[0]?.code || 'All';
+    const statusStr = status ? status.replace('_', '-') : 'All';
+    const dateStr   = new Date().toISOString().slice(0, 10);
+    const filename  = `Training-${typeCode}-${statusStr}-${dateStr}.xlsx`;
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buf);
+  } catch (err) { next(err); }
+}
+
+// Exports the full compliance matrix — one row per staff, one column per training type
+async function exportMatrix(req, res, next) {
+  try {
+    const { team_id } = req.query;
+    const params = [];
+    const staffWhere = team_id
+      ? (params.push(team_id), `WHERE s.is_active=TRUE AND s.team_id=$1`)
+      : `WHERE s.is_active=TRUE`;
+
+    const [staffRes, typesRes] = await Promise.all([
+      db.query(`
+        SELECT s.id, s.name, s.role, tm.name AS team_name
+        FROM lms_staff s LEFT JOIN lms_teams tm ON tm.id=s.team_id
+        ${staffWhere}
+        ORDER BY tm.name NULLS LAST, s.name
+      `, params),
+      db.query(`SELECT * FROM training_types WHERE is_active=TRUE ORDER BY id`),
+    ]);
+
+    // Fetch latest record per staff × type
+    const { rows: records } = await db.query(`
+      SELECT DISTINCT ON (staff_id, training_type_id)
+        staff_id, training_type_id, completion_date, expiry_date
+      FROM staff_training_records
+      ORDER BY staff_id, training_type_id, completion_date DESC
+    `);
+    const recMap = {};
+    for (const r of records) {
+      if (!recMap[r.staff_id]) recMap[r.staff_id] = {};
+      recMap[r.staff_id][r.training_type_id] = r;
+    }
+
+    const today  = new Date();
+    const soon   = new Date(today); soon.setDate(today.getDate() + 30);
+
+    const sheetRows = staffRes.rows.map(s => {
+      const row = {
+        'Staff Name': s.name,
+        'Team':       s.team_name || '',
+        'Role':       s.role || '',
+      };
+      for (const t of typesRes.rows) {
+        const rec = recMap[s.id]?.[t.id];
+        let cell = 'Never Done';
+        if (rec) {
+          const exp = new Date(rec.expiry_date);
+          if      (exp <= today) cell = `Expired (${rec.expiry_date.toISOString?.().slice(0,10) ?? rec.expiry_date})`;
+          else if (exp <= soon)  cell = `Due Soon (${rec.expiry_date.toISOString?.().slice(0,10) ?? rec.expiry_date})`;
+          else                   cell = `Current (${rec.expiry_date.toISOString?.().slice(0,10) ?? rec.expiry_date})`;
+        }
+        row[`${t.code}`] = cell;
+      }
+      return row;
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(sheetRows);
+    const colWidths = [{ wch: 28 }, { wch: 22 }, { wch: 16 },
+      ...typesRes.rows.map(() => ({ wch: 20 }))];
+    ws['!cols'] = colWidths;
+    XLSX.utils.book_append_sheet(wb, ws, 'Training Matrix');
+
+    const dateStr  = new Date().toISOString().slice(0, 10);
+    const filename = `Training-Matrix-${dateStr}.xlsx`;
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buf);
+  } catch (err) { next(err); }
+}
+
 // ─── Teams list (for filter) ──────────────────────────────────────────────────
 async function listTeams(req, res, next) {
   try {
@@ -338,4 +503,5 @@ module.exports = {
   getDashboard, listTypes, createType, updateType,
   getMatrix, listRecords, createRecord, updateRecord, deleteRecord,
   getUpcoming, listTeams,
+  exportRecords, exportMatrix,
 };

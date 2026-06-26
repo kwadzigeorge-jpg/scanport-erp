@@ -6,6 +6,8 @@ const tc = require('../controllers/trainingController');
 router.use(authenticate);
 
 router.get('/dashboard',       requirePermission('training.view'),   tc.getDashboard);
+router.get('/export/records',  requirePermission('training.view'),   tc.exportRecords);
+router.get('/export/matrix',   requirePermission('training.view'),   tc.exportMatrix);
 router.get('/types',           requirePermission('training.view'),   tc.listTypes);
 router.post('/types',          requirePermission('training.manage'), tc.createType);
 router.put('/types/:id',       requirePermission('training.manage'), tc.updateType);

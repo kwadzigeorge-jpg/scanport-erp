@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { GraduationCap, CheckCircle, XCircle, Clock, AlertTriangle, Plus, X, ChevronDown, Users, BookOpen, Calendar } from 'lucide-react';
+import { GraduationCap, CheckCircle, XCircle, Clock, AlertTriangle, Plus, X, ChevronDown, Users, BookOpen, Calendar, Download, FileSpreadsheet } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { trainingApi } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -43,6 +43,174 @@ function KPICard({ label, value, sub, accent }) {
       <div className="text-2xl font-bold">{value ?? '—'}</div>
       <div className="text-sm font-medium mt-0.5">{label}</div>
       {sub && <div className="text-xs opacity-70 mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+// ─── Export Modal ─────────────────────────────────────────────────────────────
+function ExportModal({ onClose }) {
+  const { data: types  = [] } = useQuery('training:types', trainingApi.listTypes);
+  const { data: teams  = [] } = useQuery('training:teams', trainingApi.listTeams);
+
+  const [mode,   setMode]   = useState('filtered'); // 'filtered' | 'matrix'
+  const [typeId, setTypeId] = useState('');
+  const [status, setStatus] = useState('');
+  const [teamId, setTeamId] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function doExport() {
+    setLoading(true);
+    try {
+      let blob, filename;
+      if (mode === 'matrix') {
+        blob = await trainingApi.exportMatrix(teamId ? { team_id: teamId } : {});
+        const d = new Date().toISOString().slice(0,10);
+        filename = `Training-Matrix-${d}.xlsx`;
+      } else {
+        const params = {};
+        if (typeId)  params.training_type_id = typeId;
+        if (status)  params.status = status;
+        if (teamId)  params.team_id = teamId;
+        blob = await trainingApi.exportRecords(params);
+        const typeCode  = types.find(t => String(t.id) === String(typeId))?.code || 'All';
+        const statusStr = status ? status.replace('_','-') : 'All';
+        const d = new Date().toISOString().slice(0,10);
+        filename = `Training-${typeCode}-${statusStr}-${d}.xlsx`;
+      }
+      const url = URL.createObjectURL(blob);
+      const a   = document.createElement('a');
+      a.href    = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Export downloaded.');
+      onClose();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Export failed. No records may match the filters.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const STATUS_OPTIONS = [
+    { value: '',         label: 'All statuses' },
+    { value: 'expired',  label: 'Expired' },
+    { value: 'due_soon', label: 'Due Soon (next 30 days)' },
+    { value: 'current',  label: 'Current' },
+    { value: 'never',    label: 'Never Done' },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b dark:border-gray-700">
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet className="w-5 h-5 text-green-600" />
+            <h2 className="font-semibold text-gray-800 dark:text-gray-100">Export Training Data</h2>
+          </div>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400 hover:text-gray-600" /></button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Mode selector */}
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { key: 'filtered', label: 'Filtered List',   desc: 'Staff × training rows, filterable by type & status' },
+              { key: 'matrix',   label: 'Full Matrix',     desc: 'All staff in rows, each training type as a column' },
+            ].map(m => (
+              <button
+                key={m.key}
+                onClick={() => setMode(m.key)}
+                className={`text-left p-3 rounded-xl border-2 transition-colors ${
+                  mode === m.key
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                    : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'
+                }`}
+              >
+                <p className={`text-sm font-semibold ${mode === m.key ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-200'}`}>
+                  {m.label}
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5 leading-snug">{m.desc}</p>
+              </button>
+            ))}
+          </div>
+
+          {/* Team filter — both modes */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Team (optional)</label>
+            <select
+              value={teamId}
+              onChange={e => setTeamId(e.target.value)}
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+            >
+              <option value="">All teams</option>
+              {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+
+          {/* Filtered-mode filters */}
+          {mode === 'filtered' && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Training Type</label>
+                <select
+                  value={typeId}
+                  onChange={e => setTypeId(e.target.value)}
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 dark:text-gray-100"
+                >
+                  <option value="">All training types</option>
+                  {types.filter(t => t.is_active).map(t => (
+                    <option key={t.id} value={t.id}>{t.name} ({t.code})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Status Filter</label>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {STATUS_OPTIONS.map(o => (
+                    <label key={o.value} className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                      status === o.value
+                        ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                        : 'border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}>
+                      <input type="radio" name="status" value={o.value} checked={status === o.value} onChange={() => setStatus(o.value)} className="accent-blue-600" />
+                      <span className={`text-sm font-medium ${
+                        o.value === 'expired'  ? 'text-red-600' :
+                        o.value === 'due_soon' ? 'text-amber-600' :
+                        o.value === 'current'  ? 'text-green-600' :
+                        o.value === 'never'    ? 'text-gray-500' :
+                        'text-gray-700 dark:text-gray-200'
+                      }`}>{o.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Summary line */}
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+            {mode === 'matrix'
+              ? `Will export: Full compliance matrix${teamId ? ` for selected team` : ', all teams'}`
+              : `Will export: ${typeId ? types.find(t=>String(t.id)===String(typeId))?.name || 'selected type' : 'All training types'} — ${STATUS_OPTIONS.find(o=>o.value===status)?.label || 'All statuses'}${teamId ? ', selected team' : ''}`
+            }
+          </div>
+        </div>
+
+        <div className="flex gap-3 px-5 pb-5">
+          <button onClick={onClose} className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
+            Cancel
+          </button>
+          <button
+            onClick={doExport}
+            disabled={loading}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            {loading ? 'Generating…' : 'Download Excel'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -531,8 +699,9 @@ const TABS = [
 ];
 
 export default function TrainingPage() {
-  const [tab, setTab] = useState('overview');
-  const [logModal, setLogModal] = useState(null); // null | { staffId?, typeId? }
+  const [tab, setTab]             = useState('overview');
+  const [logModal, setLogModal]   = useState(null);
+  const [showExport, setShowExport] = useState(false);
   const { hasPermission } = useAuth();
   const canManage = hasPermission('training.manage');
 
@@ -551,14 +720,22 @@ export default function TrainingPage() {
             <p className="text-sm text-gray-500">Track training compliance and renewal dates</p>
           </div>
         </div>
-        {canManage && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => openLogModal()}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+            onClick={() => setShowExport(true)}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700"
           >
-            <Plus className="w-4 h-4" /> Log Training
+            <Download className="w-4 h-4 text-green-600" /> Export
           </button>
-        )}
+          {canManage && (
+            <button
+              onClick={() => openLogModal()}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4" /> Log Training
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
@@ -594,6 +771,7 @@ export default function TrainingPage() {
           onClose={() => setLogModal(null)}
         />
       )}
+      {showExport && <ExportModal onClose={() => setShowExport(false)} />}
     </div>
   );
 }

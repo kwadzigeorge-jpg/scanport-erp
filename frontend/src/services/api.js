@@ -412,6 +412,8 @@ export const trainingApi = {
   createRecord:  (data)       => api.post('/training/records', data).then(r => r.data),
   updateRecord:  (id, data)   => api.put(`/training/records/${id}`, data).then(r => r.data),
   deleteRecord:  (id)         => api.delete(`/training/records/${id}`).then(r => r.data),
+  exportRecords: (params)     => api.get('/training/export/records', { params, responseType: 'blob' }).then(r => r.data),
+  exportMatrix:  (params)     => api.get('/training/export/matrix',  { params, responseType: 'blob' }).then(r => r.data),
 };
 
 export default api;
