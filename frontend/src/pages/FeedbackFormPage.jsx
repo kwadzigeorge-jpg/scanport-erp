@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { feedbackApi } from '../services/api';
 import clsx from 'clsx';
-import { CheckCircle2, Loader2, MessageSquare, Star } from 'lucide-react';
+import { CheckCircle2, Loader2, MessageSquare, Star, Smartphone } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 const SUBMITTER_TYPES = [
   { value: 'shipping_agent',  label: 'Shipping Agent' },
@@ -190,6 +191,33 @@ export default function FeedbackFormPage() {
             />
             <span className="text-sm text-gray-700">Submit anonymously (your identity will not be recorded)</span>
           </label>
+
+          {/* QR code — shown when anonymous is toggled on */}
+          {form.is_anonymous && (
+            <div className="flex flex-col sm:flex-row items-center gap-5 bg-blue-50 border border-blue-100 rounded-2xl p-5">
+              <div className="shrink-0 p-2 bg-white rounded-xl border border-blue-100 shadow-sm">
+                <QRCodeSVG
+                  value={`${window.location.origin}/feedback`}
+                  size={120}
+                  level="M"
+                  includeMargin={false}
+                />
+              </div>
+              <div className="text-center sm:text-left space-y-1.5">
+                <div className="flex items-center gap-2 justify-center sm:justify-start">
+                  <Smartphone size={16} className="text-blue-600" />
+                  <p className="text-sm font-semibold text-blue-800">Use your own device for full privacy</p>
+                </div>
+                <p className="text-xs text-blue-700 leading-relaxed">
+                  Scan this QR code with your phone to open the feedback form on your personal device —
+                  no one can see your screen and your submission will be completely anonymous.
+                </p>
+                <p className="text-xs text-blue-500 font-mono break-all">
+                  {window.location.origin}/feedback
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Identity */}
           {!form.is_anonymous && (
