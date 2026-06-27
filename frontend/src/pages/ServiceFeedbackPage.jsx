@@ -4,10 +4,12 @@ import { feedbackApi } from '../services/api';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   MessageSquare, Search, Download, ChevronRight, X,
   CheckCircle2, Clock, AlertTriangle, CircleDot, MinusCircle,
   BarChart2, Users, Tag, FileText, StickyNote, ExternalLink,
+  Star, QrCode, Printer,
 } from 'lucide-react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -53,6 +55,70 @@ const TYPE_LABELS = {
   port_authority: 'Port Authority',
   other:          'Other',
 };
+
+// ─── Star display ─────────────────────────────────────────────────────────────
+function StarDisplay({ rating, size = 12 }) {
+  if (!rating) return <span className="text-xs text-gray-300">—</span>;
+  return (
+    <span className="flex items-center gap-0.5">
+      {[1,2,3,4,5].map(n => (
+        <Star key={n} size={size} className={n <= rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-200'} />
+      ))}
+    </span>
+  );
+}
+
+// ─── QR Code Modal ────────────────────────────────────────────────────────────
+function QRModal({ onClose }) {
+  const url = `${window.location.origin}/feedback`;
+  const handlePrint = () => {
+    const win = window.open('', '_blank', 'width=500,height=600');
+    win.document.write(`<!DOCTYPE html><html><head><title>Feedback QR Code</title>
+      <style>
+        body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
+        h1 { font-size: 22px; margin-bottom: 4px; }
+        p { color: #666; font-size: 14px; margin-bottom: 24px; }
+        .url { font-size: 12px; color: #888; margin-top: 16px; word-break: break-all; }
+        img { border: 4px solid #e5e7eb; border-radius: 16px; padding: 16px; }
+      </style>
+    </head><body>
+      <h1>Share Your Feedback</h1>
+      <p>Scan the QR code to submit your service feedback</p>
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(url)}" width="250" height="250" />
+      <p class="url">${url}</p>
+    </body></html>`);
+    win.document.close();
+    win.print();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-sm font-semibold text-gray-900">Feedback QR Code</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div className="p-8 flex flex-col items-center gap-4">
+          <p className="text-xs text-gray-500 text-center">Share this code at port gates and offices for anonymous feedback</p>
+          <div className="p-4 border-2 border-gray-100 rounded-2xl">
+            <QRCodeSVG value={url} size={200} level="M" includeMargin />
+          </div>
+          <p className="text-xs text-gray-400 font-mono text-center break-all">{url}</p>
+          <div className="flex gap-3 w-full">
+            <a href={url} target="_blank" rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+              <ExternalLink size={13} /> Open Form
+            </a>
+            <button onClick={handlePrint}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700">
+              <Printer size={13} /> Print / Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Shared UI ─────────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
@@ -163,6 +229,12 @@ function DetailModal({ id, onClose }) {
           <PriorityBadge priority={data.priority} />
           <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{CATEGORY_LABELS[data.category] || data.category}</span>
           <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{TYPE_LABELS[data.submitter_type] || data.submitter_type}</span>
+          {data.overall_rating && (
+            <span className="flex items-center gap-1 bg-yellow-50 px-2 py-0.5 rounded-full">
+              <StarDisplay rating={data.overall_rating} size={11} />
+              <span className="text-xs text-yellow-700 font-medium ml-0.5">{data.overall_rating}/5</span>
+            </span>
+          )}
         </div>
 
         <div>
@@ -296,6 +368,7 @@ export default function ServiceFeedbackPage() {
   const [filters, setFilters] = useState({ status: '', category: '', submitter_type: '', search: '', from: '', to: '' });
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
+  const [showQR, setShowQR] = useState(false);
 
   const setFilter = (k, v) => { setFilters(f => ({ ...f, [k]: v })); setPage(1); };
 
@@ -331,6 +404,10 @@ export default function ServiceFeedbackPage() {
           <p className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">Stakeholder service feedback submissions</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => setShowQR(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-100 text-gray-700 text-xs font-semibold hover:bg-gray-200 transition-colors">
+            <QrCode size={13} /> QR Code
+          </button>
           <a
             href="/feedback"
             target="_blank"
@@ -349,7 +426,7 @@ export default function ServiceFeedbackPage() {
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
         <StatCard label="Total"        value={kpi.total}        color="gray"   />
         <StatCard label="New"          value={kpi.new}          color="blue"   />
         <StatCard label="Acknowledged" value={kpi.acknowledged} color="amber"  />
@@ -357,6 +434,15 @@ export default function ServiceFeedbackPage() {
         <StatCard label="Resolved"     value={kpi.resolved}     color="green"  />
         <StatCard label="Closed"       value={kpi.closed}       color="gray"   />
         <StatCard label="Today"        value={kpi.today}        color="blue"   />
+        <div className="bg-yellow-50 rounded-xl p-4 flex flex-col gap-1">
+          <div className="flex items-center gap-1">
+            {[1,2,3,4,5].map(n => (
+              <Star key={n} size={12} className={n <= Math.round(kpi.avg_rating || 0) ? 'fill-yellow-400 text-yellow-400' : 'text-yellow-200'} />
+            ))}
+          </div>
+          <p className="text-2xl font-bold text-yellow-700">{kpi.avg_rating || '—'}</p>
+          <p className="text-xs font-medium text-yellow-600 opacity-80">Avg Rating{kpi.rated_count ? ` (${kpi.rated_count})` : ''}</p>
+        </div>
       </div>
 
       {/* Tab bar */}
@@ -469,7 +555,7 @@ export default function ServiceFeedbackPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 dark:bg-slate-700/50">
                     <tr>
-                      {['Ref', 'Submitted', 'Submitter', 'Category', 'Priority', 'Subject', 'Status', ''].map(h => (
+                      {['Ref', 'Submitted', 'Submitter', 'Category', 'Priority', 'Rating', 'Subject', 'Status', ''].map(h => (
                         <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -492,6 +578,7 @@ export default function ServiceFeedbackPage() {
                           {CATEGORY_LABELS[row.category] || row.category}
                         </td>
                         <td className="px-4 py-3"><PriorityBadge priority={row.priority} /></td>
+                        <td className="px-4 py-3"><StarDisplay rating={row.overall_rating} /></td>
                         <td className="px-4 py-3 max-w-xs">
                           <p className="truncate text-gray-800 dark:text-slate-200 text-xs">{row.subject}</p>
                           {row.assigned_to_name && <p className="text-xs text-gray-400">→ {row.assigned_to_name}</p>}
@@ -522,6 +609,7 @@ export default function ServiceFeedbackPage() {
       )}
 
       {selectedId && <DetailModal id={selectedId} onClose={() => setSelectedId(null)} />}
+      {showQR && <QRModal onClose={() => setShowQR(false)} />}
     </div>
   );
 }

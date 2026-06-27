@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { feedbackApi } from '../services/api';
 import clsx from 'clsx';
-import { CheckCircle2, Loader2, MessageSquare } from 'lucide-react';
+import { CheckCircle2, Loader2, MessageSquare, Star } from 'lucide-react';
 
 const SUBMITTER_TYPES = [
   { value: 'shipping_agent',  label: 'Shipping Agent' },
@@ -43,6 +43,41 @@ function Field({ label, required, children, hint }) {
   );
 }
 
+const RATING_LABELS = ['', 'Very Poor', 'Poor', 'Average', 'Good', 'Excellent'];
+const RATING_COLORS = ['', 'text-red-500', 'text-orange-500', 'text-yellow-500', 'text-blue-500', 'text-green-500'];
+
+function StarRating({ value, onChange }) {
+  const [hovered, setHovered] = useState(0);
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <div className="flex gap-2">
+        {[1, 2, 3, 4, 5].map(n => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onChange(value === n ? 0 : n)}
+            onMouseEnter={() => setHovered(n)}
+            onMouseLeave={() => setHovered(0)}
+            className="transition-transform hover:scale-110 focus:outline-none"
+            aria-label={`${n} star${n > 1 ? 's' : ''}`}
+          >
+            <Star
+              size={36}
+              className={clsx('transition-colors', (hovered || value) >= n
+                ? 'fill-yellow-400 text-yellow-400'
+                : 'text-gray-300'
+              )}
+            />
+          </button>
+        ))}
+      </div>
+      <p className={clsx('text-sm font-semibold h-5', RATING_COLORS[(hovered || value)] || 'text-transparent')}>
+        {RATING_LABELS[(hovered || value)] || '—'}
+      </p>
+    </div>
+  );
+}
+
 export default function FeedbackFormPage() {
   const [form, setForm] = useState({
     is_anonymous: false,
@@ -56,6 +91,7 @@ export default function FeedbackFormPage() {
     subject: '',
     description: '',
     date_occurred: '',
+    overall_rating: 0,
   });
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(null);
@@ -107,7 +143,7 @@ export default function FeedbackFormPage() {
             Please keep this reference number for follow-up.
           </p>
           <button
-            onClick={() => { setSubmitted(null); setForm({ is_anonymous: false, submitter_name: '', submitter_email: '', submitter_phone: '', submitter_type: '', company_name: '', category: '', priority: 'normal', subject: '', description: '', date_occurred: '' }); }}
+            onClick={() => { setSubmitted(null); setForm({ is_anonymous: false, submitter_name: '', submitter_email: '', submitter_phone: '', submitter_type: '', company_name: '', category: '', priority: 'normal', subject: '', description: '', date_occurred: '', overall_rating: 0 }); }}
             className="w-full mt-2 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
           >
             Submit Another
@@ -134,6 +170,15 @@ export default function FeedbackFormPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-lg p-8 space-y-6">
+
+          {/* Overall satisfaction rating — most prominent */}
+          <div className="text-center space-y-1 py-2">
+            <p className="text-sm font-semibold text-gray-700">Overall satisfaction with our service</p>
+            <p className="text-xs text-gray-400 mb-3">Tap a star to rate (optional)</p>
+            <StarRating value={form.overall_rating} onChange={v => set('overall_rating', v)} />
+          </div>
+
+          <hr className="border-gray-100" />
 
           {/* Anonymous toggle */}
           <label className="flex items-center gap-3 cursor-pointer select-none">

@@ -13,7 +13,7 @@ async function submitFeedback(req, res, next) {
     const {
       is_anonymous, submitter_name, submitter_email, submitter_phone,
       submitter_type, company_name,
-      category, priority, subject, description, date_occurred,
+      category, priority, subject, description, date_occurred, overall_rating,
     } = req.body;
 
     const name = is_anonymous ? 'Anonymous' : (submitter_name || '').trim();
@@ -21,12 +21,15 @@ async function submitFeedback(req, res, next) {
     if (!subject?.trim())       return res.status(400).json({ error: 'Subject is required.' });
     if (!description?.trim())   return res.status(400).json({ error: 'Description is required.' });
 
+    const rating = overall_rating ? parseInt(overall_rating) : null;
+    if (rating !== null && (rating < 1 || rating > 5)) return res.status(400).json({ error: 'Rating must be 1–5.' });
+
     const { rows } = await db.query(`
       INSERT INTO service_feedback
         (is_anonymous, submitter_name, submitter_email, submitter_phone,
          submitter_type, company_name, category, priority,
-         subject, description, date_occurred, source_ip)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         subject, description, date_occurred, overall_rating, source_ip)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
       RETURNING id, ref, status, created_at
     `, [
       is_anonymous || false,
@@ -40,6 +43,7 @@ async function submitFeedback(req, res, next) {
       subject.trim(),
       description.trim(),
       date_occurred || null,
+      rating,
       req.ip || null,
     ]);
 
@@ -58,7 +62,9 @@ async function getDashboard(req, res, next) {
         COUNT(*) FILTER (WHERE status='under_review')::int     AS under_review,
         COUNT(*) FILTER (WHERE status='resolved')::int         AS resolved,
         COUNT(*) FILTER (WHERE status='closed')::int           AS closed,
-        COUNT(*) FILTER (WHERE DATE(created_at)=CURRENT_DATE)::int AS today
+        COUNT(*) FILTER (WHERE DATE(created_at)=CURRENT_DATE)::int AS today,
+        ROUND(AVG(overall_rating)::NUMERIC, 1)                 AS avg_rating,
+        COUNT(overall_rating)::int                             AS rated_count
       FROM service_feedback
     `);
 
@@ -104,7 +110,7 @@ async function listFeedback(req, res, next) {
     const { rows } = await db.query(`
       SELECT id, ref, is_anonymous, submitter_name, submitter_type,
              company_name, category, priority, subject, status,
-             assigned_to_name, created_at
+             overall_rating, assigned_to_name, created_at
       FROM service_feedback ${where}
       ORDER BY created_at DESC
       LIMIT $${params.length+1} OFFSET $${params.length+2}
@@ -196,8 +202,10 @@ async function exportFeedback(req, res, next) {
       SELECT ref, submitter_type AS "Stakeholder Type", company_name AS "Company",
              CASE WHEN is_anonymous THEN 'Anonymous' ELSE submitter_name END AS "Name",
              submitter_email AS "Email", submitter_phone AS "Phone",
-             category AS "Category", priority AS "Priority", subject AS "Subject",
-             description AS "Description", date_occurred AS "Date of Incident",
+             category AS "Category", priority AS "Priority",
+             overall_rating AS "Overall Rating (1-5)",
+             subject AS "Subject", description AS "Description",
+             date_occurred AS "Date of Incident",
              status AS "Status", assigned_to_name AS "Assigned To",
              resolution_notes AS "Resolution", resolved_date AS "Resolved Date",
              created_at AS "Submitted At"
