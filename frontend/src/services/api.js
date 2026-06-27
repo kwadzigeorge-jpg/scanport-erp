@@ -419,4 +419,15 @@ export const trainingApi = {
   exportMatrix:  (params)     => api.get('/training/export/matrix',  { params, responseType: 'blob' }).then(r => r.data),
 };
 
+// ─── Integrity Reports ────────────────────────────────────────────────────────
+export const integrityApi = {
+  submit:       (d)    => api.post('/integrity', d).then(r => r.data),
+  dashboard:    ()     => api.get('/integrity/dashboard').then(r => r.data),
+  list:         (p)    => api.get('/integrity', { params: p }).then(r => r.data),
+  get:          (id)   => api.get(`/integrity/${id}`).then(r => r.data),
+  changeStatus: (id, d) => api.post(`/integrity/${id}/status`, d).then(r => r.data),
+  addNote:      (id, d) => api.post(`/integrity/${id}/note`, d).then(r => r.data),
+  export:       ()     => api.get('/integrity/export', { responseType: 'blob' }).then(r => r.data),
+};
+
 export default api;

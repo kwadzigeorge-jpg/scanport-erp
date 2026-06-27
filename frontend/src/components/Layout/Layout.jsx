@@ -8,7 +8,7 @@ import {
   LayoutDashboard, ClipboardList,
   BarChart3, Settings, LogOut, Menu, X, Bell, LayoutGrid,
   FlaskConical, MapPin, CalendarDays, Package, Boxes, ShieldCheck, Scale,
-  Sun, Moon, MessageSquare, KeyRound, Eye, EyeOff, Users, GraduationCap, Truck,
+  Sun, Moon, MessageSquare, KeyRound, Eye, EyeOff, Users, GraduationCap, Truck, ShieldAlert,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -25,6 +25,7 @@ const navItems = [
   { to: '/grievances',      icon: Scale,           label: 'Grievances' },
   { to: '/gang-allocation', icon: Users,           label: 'Gang Allocation', roles: ['admin', 'supervisor'] },
   { to: '/service-feedback', icon: MessageSquare,  label: 'Svc Feedback', permission: 'feedback.view' },
+  { to: '/integrity',        icon: ShieldAlert,    label: 'Integrity',    permission: 'integrity.view' },
   { to: '/admin',        icon: Settings,        label: 'Admin',         role: 'admin' },
   { to: '/leave',        icon: CalendarDays,    label: 'Leave Mgmt',    roles: ['admin', 'supervisor'] },
   { to: '/training',     icon: GraduationCap,   label: 'Staff Training', roles: ['admin', 'supervisor'] },

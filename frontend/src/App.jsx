@@ -23,8 +23,10 @@ import ServiceFeedbackPage   from './pages/ServiceFeedbackPage';
 import FeedbackFormPage      from './pages/FeedbackFormPage';
 import GangAllocationPage    from './pages/GangAllocationPage';
 import FleetPage             from './pages/FleetPage';
-import StatementPage         from './pages/StatementPage';
-import NotFoundPage          from './pages/NotFoundPage';
+import StatementPage              from './pages/StatementPage';
+import IntegrityReportPage        from './pages/IntegrityReportPage';
+import IntegrityManagementPage    from './pages/IntegrityManagementPage';
+import NotFoundPage               from './pages/NotFoundPage';
 
 function ProtectedRoute({ children, roles, permission }) {
   const { user, loading, hasRole, hasPermission } = useAuth();
@@ -41,6 +43,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/feedback" element={<FeedbackFormPage />} />
+      <Route path="/integrity-report" element={<IntegrityReportPage />} />
       <Route path="/statement/:token" element={<StatementPage />} />
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
 
@@ -63,6 +66,7 @@ function AppRoutes() {
         <Route path="gang-allocation"  element={<ProtectedRoute roles={['admin', 'supervisor']}><GangAllocationPage /></ProtectedRoute>} />
         <Route path="training"         element={<ProtectedRoute roles={['admin', 'supervisor']}><TrainingPage /></ProtectedRoute>} />
         <Route path="fleet"            element={<ProtectedRoute roles={['admin', 'supervisor']}><FleetPage /></ProtectedRoute>} />
+        <Route path="integrity"        element={<ProtectedRoute permission="integrity.view"><IntegrityManagementPage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />
