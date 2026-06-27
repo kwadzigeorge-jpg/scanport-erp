@@ -192,7 +192,7 @@ export default function IntegrityReportPage() {
               type="text"
               value={form.amount_mentioned}
               onChange={e => set('amount_mentioned', e.target.value)}
-              placeholder='e.g. "GHS 200", "USD 50", "I don\'t know the exact amount"'
+              placeholder={`e.g. "GHS 200", "USD 50", "I don't know the exact amount"`}
               className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
             />
           </Field>
