@@ -333,13 +333,14 @@ async function updateDriver(req, res, next) {
 // ─── Mileage Logs ─────────────────────────────────────────────────────────────
 async function listMileageLogs(req, res, next) {
   try {
-    const { vehicle_id, driver_id, status, from, to, limit=50, offset=0 } = req.query;
+    const { vehicle_id, driver_id, status, trip_status, from, to, limit=50, offset=0 } = req.query;
     const cond = ['1=1']; const p = [];
-    if (vehicle_id) { p.push(vehicle_id); cond.push(`ml.vehicle_id=$${p.length}`); }
-    if (driver_id)  { p.push(driver_id);  cond.push(`ml.driver_id=$${p.length}`); }
-    if (status)     { p.push(status);     cond.push(`ml.status=$${p.length}`); }
-    if (from)       { p.push(from);       cond.push(`ml.trip_date>=$${p.length}`); }
-    if (to)         { p.push(to);         cond.push(`ml.trip_date<=$${p.length}`); }
+    if (vehicle_id)  { p.push(vehicle_id);  cond.push(`ml.vehicle_id=$${p.length}`); }
+    if (driver_id)   { p.push(driver_id);   cond.push(`ml.driver_id=$${p.length}`); }
+    if (status)      { p.push(status);      cond.push(`ml.status=$${p.length}`); }
+    if (trip_status) { p.push(trip_status); cond.push(`ml.trip_status=$${p.length}`); }
+    if (from)        { p.push(from);        cond.push(`ml.trip_date>=$${p.length}`); }
+    if (to)          { p.push(to);          cond.push(`ml.trip_date<=$${p.length}`); }
     p.push(parseInt(limit)); p.push(parseInt(offset));
     const { rows } = await db.query(`
       SELECT ml.*, v.registration_number, v.make, v.model, d.full_name AS driver_name
@@ -347,10 +348,77 @@ async function listMileageLogs(req, res, next) {
       JOIN fleet_vehicles v ON v.id=ml.vehicle_id
       JOIN fleet_drivers  d ON d.id=ml.driver_id
       WHERE ${cond.join(' AND ')}
-      ORDER BY ml.trip_date DESC, ml.created_at DESC
+      ORDER BY ml.trip_status ASC, ml.trip_date DESC, ml.created_at DESC
       LIMIT $${p.length-1} OFFSET $${p.length}
     `, p);
     return res.json(rows);
+  } catch (err) { next(err); }
+}
+
+async function startTrip(req, res, next) {
+  try {
+    const { vehicle_id, driver_id, trip_date, trip_start_time, odometer_start, trip_purpose, origin } = req.body;
+    if (!vehicle_id || !driver_id || odometer_start == null || !trip_purpose)
+      return res.status(400).json({ error: 'vehicle_id, driver_id, odometer_start and trip_purpose are required.' });
+
+    const { rows: [log] } = await db.query(`
+      INSERT INTO fleet_mileage_logs
+        (vehicle_id, driver_id, trip_date, trip_start_time,
+         odometer_start, trip_purpose, origin, trip_status, recorded_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'open',$8) RETURNING *
+    `, [vehicle_id, driver_id,
+        trip_date || new Date().toISOString().slice(0,10),
+        trip_start_time || null, odometer_start,
+        trip_purpose, origin || null, req.user.id]);
+
+    await logAudit(req, 'fleet:trip_started', 'fleet_mileage_logs', log.id, { vehicle_id, odometer_start });
+    return res.status(201).json(log);
+  } catch (err) { next(err); }
+}
+
+async function endTrip(req, res, next) {
+  try {
+    const { odometer_end, trip_end_time, destination, fuel_added_litres, fuel_cost, remarks } = req.body;
+    if (odometer_end == null) return res.status(400).json({ error: 'odometer_end is required.' });
+
+    const { rows: [existing] } = await db.query(
+      `SELECT * FROM fleet_mileage_logs WHERE id=$1 AND trip_status='open'`,
+      [req.params.id]
+    );
+    if (!existing) return res.status(404).json({ error: 'Trip not found or already completed.' });
+
+    if (parseFloat(odometer_end) < parseFloat(existing.odometer_start))
+      return res.status(400).json({ error: 'Odometer end cannot be less than odometer start.' });
+
+    const dist       = parseFloat(odometer_end) - parseFloat(existing.odometer_start);
+    const is_flagged = dist > 500 || dist === 0;
+    const flag_reason = dist > 500 ? `Abnormal distance: ${dist.toFixed(1)} km in one trip`
+                      : dist === 0 ? 'Zero distance trip' : null;
+
+    const { rows: [log] } = await db.query(`
+      UPDATE fleet_mileage_logs SET
+        odometer_end=$1, trip_end_time=$2, destination=$3,
+        fuel_added_litres=$4, fuel_cost=$5, remarks=$6,
+        is_flagged=$7, flag_reason=$8,
+        trip_status='completed', updated_at=NOW()
+      WHERE id=$9 RETURNING *
+    `, [odometer_end, trip_end_time || null, destination || null,
+        fuel_added_litres || null, fuel_cost || null, remarks || null,
+        is_flagged, flag_reason, req.params.id]);
+
+    await db.query(
+      `UPDATE fleet_vehicles SET current_odometer_km=GREATEST(current_odometer_km,$1),updated_at=NOW() WHERE id=$2`,
+      [odometer_end, existing.vehicle_id]
+    );
+
+    if (is_flagged) {
+      await db.query(
+        `INSERT INTO fleet_alerts (vehicle_id,alert_type,message) VALUES ($1,'abnormal_mileage',$2)`,
+        [existing.vehicle_id, `Flagged trip: ${flag_reason}`]
+      );
+    }
+    await logAudit(req, 'fleet:trip_ended', 'fleet_mileage_logs', log.id, { odometer_end, distance_km: dist });
+    return res.json(log);
   } catch (err) { next(err); }
 }
 
@@ -557,7 +625,7 @@ module.exports = {
   listVehicles, getVehicle, createVehicle, updateVehicle, setVehicleStatus,
   assignDriver, unassignDriver,
   listDrivers, createDriver, updateDriver,
-  listMileageLogs, createMileageLog, approveMileageLog, rejectMileageLog,
+  listMileageLogs, startTrip, endTrip, createMileageLog, approveMileageLog, rejectMileageLog,
   listFuelLogs, createFuelLog,
   listMaintenance, createMaintenance, updateMaintenance,
   listAlerts, dismissAlert,

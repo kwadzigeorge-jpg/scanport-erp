@@ -267,7 +267,131 @@ function DriverModal({ driver, onClose }) {
   );
 }
 
-// ── Mileage Log Modal ─────────────────────────────────────────────────────────
+// ── Start Trip Modal ──────────────────────────────────────────────────────────
+function StartTripModal({ onClose }) {
+  const qc = useQueryClient();
+  const { data: vehicles = [] } = useQuery('fleet-vehicles', () => fleetApi.listVehicles());
+  const { data: drivers  = [] } = useQuery('fleet-drivers',  () => fleetApi.listDrivers());
+  const [f, setF] = useState({
+    vehicle_id: '', driver_id: '', trip_date: new Date().toISOString().slice(0,10),
+    trip_start_time: '', odometer_start: '', trip_purpose: '', origin: '',
+  });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+
+  const mut = useMutation(fleetApi.startTrip, {
+    onSuccess: () => { toast.success('Trip started.'); qc.invalidateQueries('fleet-mileage'); qc.invalidateQueries('fleet-dashboard'); onClose(); },
+    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+  });
+
+  return (
+    <Modal title="Start Trip" onClose={onClose} wide>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Vehicle" required>
+          <select className={sel} value={f.vehicle_id} onChange={e => set('vehicle_id', e.target.value)}>
+            <option value="">— Select vehicle —</option>
+            {vehicles.map(v => <option key={v.id} value={v.id}>{v.registration_number} — {v.make} {v.model}</option>)}
+          </select>
+        </Field>
+        <Field label="Driver" required>
+          <select className={sel} value={f.driver_id} onChange={e => set('driver_id', e.target.value)}>
+            <option value="">— Select driver —</option>
+            {drivers.map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
+          </select>
+        </Field>
+        <Field label="Trip Date" required>
+          <input type="date" className={inp} value={f.trip_date} onChange={e => set('trip_date', e.target.value)} />
+        </Field>
+        <Field label="Start Time">
+          <input type="time" className={inp} value={f.trip_start_time} onChange={e => set('trip_start_time', e.target.value)} />
+        </Field>
+        <Field label="Odometer Start (km)" required>
+          <input type="number" className={inp} value={f.odometer_start} onChange={e => set('odometer_start', e.target.value)} min="0" />
+        </Field>
+        <Field label="Origin">
+          <input className={inp} value={f.origin} onChange={e => set('origin', e.target.value)} placeholder="Departure location" />
+        </Field>
+        <div className="col-span-2">
+          <Field label="Trip Purpose" required>
+            <input className={inp} value={f.trip_purpose} onChange={e => set('trip_purpose', e.target.value)} placeholder="Official duty / Field inspection…" />
+          </Field>
+        </div>
+      </div>
+      <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-gray-100">
+        <button onClick={onClose} className="btn-secondary text-sm py-2 px-4">Cancel</button>
+        <button onClick={() => mut.mutate(f)} disabled={mut.isLoading || !f.vehicle_id || !f.driver_id || !f.odometer_start || !f.trip_purpose} className="btn-primary text-sm py-2 px-4">
+          {mut.isLoading ? 'Starting…' : 'Start Trip'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── End Trip Modal ────────────────────────────────────────────────────────────
+function EndTripModal({ trip, onClose }) {
+  const qc = useQueryClient();
+  const [f, setF] = useState({
+    odometer_end: '', trip_end_time: '', destination: '',
+    fuel_added_litres: '', fuel_cost: '', remarks: '',
+  });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const dist = f.odometer_end && trip.odometer_start
+    ? Math.max(0, parseFloat(f.odometer_end) - parseFloat(trip.odometer_start)).toFixed(1)
+    : null;
+
+  const mut = useMutation(d => fleetApi.endTrip(trip.id, d), {
+    onSuccess: () => { toast.success('Trip ended.'); qc.invalidateQueries('fleet-mileage'); qc.invalidateQueries('fleet-dashboard'); onClose(); },
+    onError: e => toast.error(e.response?.data?.error || 'Failed.'),
+  });
+
+  return (
+    <Modal title="End Trip" onClose={onClose} wide>
+      {/* Trip summary */}
+      <div className="bg-blue-50 rounded-xl p-3 mb-4 grid grid-cols-3 gap-3 text-xs text-blue-800">
+        <div><span className="font-semibold block">Vehicle</span>{trip.registration_number}</div>
+        <div><span className="font-semibold block">Driver</span>{trip.driver_name}</div>
+        <div><span className="font-semibold block">Odometer Start</span>{fmtNum(trip.odometer_start, 0)} km</div>
+        <div className="col-span-3"><span className="font-semibold">Purpose:</span> {trip.trip_purpose}</div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Odometer End (km)" required>
+          <input type="number" className={inp} value={f.odometer_end} onChange={e => set('odometer_end', e.target.value)} min={trip.odometer_start} />
+        </Field>
+        <Field label="End Time">
+          <input type="time" className={inp} value={f.trip_end_time} onChange={e => set('trip_end_time', e.target.value)} />
+        </Field>
+        {dist !== null && (
+          <div className="col-span-2">
+            <div className={clsx('rounded-lg px-3 py-2 text-sm font-medium', parseFloat(dist) > 500 ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200')}>
+              Distance: {dist} km {parseFloat(dist) > 500 && '⚠ Will be flagged for review'}
+            </div>
+          </div>
+        )}
+        <Field label="Destination">
+          <input className={inp} value={f.destination} onChange={e => set('destination', e.target.value)} />
+        </Field>
+        <Field label="Fuel Added (L)">
+          <input type="number" className={inp} value={f.fuel_added_litres} onChange={e => set('fuel_added_litres', e.target.value)} step="0.01" />
+        </Field>
+        <Field label="Fuel Cost (GHS)">
+          <input type="number" className={inp} value={f.fuel_cost} onChange={e => set('fuel_cost', e.target.value)} />
+        </Field>
+        <div className="col-span-2">
+          <Field label="Remarks">
+            <textarea className={inp} rows={2} value={f.remarks} onChange={e => set('remarks', e.target.value)} />
+          </Field>
+        </div>
+      </div>
+      <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-gray-100">
+        <button onClick={onClose} className="btn-secondary text-sm py-2 px-4">Cancel</button>
+        <button onClick={() => mut.mutate(f)} disabled={mut.isLoading || !f.odometer_end} className="btn-primary text-sm py-2 px-4">
+          {mut.isLoading ? 'Saving…' : 'End Trip'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── (legacy) Full Trip Modal — kept for back-compat ───────────────────────────
 function MileageModal({ onClose }) {
   const qc = useQueryClient();
   const { data: vehicles = [] } = useQuery('fleet-vehicles', () => fleetApi.listVehicles());
@@ -706,12 +830,24 @@ function DriversTab() {
 // ── Mileage Tab ───────────────────────────────────────────────────────────────
 function MileageTab() {
   const qc = useQueryClient();
-  const [showModal, setShowModal] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('');
+  const [showStart, setShowStart] = useState(false);
+  const [endTrip, setEndTrip]     = useState(null);
+  const [filter, setFilter]       = useState('');
+
+  const queryParams = filter === 'open'
+    ? { trip_status: 'open' }
+    : filter === 'pending'
+    ? { status: 'pending', trip_status: 'completed' }
+    : filter === 'approved'
+    ? { status: 'approved' }
+    : filter === 'rejected'
+    ? { status: 'rejected' }
+    : {};
+
   const { data: logs = [], isLoading } = useQuery(
-    ['fleet-mileage', statusFilter],
-    () => fleetApi.listMileage({ status: statusFilter || undefined }),
-    { keepPreviousData: true }
+    ['fleet-mileage', filter],
+    () => fleetApi.listMileage(queryParams),
+    { keepPreviousData: true, refetchInterval: filter === 'open' || filter === '' ? 30000 : false }
   );
 
   const approveMut = useMutation(fleetApi.approveMileage, {
@@ -725,47 +861,72 @@ function MileageTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <select className={clsx(sel, 'w-40')} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          <option value="">All statuses</option>
-          <option value="pending">Pending</option>
+        <select className={clsx(sel, 'w-48')} value={filter} onChange={e => setFilter(e.target.value)}>
+          <option value="">All trips</option>
+          <option value="open">In Progress</option>
+          <option value="pending">Pending Approval</option>
           <option value="approved">Approved</option>
           <option value="rejected">Rejected</option>
         </select>
-        <button onClick={() => setShowModal(true)} className="btn-primary flex items-center gap-2 text-sm py-2 px-4 ml-auto">
-          <Plus size={14}/> Log Trip
+        <button onClick={() => setShowStart(true)} className="btn-primary flex items-center gap-2 text-sm py-2 px-4 ml-auto">
+          <Plus size={14}/> Start Trip
         </button>
       </div>
 
-      {isLoading ? <Spinner /> : !logs.length ? <EmptyState msg="No mileage logs found." /> : (
+      {isLoading ? <Spinner /> : !logs.length ? <EmptyState msg="No trips found." /> : (
         <div className="overflow-x-auto rounded-xl border border-gray-200">
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['Date','Vehicle','Driver','Start','End','Distance','Purpose','Origin → Dest','Fuel','Status','Actions'].map(h => (
+                {['Date','Vehicle','Driver','Odo Start','Odo End','Distance','Purpose','Route','Fuel','Status',''].map(h => (
                   <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {logs.map(l => (
-                <tr key={l.id} className={clsx('hover:bg-gray-50', l.is_flagged && 'bg-red-50/40')}>
+                <tr key={l.id} className={clsx(
+                  'hover:bg-gray-50',
+                  l.trip_status === 'open' && 'bg-blue-50/40',
+                  l.is_flagged && 'bg-red-50/40'
+                )}>
                   <td className="px-3 py-2.5 text-gray-600 text-xs whitespace-nowrap">{fmtDate(l.trip_date)}</td>
                   <td className="px-3 py-2.5 font-semibold text-gray-800 text-xs">{l.registration_number}</td>
                   <td className="px-3 py-2.5 text-gray-700 text-xs">{l.driver_name}</td>
-                  <td className="px-3 py-2.5 text-gray-600 text-xs">{fmtNum(l.odometer_start,0)}</td>
-                  <td className="px-3 py-2.5 text-gray-600 text-xs">{fmtNum(l.odometer_end,0)}</td>
-                  <td className="px-3 py-2.5 text-xs font-semibold text-gray-800">{fmtNum(l.distance_km,1)} km</td>
+                  <td className="px-3 py-2.5 text-gray-600 text-xs">{fmtNum(l.odometer_start,0)} km</td>
+                  <td className="px-3 py-2.5 text-gray-600 text-xs">
+                    {l.trip_status === 'open' ? <span className="text-blue-500 italic text-xs">on trip…</span> : `${fmtNum(l.odometer_end,0)} km`}
+                  </td>
+                  <td className="px-3 py-2.5 text-xs font-semibold text-gray-800">
+                    {l.trip_status === 'open' ? '—' : `${fmtNum(l.distance_km,1)} km`}
+                  </td>
                   <td className="px-3 py-2.5 text-gray-600 text-xs max-w-[140px] truncate">{l.trip_purpose}</td>
-                  <td className="px-3 py-2.5 text-gray-500 text-xs">{l.origin && l.destination ? `${l.origin} → ${l.destination}` : l.origin || l.destination || '—'}</td>
+                  <td className="px-3 py-2.5 text-gray-500 text-xs">
+                    {l.origin && l.destination ? `${l.origin} → ${l.destination}`
+                      : l.origin ? `From ${l.origin}`
+                      : l.destination ? `To ${l.destination}` : '—'}
+                  </td>
                   <td className="px-3 py-2.5 text-gray-500 text-xs">{l.fuel_added_litres ? `${l.fuel_added_litres}L` : '—'}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex flex-col gap-0.5">
-                      <Badge map={MILEAGE_STATUS} value={l.status}/>
-                      {l.is_flagged && <span className="text-xs text-red-500">⚠ Flagged</span>}
-                    </div>
+                  <td className="px-3 py-2.5 min-w-[110px]">
+                    {l.trip_status === 'open' ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse inline-block" />
+                        In Progress
+                      </span>
+                    ) : (
+                      <div className="flex flex-col gap-0.5">
+                        <Badge map={MILEAGE_STATUS} value={l.status}/>
+                        {l.is_flagged && <span className="text-xs text-red-500">⚠ Flagged</span>}
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2.5">
-                    {l.status === 'pending' && (
+                    {l.trip_status === 'open' ? (
+                      <button onClick={() => setEndTrip(l)}
+                        className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg font-medium whitespace-nowrap">
+                        End Trip
+                      </button>
+                    ) : l.status === 'pending' ? (
                       <div className="flex gap-1">
                         <button onClick={() => approveMut.mutate(l.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Approve">
                           <CheckCircle size={13}/>
@@ -774,7 +935,7 @@ function MileageTab() {
                           <XCircle size={13}/>
                         </button>
                       </div>
-                    )}
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -782,7 +943,9 @@ function MileageTab() {
           </table>
         </div>
       )}
-      {showModal && <MileageModal onClose={() => setShowModal(false)} />}
+
+      {showStart && <StartTripModal onClose={() => setShowStart(false)} />}
+      {endTrip   && <EndTripModal trip={endTrip} onClose={() => setEndTrip(null)} />}
     </div>
   );
 }

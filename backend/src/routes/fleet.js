@@ -19,6 +19,8 @@ router.put('/drivers/:id',   requirePermission('fleet.manage'), fc.updateDriver)
 
 // ── Mileage (before /:id) ─────────────────────────────────────────────────────
 router.get('/mileage/list',           requirePermission('fleet.view'),    fc.listMileageLogs);
+router.post('/mileage/start',         requirePermission('fleet.log'),     fc.startTrip);
+router.patch('/mileage/:id/end',      requirePermission('fleet.log'),     fc.endTrip);
 router.post('/mileage',               requirePermission('fleet.log'),     fc.createMileageLog);
 router.patch('/mileage/:id/approve',  requirePermission('fleet.approve'), fc.approveMileageLog);
 router.patch('/mileage/:id/reject',   requirePermission('fleet.approve'), fc.rejectMileageLog);

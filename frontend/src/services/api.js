@@ -356,6 +356,8 @@ export const fleetApi = {
   createDriver:       (d)       => api.post('/fleet/drivers', d).then(r => r.data),
   updateDriver:       (id, d)   => api.put(`/fleet/drivers/${id}`, d).then(r => r.data),
   listMileage:        (p)       => api.get('/fleet/mileage/list', { params: p }).then(r => r.data),
+  startTrip:          (d)       => api.post('/fleet/mileage/start', d).then(r => r.data),
+  endTrip:            (id, d)   => api.patch(`/fleet/mileage/${id}/end`, d).then(r => r.data),
   createMileage:      (d)       => api.post('/fleet/mileage', d).then(r => r.data),
   approveMileage:     (id)      => api.patch(`/fleet/mileage/${id}/approve`).then(r => r.data),
   rejectMileage:      (id, d)   => api.patch(`/fleet/mileage/${id}/reject`, d).then(r => r.data),
