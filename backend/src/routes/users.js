@@ -3,7 +3,7 @@ const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
 const {
   listUsers, getUser, createUser, updateUser,
-  resetUserPassword, unlockUser,
+  resetUserPassword, unlockUser, deleteUser,
   killUserSessions, listActiveSessions, killSession,
   listRoles, listPermissions, getUserStats,
 } = require('../controllers/userController');
@@ -23,5 +23,6 @@ router.put('/:id',                                 requirePermission('user.edit'
 router.post('/:id/reset-password',                 requirePermission('user.password_reset'),resetUserPassword);
 router.post('/:id/unlock',                         requirePermission('user.unlock'),        unlockUser);
 router.delete('/:id/sessions',                     requirePermission('user.session_kill'),  killUserSessions);
+router.delete('/:id',                              requirePermission('user.delete'),        deleteUser);
 
 module.exports = router;

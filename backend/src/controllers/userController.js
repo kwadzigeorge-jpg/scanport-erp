@@ -239,9 +239,66 @@ async function getUserStats(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function deleteUser(req, res, next) {
+  try {
+    const { id } = req.params;
+
+    // Cannot delete yourself
+    if (id === req.user.id)
+      return res.status(400).json({ error: 'You cannot delete your own account.' });
+
+    const { rows: [target] } = await db.query(
+      `SELECT u.id, u.full_name, u.username, u.email, r.name AS role
+       FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=$1`, [id]
+    );
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+
+    // Prevent deleting the last admin
+    if (target.role === 'admin') {
+      const { rows: [{ cnt }] } = await db.query(
+        `SELECT COUNT(*) AS cnt FROM users u JOIN roles r ON r.id=u.role_id
+         WHERE r.name='admin' AND u.is_active=TRUE AND u.id <> $1`, [id]
+      );
+      if (parseInt(cnt) === 0)
+        return res.status(400).json({ error: 'Cannot delete the last active admin account.' });
+    }
+
+    // Kill all sessions first
+    await db.query('DELETE FROM user_sessions WHERE user_id=$1', [id]);
+
+    // Try hard delete; if FK constraints block it, do a soft purge instead
+    try {
+      await db.query('DELETE FROM users WHERE id=$1', [id]);
+      await logAudit(req, 'user:deleted', 'users', id, { username: target.username, full_name: target.full_name });
+      return res.json({ deleted: true, message: `${target.full_name} has been permanently deleted.` });
+    } catch (fkErr) {
+      if (fkErr.code !== '23503') throw fkErr; // re-throw non-FK errors
+
+      // Soft purge — anonymise the account so the username/email slots are freed
+      // and audit history referencing the ID still resolves to something readable
+      const stamp = Date.now();
+      await db.query(`
+        UPDATE users SET
+          username          = 'deleted_' || $1,
+          email             = 'deleted_' || $1 || '@removed.invalid',
+          full_name         = 'Deleted User',
+          password_hash     = '',
+          is_active         = FALSE,
+          password_reset_token    = NULL,
+          password_reset_expires  = NULL,
+          updated_at        = NOW()
+        WHERE id=$2
+      `, [stamp, id]);
+
+      await logAudit(req, 'user:purged', 'users', id, { username: target.username, full_name: target.full_name });
+      return res.json({ deleted: false, purged: true, message: `${target.full_name}'s account has been permanently deactivated and anonymised. Their activity history has been preserved.` });
+    }
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   listUsers, getUser, createUser, updateUser,
-  resetUserPassword, unlockUser,
+  resetUserPassword, unlockUser, deleteUser,
   killUserSessions, listActiveSessions, killSession,
   listRoles, listPermissions, getUserStats,
 };

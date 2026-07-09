@@ -84,6 +84,7 @@ function UsersPanel() {
   const [editUser,   setEditUser]     = useState(null);
   const [detailUser, setDetailUser]   = useState(null);
   const [resetUser,  setResetUser]    = useState(null);
+  const [deleteUser, setDeleteUser]   = useState(null);
   const [filters, setFilters]         = useState({ search: '', role: '', is_active: '' });
 
   const { data, isLoading, refetch } = useQuery(
@@ -252,6 +253,11 @@ function UsersPanel() {
                           color={u.is_active ? 'green' : 'gray'}
                         />
                       )}
+                      {/* Delete */}
+                      {u.id !== currentUser?.id && (
+                        <ActionBtn title="Delete Account" icon={Trash2}
+                          onClick={() => setDeleteUser(u)} color="red" />
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -281,8 +287,90 @@ function UsersPanel() {
           onSaved={() => { qc.invalidateQueries('admin-users'); setEditUser(null); }}
         />
       )}
-      {resetUser && <ResetPasswordModal user={resetUser} onClose={() => setResetUser(null)} />}
+      {resetUser  && <ResetPasswordModal user={resetUser} onClose={() => setResetUser(null)} />}
       {detailUser && <UserDetailDrawer userId={detailUser.id} onClose={() => setDetailUser(null)} />}
+      {deleteUser && (
+        <DeleteUserModal
+          user={deleteUser}
+          onClose={() => setDeleteUser(null)}
+          onDeleted={() => {
+            qc.invalidateQueries('admin-users');
+            qc.invalidateQueries('user-stats');
+            setDeleteUser(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Delete User Modal ────────────────────────────────────────────────────────
+function DeleteUserModal({ user, onClose, onDeleted }) {
+  const [confirm, setConfirm] = useState('');
+  const mut = useMutation(() => usersApi.deleteUser(user.id), {
+    onSuccess: (data) => {
+      toast.success(data.message);
+      onDeleted();
+    },
+    onError: (err) => toast.error(err.response?.data?.error || 'Delete failed.'),
+  });
+
+  const ready = confirm === user.username;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-sm font-semibold text-red-700 flex items-center gap-2">
+            <Trash2 size={15} /> Delete Account
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <AlertTriangle size={18} className="text-red-600 shrink-0" />
+            <p className="text-sm text-red-700">
+              This is <strong>permanent and cannot be undone</strong>. All sessions will be terminated immediately.
+            </p>
+          </div>
+
+          <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-1">
+            <p className="text-xs text-gray-500">Account to be deleted</p>
+            <p className="font-semibold text-gray-900">{user.full_name}</p>
+            <p className="text-xs text-gray-400">@{user.username} · {user.email}</p>
+            <span className={clsx('inline-block text-xs px-2 py-0.5 rounded-full font-medium capitalize mt-1',
+              { admin: 'bg-red-100 text-red-700', supervisor: 'bg-purple-100 text-purple-700' }[user.role] || 'bg-gray-100 text-gray-600'
+            )}>{user.role?.replace('_', ' ')}</span>
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-gray-600">
+              Type <span className="font-mono font-bold text-gray-900">{user.username}</span> to confirm
+            </label>
+            <input
+              autoFocus
+              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-red-500"
+              placeholder={user.username}
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && ready && mut.mutate()}
+            />
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose}
+              className="flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
+              Cancel
+            </button>
+            <button
+              onClick={() => mut.mutate()}
+              disabled={!ready || mut.isLoading}
+              className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors disabled:opacity-40">
+              {mut.isLoading ? 'Deleting…' : 'Delete Account'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

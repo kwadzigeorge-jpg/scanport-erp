@@ -47,6 +47,7 @@ export const usersApi = {
   resetPassword:    (id, d)  => api.post(`/users/${id}/reset-password`, d),
   unlock:           (id)     => api.post(`/users/${id}/unlock`),
   killSessions:     (id)     => api.delete(`/users/${id}/sessions`),
+  deleteUser:       (id)     => api.delete(`/users/${id}`).then(r => r.data),
   roles:            ()       => api.get('/users/roles'),
   permissions:      ()       => api.get('/users/permissions'),
   stats:            ()       => api.get('/users/stats'),
