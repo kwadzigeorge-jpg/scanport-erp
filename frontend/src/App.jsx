@@ -26,6 +26,7 @@ import FleetPage             from './pages/FleetPage';
 import StatementPage              from './pages/StatementPage';
 import IntegrityReportPage        from './pages/IntegrityReportPage';
 import IntegrityManagementPage    from './pages/IntegrityManagementPage';
+import MarshalDeploymentPage      from './pages/MarshalDeploymentPage';
 import NotFoundPage               from './pages/NotFoundPage';
 
 function ProtectedRoute({ children, roles, permission }) {
@@ -66,7 +67,8 @@ function AppRoutes() {
         <Route path="gang-allocation"  element={<ProtectedRoute roles={['admin', 'supervisor']}><GangAllocationPage /></ProtectedRoute>} />
         <Route path="training"         element={<ProtectedRoute roles={['admin', 'supervisor']}><TrainingPage /></ProtectedRoute>} />
         <Route path="fleet"            element={<ProtectedRoute roles={['admin', 'supervisor']}><FleetPage /></ProtectedRoute>} />
-        <Route path="integrity"        element={<ProtectedRoute permission="integrity.view"><IntegrityManagementPage /></ProtectedRoute>} />
+        <Route path="integrity"          element={<ProtectedRoute permission="integrity.view"><IntegrityManagementPage /></ProtectedRoute>} />
+        <Route path="marshal-deployment" element={<ProtectedRoute permission="marshal.view"><MarshalDeploymentPage /></ProtectedRoute>} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

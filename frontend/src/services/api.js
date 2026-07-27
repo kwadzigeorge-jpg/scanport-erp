@@ -433,4 +433,29 @@ export const integrityApi = {
   export:       ()     => api.get('/integrity/export', { responseType: 'blob' }).then(r => r.data),
 };
 
+export const marshalApi = {
+  // Gangs
+  listGangs:    ()          => api.get('/marshal/gangs').then(r => r.data),
+  listMembers:  (gangId)    => api.get(`/marshal/gangs/${gangId}/members`).then(r => r.data),
+  addMember:    (gangId, d) => api.post(`/marshal/gangs/${gangId}/members`, d).then(r => r.data),
+  deleteMember: (gangId, memberId) => api.delete(`/marshal/gangs/${gangId}/members/${memberId}`).then(r => r.data),
+
+  // Deployments
+  getDeploymentView: (p)  => api.get('/marshal/deployments', { params: p }).then(r => r.data),
+  createDeployment:  (d)  => api.post('/marshal/deployments', d).then(r => r.data),
+  closeDeployment:   (id) => api.post(`/marshal/deployments/${id}/close`).then(r => r.data),
+  deleteDeployment:  (id) => api.delete(`/marshal/deployments/${id}`).then(r => r.data),
+
+  // Attendance
+  toggleAttendance: (id)     => api.patch(`/marshal/attendance/${id}/toggle`).then(r => r.data),
+
+  // Overtime
+  getOvertimeReport: (p)  => api.get('/marshal/overtime', { params: p }).then(r => r.data),
+  recordOvertime:    (d)  => api.post('/marshal/overtime', d).then(r => r.data),
+  removeOvertime:    (id) => api.delete(`/marshal/overtime/${id}`).then(r => r.data),
+
+  // Dashboard
+  dashboard: () => api.get('/marshal/dashboard').then(r => r.data),
+};
+
 export default api;

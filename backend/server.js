@@ -62,6 +62,7 @@ app.use('/api/training',    require('./src/routes/training'));
 app.use('/api/fleet',       require('./src/routes/fleet'));
 app.use('/api/statements',  require('./src/routes/statements'));
 app.use('/api/integrity',   require('./src/routes/integrity'));
+app.use('/api/marshal',     require('./src/routes/marshal'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
