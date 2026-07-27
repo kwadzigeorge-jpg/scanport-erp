@@ -219,7 +219,7 @@ function SetupModal({ preArea, date, shift, gangs, onClose, onCreated }) {
             <select value={gangId} onChange={e => setGangId(e.target.value)}
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">Select a gang…</option>
-              {gangs.map(g => <option key={g.id} value={g.id}>{g.name} ({g.member_count} members)</option>)}
+              {gangs.map(g => <option key={g.id} value={g.id}>{g.name} — {g.scan_count} scan / {g.intrusive_count} intrusive</option>)}
             </select>
           </div>
           <div>
@@ -335,7 +335,7 @@ function OvertimeModal({ date, shift, deployments, onClose, onRecorded }) {
 // ── Member Management Modal ───────────────────────────────────────────────────
 function MemberModal({ gang, onClose }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ full_name: '', employee_id: '', position_no: '', role: 'marshal' });
+  const [form, setForm] = useState({ full_name: '', employee_id: '', position_no: '', role: 'marshal', group_type: 'SCAN' });
   const { data: members = [], isLoading } = useQuery(
     ['marshal-members', gang.id],
     () => marshalApi.listMembers(gang.id)
@@ -346,7 +346,7 @@ function MemberModal({ gang, onClose }) {
     {
       onSuccess: () => {
         toast.success('Member added.');
-        setForm({ full_name: '', employee_id: '', position_no: '', role: 'marshal' });
+        setForm(p => ({ full_name: '', employee_id: '', position_no: '', role: 'marshal', group_type: p.group_type }));
         qc.invalidateQueries(['marshal-members', gang.id]);
         qc.invalidateQueries('marshal-gangs');
       },
@@ -367,6 +367,9 @@ function MemberModal({ gang, onClose }) {
   );
 
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const scanMembers      = members.filter(m => m.group_type === 'SCAN');
+  const intrusiveMembers = members.filter(m => m.group_type === 'INTRUSIVE');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -389,10 +392,15 @@ function MemberModal({ gang, onClose }) {
               <input type="number" placeholder="Position No *" value={form.position_no} onChange={e => f('position_no', e.target.value)}
                 className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               <select value={form.role} onChange={e => f('role', e.target.value)}
-                className="col-span-2 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="marshal">Marshal</option>
                 <option value="headman">Head Man</option>
                 <option value="foreman">Foreman</option>
+              </select>
+              <select value={form.group_type} onChange={e => f('group_type', e.target.value)}
+                className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="SCAN">Scan Marshal</option>
+                <option value="INTRUSIVE">Intrusive</option>
               </select>
             </div>
             <button onClick={() => addMut.mutate()}
@@ -402,29 +410,40 @@ function MemberModal({ gang, onClose }) {
             </button>
           </div>
 
-          {/* Member list */}
+          {/* Member list — split by group */}
           {isLoading ? <p className="text-xs text-center text-gray-400">Loading…</p> : (
-            <div className="space-y-1">
-              {members.map(m => (
-                <div key={m.id} className="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2">
-                  <span className="w-6 h-6 rounded-full bg-white border text-xs font-bold flex items-center justify-center text-gray-600">
-                    {m.position_no}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{m.full_name}</p>
-                    {m.employee_id && <p className="text-xs text-gray-400">{m.employee_id}</p>}
+            <>
+              {[{ label: 'Scan Marshals', items: scanMembers, badge: 'bg-blue-100 text-blue-700' },
+                { label: 'Intrusive',     items: intrusiveMembers, badge: 'bg-purple-100 text-purple-700' }
+              ].map(({ label, items, badge }) => (
+                <div key={label}>
+                  <p className={clsx('text-[10px] font-bold uppercase tracking-wider px-1 mb-1.5', badge.split(' ')[1])}>
+                    {label} ({items.length})
+                  </p>
+                  <div className="space-y-1">
+                    {items.map(m => (
+                      <div key={m.id} className="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2">
+                        <span className="w-6 h-6 rounded-full bg-white border text-xs font-bold flex items-center justify-center text-gray-600">
+                          {m.position_no}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{m.full_name}</p>
+                          {m.employee_id && <p className="text-xs text-gray-400">{m.employee_id}</p>}
+                        </div>
+                        <span className="text-[10px] font-semibold bg-white border rounded-full px-2 py-0.5 text-gray-500 capitalize">
+                          {m.role}
+                        </span>
+                        <button onClick={() => delMut.mutate(m.id)}
+                          className="text-gray-300 hover:text-red-500 transition-colors">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                    {!items.length && <p className="text-xs text-gray-400 px-1 pb-1">None</p>}
                   </div>
-                  <span className="text-[10px] font-semibold bg-white border rounded-full px-2 py-0.5 text-gray-500 capitalize">
-                    {m.role}
-                  </span>
-                  <button onClick={() => delMut.mutate(m.id)}
-                    className="text-gray-300 hover:text-red-500 transition-colors">
-                    <Trash2 size={13} />
-                  </button>
                 </div>
               ))}
-              {!members.length && <p className="text-xs text-center text-gray-400 py-3">No members yet</p>}
-            </div>
+            </>
           )}
         </div>
       </div>
@@ -511,7 +530,7 @@ function GangRosterPanel({ gangs, onManage }) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-semibold text-gray-900">{g.name}</p>
-                <p className="text-xs text-gray-400">{g.member_count} active members</p>
+                <p className="text-xs text-gray-400">{g.scan_count} scan · {g.intrusive_count} intrusive</p>
               </div>
               <span className={clsx('text-xs font-bold px-2 py-1 rounded-full', gc.badge)}>{g.code}</span>
             </div>

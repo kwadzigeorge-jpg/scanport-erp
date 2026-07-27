@@ -6,7 +6,9 @@ async function listGangs(req, res, next) {
   try {
     const { rows } = await db.query(`
       SELECT g.id, g.name, g.code, g.color, g.is_active,
-             COUNT(m.id) FILTER (WHERE m.is_active) AS member_count
+             COUNT(m.id) FILTER (WHERE m.is_active) AS member_count,
+             COUNT(m.id) FILTER (WHERE m.is_active AND m.group_type='SCAN')      AS scan_count,
+             COUNT(m.id) FILTER (WHERE m.is_active AND m.group_type='INTRUSIVE') AS intrusive_count
       FROM scan_gangs g
       LEFT JOIN scan_gang_members m ON m.gang_id = g.id
       GROUP BY g.id ORDER BY g.id
@@ -17,32 +19,34 @@ async function listGangs(req, res, next) {
 
 async function listMembers(req, res, next) {
   try {
+    const { group_type } = req.query;
     const { rows } = await db.query(`
-      SELECT id, gang_id, full_name, employee_id, position_no, role, is_active
+      SELECT id, gang_id, full_name, employee_id, position_no, role, group_type, is_active
       FROM scan_gang_members
       WHERE gang_id = $1
-      ORDER BY position_no
-    `, [req.params.gangId]);
+        AND ($2::varchar IS NULL OR group_type = $2)
+      ORDER BY group_type, position_no
+    `, [req.params.gangId, group_type || null]);
     res.json(rows);
   } catch (err) { next(err); }
 }
 
 async function addMember(req, res, next) {
   try {
-    const { full_name, employee_id, position_no, role = 'marshal' } = req.body;
+    const { full_name, employee_id, position_no, role = 'marshal', group_type = 'SCAN' } = req.body;
     const { gangId } = req.params;
     if (!full_name || !position_no) {
       return res.status(400).json({ error: 'full_name and position_no are required.' });
     }
     const { rows } = await db.query(`
-      INSERT INTO scan_gang_members (gang_id, full_name, employee_id, position_no, role)
-      VALUES ($1,$2,$3,$4,$5)
+      INSERT INTO scan_gang_members (gang_id, full_name, employee_id, position_no, role, group_type)
+      VALUES ($1,$2,$3,$4,$5,$6)
       RETURNING *
-    `, [gangId, full_name.trim(), employee_id?.trim() || null, position_no, role]);
+    `, [gangId, full_name.trim(), employee_id?.trim() || null, position_no, role, group_type]);
     await logAudit(req, 'marshal:member_added', 'scan_gang_members', rows[0].id, { gangId, full_name });
     res.status(201).json(rows[0]);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Position number already taken in this gang.' });
+    if (err.code === '23505') return res.status(409).json({ error: 'Position number already taken in this gang/group.' });
     next(err);
   }
 }
@@ -140,10 +144,11 @@ async function createDeployment(req, res, next) {
 
     const dep = rows[0];
 
-    // Auto-create attendance stubs for all active members of this gang
+    // Enrol the right crew: INTRUSIVE area → INTRUSIVE group, else SCAN group
+    const groupType = area === 'INTRUSIVE' ? 'INTRUSIVE' : 'SCAN';
     const { rows: members } = await db.query(
-      'SELECT id FROM scan_gang_members WHERE gang_id=$1 AND is_active=TRUE ORDER BY position_no',
-      [gang_id]
+      'SELECT id FROM scan_gang_members WHERE gang_id=$1 AND is_active=TRUE AND group_type=$2 ORDER BY position_no',
+      [gang_id, groupType]
     );
 
     if (members.length) {
