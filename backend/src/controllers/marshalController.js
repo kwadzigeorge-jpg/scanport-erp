@@ -17,6 +17,22 @@ async function listGangs(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function listAllMembers(req, res, next) {
+  try {
+    const { group_type } = req.query;
+    const { rows } = await db.query(`
+      SELECT m.id, m.gang_id, m.full_name, m.employee_id, m.position_no, m.role, m.group_type,
+             g.name AS gang_name, g.code AS gang_code, g.color AS gang_color
+      FROM scan_gang_members m
+      JOIN scan_gangs g ON g.id = m.gang_id
+      WHERE m.is_active = TRUE
+        AND ($1::varchar IS NULL OR m.group_type = $1)
+      ORDER BY g.id, m.position_no
+    `, [group_type || null]);
+    res.json(rows);
+  } catch (err) { next(err); }
+}
+
 async function listMembers(req, res, next) {
   try {
     const { group_type } = req.query;
@@ -130,12 +146,11 @@ async function getDeploymentView(req, res, next) {
 
 async function createDeployment(req, res, next) {
   try {
-    const { deployment_date, shift, area, gang_id, notes } = req.body;
+    const { deployment_date, shift, area, gang_id, notes, member_ids } = req.body;
     if (!deployment_date || !shift || !area || !gang_id) {
       return res.status(400).json({ error: 'deployment_date, shift, area and gang_id are required.' });
     }
 
-    // Insert deployment
     const { rows } = await db.query(`
       INSERT INTO marshal_deployments (deployment_date, shift, area, gang_id, opened_by, notes)
       VALUES ($1,$2,$3,$4,$5,$6)
@@ -143,25 +158,36 @@ async function createDeployment(req, res, next) {
     `, [deployment_date, shift, area, gang_id, req.user.id, notes || null]);
 
     const dep = rows[0];
+    let enrolledCount = 0;
 
-    // Enrol the right crew: INTRUSIVE area → INTRUSIVE group, else SCAN group
-    const groupType = area === 'INTRUSIVE' ? 'INTRUSIVE' : 'SCAN';
-    const { rows: members } = await db.query(
-      'SELECT id FROM scan_gang_members WHERE gang_id=$1 AND is_active=TRUE AND group_type=$2 ORDER BY position_no',
-      [gang_id, groupType]
-    );
-
-    if (members.length) {
-      const vals = members.map((m, i) => `($1, $${i + 2})`).join(',');
+    if (Array.isArray(member_ids) && member_ids.length > 0) {
+      // Explicit member list supplied by the supervisor (supports substitutes from any gang)
+      const vals = member_ids.map((_, i) => `($1, $${i + 2})`).join(',');
       await db.query(
         `INSERT INTO marshal_attendance (deployment_id, member_id) VALUES ${vals} ON CONFLICT DO NOTHING`,
-        [dep.id, ...members.map(m => m.id)]
+        [dep.id, ...member_ids]
       );
+      enrolledCount = member_ids.length;
+    } else {
+      // Auto-enrol: INTRUSIVE area → INTRUSIVE group, IMPORTS/EXPORTS → SCAN group
+      const groupType = area === 'INTRUSIVE' ? 'INTRUSIVE' : 'SCAN';
+      const { rows: members } = await db.query(
+        'SELECT id FROM scan_gang_members WHERE gang_id=$1 AND is_active=TRUE AND group_type=$2 ORDER BY position_no',
+        [gang_id, groupType]
+      );
+      if (members.length) {
+        const vals = members.map((_, i) => `($1, $${i + 2})`).join(',');
+        await db.query(
+          `INSERT INTO marshal_attendance (deployment_id, member_id) VALUES ${vals} ON CONFLICT DO NOTHING`,
+          [dep.id, ...members.map(m => m.id)]
+        );
+      }
+      enrolledCount = members.length;
     }
 
     await logAudit(req, 'marshal:deployment_created', 'marshal_deployments', dep.id,
-      { date: deployment_date, shift, area, gang_id });
-    res.status(201).json({ ...dep, members_enrolled: members.length });
+      { date: deployment_date, shift, area, gang_id, enrolledCount });
+    res.status(201).json({ ...dep, members_enrolled: enrolledCount });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'A deployment already exists for this area/shift/date.' });
     next(err);
@@ -344,7 +370,7 @@ async function getDashboard(req, res, next) {
 }
 
 module.exports = {
-  listGangs, listMembers, addMember, updateMember, deleteMember,
+  listGangs, listAllMembers, listMembers, addMember, updateMember, deleteMember,
   getDeploymentView, createDeployment, closeDeployment, deleteDeployment,
   toggleAttendance, updateAttendanceNote,
   recordOvertime, removeOvertime, getOvertimeReport,

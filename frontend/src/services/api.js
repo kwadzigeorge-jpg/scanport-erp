@@ -435,8 +435,9 @@ export const integrityApi = {
 
 export const marshalApi = {
   // Gangs
-  listGangs:    ()          => api.get('/marshal/gangs').then(r => r.data),
-  listMembers:  (gangId)    => api.get(`/marshal/gangs/${gangId}/members`).then(r => r.data),
+  listGangs:       ()             => api.get('/marshal/gangs').then(r => r.data),
+  listAllMembers:  (group_type)   => api.get('/marshal/members', { params: { group_type } }).then(r => r.data),
+  listMembers:     (gangId)       => api.get(`/marshal/gangs/${gangId}/members`).then(r => r.data),
   addMember:    (gangId, d) => api.post(`/marshal/gangs/${gangId}/members`, d).then(r => r.data),
   deleteMember: (gangId, memberId) => api.delete(`/marshal/gangs/${gangId}/members/${memberId}`).then(r => r.data),
 

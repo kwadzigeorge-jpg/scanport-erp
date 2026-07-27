@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { marshalApi } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -179,12 +179,66 @@ function AreaColumn({ area, deployment, gangs, onSetup, onClose, onDelete, onTog
 
 // ── Setup Modal ───────────────────────────────────────────────────────────────
 function SetupModal({ preArea, date, shift, gangs, onClose, onCreated }) {
-  const [area,   setArea]   = useState(preArea || 'IMPORTS');
-  const [gangId, setGangId] = useState('');
-  const [notes,  setNotes]  = useState('');
+  const [area,            setArea]            = useState(preArea || 'IMPORTS');
+  const [selected,        setSelected]        = useState(new Set());
+  const [primaryGangId,   setPrimaryGangId]   = useState(null);
+  const [notes,           setNotes]           = useState('');
+
+  const groupType = area === 'INTRUSIVE' ? 'INTRUSIVE' : 'SCAN';
+
+  const { data: allMembers = [], isLoading: membersLoading } = useQuery(
+    ['marshal-all-members', groupType],
+    () => marshalApi.listAllMembers(groupType),
+    { staleTime: 60000 }
+  );
+
+  // Reset selection whenever groupType changes (area switched between SCAN/INTRUSIVE)
+  useEffect(() => {
+    setSelected(new Set());
+    setPrimaryGangId(null);
+  }, [groupType]);
+
+  // Members keyed by gang
+  const membersByGang = useMemo(() =>
+    gangs.map(g => ({ ...g, members: allMembers.filter(m => m.gang_id === g.id) })),
+    [gangs, allMembers]
+  );
+
+  const toggleGang = (gang) => {
+    const ids = gang.members.map(m => m.id);
+    const allChecked = ids.every(id => selected.has(id));
+    const next = new Set(selected);
+    if (allChecked) {
+      ids.forEach(id => next.delete(id));
+      if (primaryGangId === gang.id) setPrimaryGangId(null);
+    } else {
+      ids.forEach(id => next.add(id));
+      if (!primaryGangId) setPrimaryGangId(gang.id);
+    }
+    setSelected(next);
+  };
+
+  const toggleMember = (memberId, gangId) => {
+    const next = new Set(selected);
+    if (next.has(memberId)) {
+      next.delete(memberId);
+    } else {
+      next.add(memberId);
+      if (!primaryGangId) setPrimaryGangId(gangId);
+    }
+    setSelected(next);
+  };
+
+  const effectiveGangId = primaryGangId ||
+    (membersByGang.find(g => g.members.some(m => selected.has(m.id)))?.id ?? null);
 
   const mut = useMutation(
-    () => marshalApi.createDeployment({ deployment_date: date, shift, area, gang_id: parseInt(gangId), notes }),
+    () => marshalApi.createDeployment({
+      deployment_date: date, shift, area,
+      gang_id: effectiveGangId,
+      notes: notes || undefined,
+      member_ids: Array.from(selected),
+    }),
     {
       onSuccess: () => { toast.success(`${area} deployment created.`); onCreated(); onClose(); },
       onError:   e  => toast.error(e.response?.data?.error || 'Failed.'),
@@ -193,46 +247,136 @@ function SetupModal({ preArea, date, shift, gangs, onClose, onCreated }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
-        <div className="flex items-center justify-between px-5 py-4 border-b">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[88vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
           <h2 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
             <Plus size={15} /> Assign Gang to Area
           </h2>
           <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
         </div>
-        <div className="p-5 space-y-4">
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Area</label>
-            <div className="flex gap-2">
-              {AREAS.map(a => (
-                <button key={a} onClick={() => setArea(a)}
-                  className={clsx('flex-1 py-2 rounded-xl text-xs font-semibold border transition-all',
-                    area === a ? `${AREA_CFG[a].bg} text-white border-transparent` : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                  )}>
-                  {AREA_CFG[a].icon} {a}
-                </button>
-              ))}
+
+        {/* Area picker */}
+        <div className="px-5 pt-4 pb-2 shrink-0">
+          <label className="text-xs font-medium text-gray-500 block mb-1.5">Area</label>
+          <div className="flex gap-2">
+            {AREAS.map(a => (
+              <button key={a} onClick={() => setArea(a)}
+                className={clsx('flex-1 py-2 rounded-xl text-xs font-semibold border transition-all',
+                  area === a ? `${AREA_CFG[a].bg} text-white border-transparent` : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                )}>
+                {AREA_CFG[a].icon} {a}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Member picker */}
+        <div className="flex-1 overflow-y-auto px-5 pb-2 space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-gray-500">
+              Select members — tick substitutes from any gang
+            </label>
+            {selected.size > 0 && (
+              <span className="text-xs font-bold text-blue-600">{selected.size} selected</span>
+            )}
+          </div>
+
+          {membersLoading ? (
+            <div className="flex justify-center py-10">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
             </div>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Gang</label>
-            <select value={gangId} onChange={e => setGangId(e.target.value)}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="">Select a gang…</option>
-              {gangs.map(g => <option key={g.id} value={g.id}>{g.name} — {g.scan_count} scan / {g.intrusive_count} intrusive</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Notes (optional)</label>
-            <input value={notes} onChange={e => setNotes(e.target.value)}
-              placeholder="e.g. reduced capacity today"
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div className="flex gap-3 pt-1">
-            <button onClick={onClose} className="flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600">Cancel</button>
-            <button onClick={() => mut.mutate()} disabled={!gangId || mut.isLoading}
-              className="flex-1 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold disabled:opacity-40">
-              {mut.isLoading ? 'Creating…' : 'Create'}
+          ) : membersByGang.map(gang => {
+            const checkedCount = gang.members.filter(m => selected.has(m.id)).length;
+            const allChecked   = gang.members.length > 0 && checkedCount === gang.members.length;
+            const someChecked  = checkedCount > 0 && !allChecked;
+            const gc = GANG_COLOR[gang.color] || GANG_COLOR.blue;
+
+            return (
+              <div key={gang.id} className="rounded-xl border overflow-hidden">
+                {/* Gang header */}
+                <button
+                  onClick={() => toggleGang(gang)}
+                  className="flex items-center gap-3 w-full px-4 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors"
+                >
+                  <span className={clsx(
+                    'w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all',
+                    allChecked ? 'bg-blue-600 border-blue-600' : someChecked ? 'bg-blue-100 border-blue-400' : 'border-gray-300'
+                  )}>
+                    {(allChecked || someChecked) && (
+                      <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-none stroke-current text-white stroke-2">
+                        {allChecked
+                          ? <path d="M1 4l3 3 5-6" strokeLinecap="round" strokeLinejoin="round"/>
+                          : <path d="M2 4h6" strokeLinecap="round"/>
+                        }
+                      </svg>
+                    )}
+                  </span>
+                  <span className={clsx('text-xs font-bold px-1.5 py-0.5 rounded-full', gc.badge)}>
+                    {gang.code}
+                  </span>
+                  <span className="text-sm font-semibold text-gray-800">{gang.name}</span>
+                  <span className="ml-auto text-xs text-gray-400">
+                    {checkedCount}/{gang.members.length}
+                  </span>
+                </button>
+
+                {/* Member rows */}
+                {gang.members.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-3">No members in this group</p>
+                ) : (
+                  <div>
+                    {gang.members.map(m => {
+                      const roleTag = m.role === 'headman' ? 'HM' : m.role === 'foreman' ? 'FM' : null;
+                      const isChecked = selected.has(m.id);
+                      return (
+                        <label
+                          key={m.id}
+                          className={clsx(
+                            'flex items-center gap-3 px-4 py-2 cursor-pointer border-t border-gray-100 transition-colors',
+                            isChecked ? 'bg-blue-50' : 'hover:bg-gray-50'
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleMember(m.id, gang.id)}
+                            className="w-4 h-4 rounded accent-blue-600"
+                          />
+                          <span className="w-5 text-[11px] text-gray-400 text-right shrink-0">{m.position_no}</span>
+                          <span className={clsx('flex-1 text-sm', isChecked ? 'font-medium text-gray-900' : 'text-gray-700')}>
+                            {m.full_name}
+                          </span>
+                          {roleTag && (
+                            <span className="shrink-0 text-[10px] font-bold bg-white border rounded-full px-1.5 py-0.5 text-gray-500">
+                              {roleTag}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Notes + actions */}
+        <div className="px-5 py-4 border-t space-y-3 shrink-0">
+          <input value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder="Notes (optional)"
+            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <div className="flex gap-3">
+            <button onClick={onClose} className="flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600">
+              Cancel
+            </button>
+            <button
+              onClick={() => mut.mutate()}
+              disabled={selected.size === 0 || !effectiveGangId || mut.isLoading}
+              className="flex-1 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold disabled:opacity-40"
+            >
+              {mut.isLoading ? 'Creating…' : `Deploy ${selected.size || ''} members`}
             </button>
           </div>
         </div>

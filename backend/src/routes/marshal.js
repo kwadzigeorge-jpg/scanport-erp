@@ -13,6 +13,7 @@ router.get('/dashboard',                           VIEW,   mc.getDashboard);
 
 // Gangs + members
 router.get('/gangs',                               VIEW,   mc.listGangs);
+router.get('/members',                             VIEW,   mc.listAllMembers);
 router.get('/gangs/:gangId/members',               VIEW,   mc.listMembers);
 router.post('/gangs/:gangId/members',              MANAGE, mc.addMember);
 router.put('/gangs/:gangId/members/:memberId',     MANAGE, mc.updateMember);
