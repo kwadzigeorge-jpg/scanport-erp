@@ -43,6 +43,7 @@ const ATOMIC_PERMISSIONS = [
   { name: 'marshal.start_examination',    description: 'Start container examination' },
   { name: 'marshal.complete_examination', description: 'Complete container examination' },
   { name: 'marshal.confirm_exit',   description: 'Confirm container exit from holding area' },
+  { name: 'marshal.manage',         description: 'Create deployments and record scan-marshal attendance' },
   // Dashboard
   { name: 'dashboard.view',       description: 'View operations dashboard' },
   // Report
@@ -124,6 +125,7 @@ const PERMISSION_GROUPS = {
   'Marshal Operations': [
     'marshal.view','marshal.confirm_entry','marshal.start_examination',
     'marshal.complete_examination','marshal.confirm_exit',
+    'marshal.manage',
     'holding_area.view','bay.view','container.view',
   ],
   'Reporting': [
