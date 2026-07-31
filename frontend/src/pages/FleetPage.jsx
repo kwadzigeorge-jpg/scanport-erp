@@ -6,7 +6,7 @@ import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import {
   Truck, Users, Fuel, Wrench, BarChart3, AlertTriangle,
-  Plus, X, Pencil, CheckCircle, XCircle, Clock, RefreshCw,
+  Plus, X, Pencil, Trash2, CheckCircle, XCircle, Clock, RefreshCw,
   Shield, Calendar, Activity, TrendingUp, MapPin, Bell,
 } from 'lucide-react';
 
@@ -827,12 +827,130 @@ function DriversTab() {
   );
 }
 
+// ── Edit Mileage Modal ────────────────────────────────────────────────────────
+function EditMileageModal({ log, onClose }) {
+  const qc = useQueryClient();
+  const [f, setF] = useState({
+    trip_date:         log.trip_date?.slice(0, 10) || '',
+    trip_start_time:   log.trip_start_time || '',
+    trip_end_time:     log.trip_end_time   || '',
+    odometer_start:    log.odometer_start  ?? '',
+    odometer_end:      log.odometer_end    ?? '',
+    trip_purpose:      log.trip_purpose    || '',
+    origin:            log.origin          || '',
+    destination:       log.destination     || '',
+    fuel_added_litres: log.fuel_added_litres ?? '',
+    fuel_cost:         log.fuel_cost        ?? '',
+    remarks:           log.remarks          || '',
+  });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+
+  const dist = f.odometer_start !== '' && f.odometer_end !== ''
+    ? Math.max(0, parseFloat(f.odometer_end || 0) - parseFloat(f.odometer_start || 0)).toFixed(1)
+    : null;
+
+  const mut = useMutation(d => fleetApi.updateMileage(log.id, d), {
+    onSuccess: () => {
+      toast.success('Log updated.');
+      qc.invalidateQueries('fleet-mileage');
+      qc.invalidateQueries('fleet-dashboard');
+      onClose();
+    },
+    onError: e => toast.error(e.response?.data?.error || 'Update failed.'),
+  });
+
+  const inp = 'w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b dark:border-slate-700">
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-100 flex items-center gap-2">
+            <Pencil size={14}/> Edit Mileage Log
+          </h2>
+          <button onClick={onClose}><X size={18} className="text-gray-400"/></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="label">Trip Purpose *</label>
+              <input className={inp} value={f.trip_purpose} onChange={e => set('trip_purpose', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Date</label>
+              <input type="date" className={inp} value={f.trip_date} onChange={e => set('trip_date', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Start Time</label>
+              <input type="time" className={inp} value={f.trip_start_time} onChange={e => set('trip_start_time', e.target.value)} />
+            </div>
+            {log.trip_status !== 'open' && (
+              <div>
+                <label className="label">End Time</label>
+                <input type="time" className={inp} value={f.trip_end_time} onChange={e => set('trip_end_time', e.target.value)} />
+              </div>
+            )}
+            <div>
+              <label className="label">Odometer Start (km)</label>
+              <input type="number" className={inp} value={f.odometer_start} onChange={e => set('odometer_start', e.target.value)} />
+            </div>
+            {log.trip_status !== 'open' && (
+              <div>
+                <label className="label">Odometer End (km)</label>
+                <input type="number" className={inp} value={f.odometer_end} onChange={e => set('odometer_end', e.target.value)} />
+              </div>
+            )}
+            {dist !== null && (
+              <div className="col-span-2">
+                <p className="text-xs text-gray-500">Calculated distance: <span className="font-semibold text-gray-800">{dist} km</span>
+                  {parseFloat(dist) > 500 && <span className="ml-2 text-red-500 text-xs">⚠ will be flagged</span>}
+                </p>
+              </div>
+            )}
+            <div>
+              <label className="label">Origin</label>
+              <input className={inp} value={f.origin} onChange={e => set('origin', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Destination</label>
+              <input className={inp} value={f.destination} onChange={e => set('destination', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Fuel Added (L)</label>
+              <input type="number" step="0.1" className={inp} value={f.fuel_added_litres} onChange={e => set('fuel_added_litres', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Fuel Cost (GHS)</label>
+              <input type="number" step="0.01" className={inp} value={f.fuel_cost} onChange={e => set('fuel_cost', e.target.value)} />
+            </div>
+            <div className="col-span-2">
+              <label className="label">Remarks</label>
+              <textarea rows={2} className={inp} value={f.remarks} onChange={e => set('remarks', e.target.value)} />
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-3 px-5 py-4 border-t dark:border-slate-700">
+          <button onClick={onClose} className="flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600">Cancel</button>
+          <button
+            onClick={() => mut.mutate(f)}
+            disabled={!f.trip_purpose || mut.isLoading}
+            className="flex-1 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold disabled:opacity-40"
+          >
+            {mut.isLoading ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Mileage Tab ───────────────────────────────────────────────────────────────
 function MileageTab() {
   const qc = useQueryClient();
   const [showStart, setShowStart] = useState(false);
-  const [endTrip, setEndTrip]     = useState(null);
-  const [filter, setFilter]       = useState('');
+  const [endTrip,   setEndTrip]   = useState(null);
+  const [editLog,   setEditLog]   = useState(null);
+  const [filter,    setFilter]    = useState('');
 
   const queryParams = filter === 'open'
     ? { trip_status: 'open' }
@@ -857,6 +975,10 @@ function MileageTab() {
   const rejectMut = useMutation(id => fleetApi.rejectMileage(id, { reason: 'Rejected by reviewer' }), {
     onSuccess: () => { toast.success('Rejected.'); qc.invalidateQueries('fleet-mileage'); },
   });
+  const deleteMut = useMutation(id => fleetApi.deleteMileage(id), {
+    onSuccess: () => { toast.success('Log deleted.'); qc.invalidateQueries('fleet-mileage'); qc.invalidateQueries('fleet-dashboard'); },
+    onError: e => toast.error(e.response?.data?.error || 'Delete failed.'),
+  });
 
   return (
     <div className="space-y-4">
@@ -878,7 +1000,7 @@ function MileageTab() {
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['Date','Vehicle','Driver','Odo Start','Odo End','Distance','Purpose','Route','Fuel','Status',''].map(h => (
+                {['Date','Vehicle','Driver','Odo Start','Odo End','Distance','Purpose','Route','Fuel','Status','Actions'].map(h => (
                   <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -921,21 +1043,33 @@ function MileageTab() {
                     )}
                   </td>
                   <td className="px-3 py-2.5">
-                    {l.trip_status === 'open' ? (
-                      <button onClick={() => setEndTrip(l)}
-                        className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg font-medium whitespace-nowrap">
-                        End Trip
+                    <div className="flex items-center gap-1">
+                      {l.trip_status === 'open' ? (
+                        <button onClick={() => setEndTrip(l)}
+                          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg font-medium whitespace-nowrap">
+                          End Trip
+                        </button>
+                      ) : l.status === 'pending' ? (
+                        <>
+                          <button onClick={() => approveMut.mutate(l.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Approve">
+                            <CheckCircle size={13}/>
+                          </button>
+                          <button onClick={() => rejectMut.mutate(l.id)} className="p-1 text-red-500 hover:bg-red-50 rounded" title="Reject">
+                            <XCircle size={13}/>
+                          </button>
+                        </>
+                      ) : null}
+                      <button onClick={() => setEditLog(l)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Edit">
+                        <Pencil size={13}/>
                       </button>
-                    ) : l.status === 'pending' ? (
-                      <div className="flex gap-1">
-                        <button onClick={() => approveMut.mutate(l.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Approve">
-                          <CheckCircle size={13}/>
-                        </button>
-                        <button onClick={() => rejectMut.mutate(l.id)} className="p-1 text-red-500 hover:bg-red-50 rounded" title="Reject">
-                          <XCircle size={13}/>
-                        </button>
-                      </div>
-                    ) : null}
+                      <button
+                        onClick={() => { if (window.confirm(`Delete this trip log (${l.trip_purpose})?`)) deleteMut.mutate(l.id); }}
+                        className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
+                        title="Delete"
+                      >
+                        <Trash2 size={13}/>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -946,6 +1080,7 @@ function MileageTab() {
 
       {showStart && <StartTripModal onClose={() => setShowStart(false)} />}
       {endTrip   && <EndTripModal trip={endTrip} onClose={() => setEndTrip(null)} />}
+      {editLog   && <EditMileageModal log={editLog} onClose={() => setEditLog(null)} />}
     </div>
   );
 }

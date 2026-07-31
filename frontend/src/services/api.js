@@ -360,6 +360,8 @@ export const fleetApi = {
   startTrip:          (d)       => api.post('/fleet/mileage/start', d).then(r => r.data),
   endTrip:            (id, d)   => api.patch(`/fleet/mileage/${id}/end`, d).then(r => r.data),
   createMileage:      (d)       => api.post('/fleet/mileage', d).then(r => r.data),
+  updateMileage:      (id, d)   => api.put(`/fleet/mileage/${id}`, d).then(r => r.data),
+  deleteMileage:      (id)      => api.delete(`/fleet/mileage/${id}`).then(r => r.data),
   approveMileage:     (id)      => api.patch(`/fleet/mileage/${id}/approve`).then(r => r.data),
   rejectMileage:      (id, d)   => api.patch(`/fleet/mileage/${id}/reject`, d).then(r => r.data),
   listFuel:           (p)       => api.get('/fleet/fuel/list', { params: p }).then(r => r.data),

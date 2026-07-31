@@ -22,6 +22,8 @@ router.get('/mileage/list',           requirePermission('fleet.view'),    fc.lis
 router.post('/mileage/start',         requirePermission('fleet.log'),     fc.startTrip);
 router.patch('/mileage/:id/end',      requirePermission('fleet.log'),     fc.endTrip);
 router.post('/mileage',               requirePermission('fleet.log'),     fc.createMileageLog);
+router.put('/mileage/:id',            requirePermission('fleet.log'),     fc.updateMileageLog);
+router.delete('/mileage/:id',         requirePermission('fleet.log'),     fc.deleteMileageLog);
 router.patch('/mileage/:id/approve',  requirePermission('fleet.approve'), fc.approveMileageLog);
 router.patch('/mileage/:id/reject',   requirePermission('fleet.approve'), fc.rejectMileageLog);
 

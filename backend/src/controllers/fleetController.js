@@ -464,6 +464,75 @@ async function createMileageLog(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function updateMileageLog(req, res, next) {
+  try {
+    const { id } = req.params;
+    const {
+      trip_date, trip_start_time, trip_end_time,
+      odometer_start, odometer_end,
+      trip_purpose, origin, destination,
+      fuel_added_litres, fuel_cost, remarks,
+    } = req.body;
+
+    const { rows: [existing] } = await db.query(
+      'SELECT * FROM fleet_mileage_logs WHERE id=$1', [id]
+    );
+    if (!existing) return res.status(404).json({ error: 'Log not found.' });
+
+    const oStart = odometer_start != null ? parseFloat(odometer_start) : parseFloat(existing.odometer_start);
+    const oEnd   = odometer_end   != null ? parseFloat(odometer_end)   : (existing.odometer_end != null ? parseFloat(existing.odometer_end) : null);
+    const dist   = (oEnd != null && oEnd >= oStart) ? parseFloat((oEnd - oStart).toFixed(2)) : existing.distance_km;
+    const flagged = dist > 500 ? true : dist === 0 ? true : false;
+    const flagReason = dist > 500 ? `Abnormal distance: ${dist} km in one trip`
+                     : dist === 0 ? 'Zero distance trip' : null;
+
+    const { rows: [log] } = await db.query(`
+      UPDATE fleet_mileage_logs SET
+        trip_date         = COALESCE($1, trip_date),
+        trip_start_time   = COALESCE($2, trip_start_time),
+        trip_end_time     = COALESCE($3, trip_end_time),
+        odometer_start    = $4,
+        odometer_end      = $5,
+        distance_km       = $6,
+        trip_purpose      = COALESCE($7, trip_purpose),
+        origin            = COALESCE($8, origin),
+        destination       = COALESCE($9, destination),
+        fuel_added_litres = $10,
+        fuel_cost         = $11,
+        remarks           = $12,
+        is_flagged        = $13,
+        flag_reason       = $14,
+        updated_at        = NOW()
+      WHERE id = $15
+      RETURNING *
+    `, [
+      trip_date || null, trip_start_time || null, trip_end_time || null,
+      oStart, oEnd,
+      dist,
+      trip_purpose || null, origin || null, destination || null,
+      fuel_added_litres != null ? parseFloat(fuel_added_litres) : existing.fuel_added_litres,
+      fuel_cost != null ? parseFloat(fuel_cost) : existing.fuel_cost,
+      remarks !== undefined ? remarks : existing.remarks,
+      flagged, flagReason,
+      id,
+    ]);
+
+    await logAudit(req, 'fleet:mileage_updated', 'fleet_mileage_logs', id, { odometer_start: oStart, odometer_end: oEnd, distance_km: dist });
+    return res.json(log);
+  } catch (err) { next(err); }
+}
+
+async function deleteMileageLog(req, res, next) {
+  try {
+    const { rows: [log] } = await db.query(
+      'DELETE FROM fleet_mileage_logs WHERE id=$1 RETURNING id, vehicle_id, trip_purpose', [req.params.id]
+    );
+    if (!log) return res.status(404).json({ error: 'Log not found.' });
+    await logAudit(req, 'fleet:mileage_deleted', 'fleet_mileage_logs', log.id, { trip_purpose: log.trip_purpose });
+    return res.json({ message: 'Mileage log deleted.' });
+  } catch (err) { next(err); }
+}
+
 async function approveMileageLog(req, res, next) {
   try {
     const { rows: [log] } = await db.query(`
@@ -625,7 +694,7 @@ module.exports = {
   listVehicles, getVehicle, createVehicle, updateVehicle, setVehicleStatus,
   assignDriver, unassignDriver,
   listDrivers, createDriver, updateDriver,
-  listMileageLogs, startTrip, endTrip, createMileageLog, approveMileageLog, rejectMileageLog,
+  listMileageLogs, startTrip, endTrip, createMileageLog, updateMileageLog, deleteMileageLog, approveMileageLog, rejectMileageLog,
   listFuelLogs, createFuelLog,
   listMaintenance, createMaintenance, updateMaintenance,
   listAlerts, dismissAlert,
