@@ -303,18 +303,22 @@ function BayCard({ bay, areaName, onRelease, onPrint, onCheckinContainer, onRele
 }
 
 // ─── Allocation Grid ──────────────────────────────────────────────────────────
-function AllocationView({ areas, search, onRelease, onPrint, onCheckinContainer, onReleaseContainer }) {
+function AllocationView({ areas, search, onRelease, onPrint, onCheckinContainer, onReleaseContainer, canManageReefer }) {
   return (
     <div className="space-y-8">
       {areas.map(area => {
+        // Restrict reefer bays to users with truck.bay_assign permission
+        const visibleBays = canManageReefer ? area.bays : area.bays.filter(b => !b.is_reefer);
+        if (!visibleBays.length) return null;
+
         const baysToShow = search
-          ? area.bays.filter(b =>
+          ? visibleBays.filter(b =>
               !b.truck ||
               b.truck.truck_number?.toLowerCase().includes(search.toLowerCase()) ||
               b.truck.agent_name?.toLowerCase().includes(search.toLowerCase()) ||
               b.truck.containers?.some(c => c.container_number?.includes(search.toUpperCase()))
             )
-          : area.bays;
+          : visibleBays;
 
         return (
           <div key={area.id}>
@@ -324,10 +328,10 @@ function AllocationView({ areas, search, onRelease, onPrint, onCheckinContainer,
               <span className="text-xs text-gray-400">{area.code}</span>
               <div className="ml-auto flex items-center gap-3 text-xs text-gray-500">
                 <span className="text-green-600 font-semibold">
-                  {area.bays.filter(b => !b.truck).length} free
+                  {visibleBays.filter(b => !b.truck).length} free
                 </span>
                 <span className="text-blue-600 font-semibold">
-                  {area.bays.filter(b => b.truck).length} occupied
+                  {visibleBays.filter(b => b.truck).length} occupied
                 </span>
               </div>
             </div>
@@ -1045,6 +1049,7 @@ export default function BaysPage() {
           </div>
         ) : tab === 'allocation' || tab === 'queued' ? (
           <AllocationView areas={tabAreas} search={search} onRelease={handleRelease} onPrint={handlePrint}
+            canManageReefer={hasPermission('truck.bay_assign')}
             onCheckinContainer={(id, cn) => {
               if (window.confirm(`Check in container ${cn}?`)) checkinContainerMutation.mutate(id);
             }}

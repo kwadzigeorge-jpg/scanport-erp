@@ -308,6 +308,14 @@ async function confirmEntry(req, res, next) {
       return res.status(409).json({ error: `Transaction is already in status: ${txn.status}` });
     }
 
+    // Reefer containers are managed exclusively from the Bay Allocation page
+    if (txn.bay_id) {
+      const { rows: bayInfo } = await db.query('SELECT is_reefer FROM bays WHERE id=$1', [txn.bay_id]);
+      if (bayInfo[0]?.is_reefer) {
+        return res.status(403).json({ error: 'Reefer containers must be checked in from the Bay Allocation (Bays View) page.' });
+      }
+    }
+
     const updates = [`status='ARRIVED_AT_BAY'`, `bay_entry_time=NOW()`, `time_in=NOW()`, `confirmed_entry_by=$1`];
     const params = [req.user.id];
 
@@ -505,6 +513,7 @@ async function listTransactions(req, res, next) {
               ct.examination_findings, ct.examining_officer, ct.notes,
               ct.created_at, ct.updated_at,
               ha.name AS area_name, ha.code AS area_code, b.bay_code,
+              COALESCE(b.is_reefer, FALSE) AS is_reefer,
               ub.username AS booth_officer, ub.full_name AS booth_officer_name,
               ue.username AS entry_marshal, ux.username AS exit_marshal
        FROM container_transactions ct

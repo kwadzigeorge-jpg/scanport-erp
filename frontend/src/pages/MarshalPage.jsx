@@ -182,7 +182,8 @@ function GateCheckInPanel() {
     }
   );
 
-  const queue = data?.transactions || [];
+  // Reefer containers are managed from the Bay Allocation page, not by marshals
+  const queue = (data?.transactions || []).filter(t => !t.is_reefer);
 
   return (
     <div className="space-y-4">
