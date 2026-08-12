@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { containersApi } from '../services/api';
+import { containersApi, bayAdminApi } from '../services/api';
 import { format, formatDistanceToNow } from 'date-fns';
 import {
   LayoutGrid, Database, AlertTriangle, BarChart3,
-  CheckSquare, List, HelpCircle, RefreshCw, Search,
-  Truck, User, Phone, Clock, LogOut, Container, ChevronDown, X, Printer
+  CheckSquare, List, RefreshCw, Search, Settings,
+  Truck, User, Phone, Clock, LogOut, Container, X, Printer,
+  Pencil, Trash2, Plus, Power,
 } from 'lucide-react';
 import io from 'socket.io-client';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 import ChitPrintView from '../components/Containers/ChitPrintView';
+import { useAuth } from '../context/AuthContext';
 
 const TABS = [
   { key: 'allocation', label: 'Bays Allocation', icon: LayoutGrid },
@@ -19,6 +21,7 @@ const TABS = [
   { key: 'overstayed', label: 'Overstayed',       icon: AlertTriangle },
   { key: 'released',   label: 'Released',         icon: CheckSquare },
   { key: 'analytics',  label: 'Analytics',        icon: BarChart3 },
+  { key: 'manage',     label: 'Manage',           icon: Settings, permission: 'bay.manage' },
 ];
 
 // Color scheme per status/dwell combination
@@ -467,13 +470,334 @@ function AnalyticsView({ stats, areas }) {
   );
 }
 
+// ─── Area Form Modal ──────────────────────────────────────────────────────────
+function AreaFormModal({ area, onClose }) {
+  const qc = useQueryClient();
+  const [f, setF] = useState({
+    name:        area?.name        || '',
+    code:        area?.code        || '',
+    description: area?.description || '',
+  });
+  const [err, setErr] = useState('');
+
+  const mut = useMutation(
+    (d) => area ? bayAdminApi.updateArea(area.id, d) : bayAdminApi.createArea(d),
+    {
+      onSuccess: () => {
+        qc.invalidateQueries('bay-admin-areas');
+        toast.success(area ? 'Area updated' : 'Area created');
+        onClose();
+      },
+      onError: (e) => setErr(e.response?.data?.error || 'Save failed'),
+    }
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <h2 className="font-semibold text-gray-900">{area ? 'Edit Holding Area' : 'Add Holding Area'}</h2>
+          <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
+        </div>
+        <form onSubmit={(e) => { e.preventDefault(); setErr(''); mut.mutate(f); }} className="p-5 space-y-4">
+          {err && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
+          <div>
+            <label className="label">Name</label>
+            <input className="input" value={f.name}
+              onChange={e => setF(p => ({ ...p, name: e.target.value }))} required />
+          </div>
+          <div>
+            <label className="label">Code <span className="text-gray-400 font-normal">(e.g. HA-A)</span></label>
+            <input className="input uppercase tracking-wider" value={f.code} maxLength={10}
+              onChange={e => setF(p => ({ ...p, code: e.target.value.toUpperCase() }))} required />
+          </div>
+          <div>
+            <label className="label">Description <span className="text-gray-400 font-normal">(optional)</span></label>
+            <input className="input" value={f.description}
+              onChange={e => setF(p => ({ ...p, description: e.target.value }))} />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" disabled={mut.isLoading} className="btn-primary flex-1 justify-center">
+              {mut.isLoading
+                ? <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : 'Save'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Bay Form Modal ───────────────────────────────────────────────────────────
+function BayFormModal({ bay, areas, onClose }) {
+  const qc = useQueryClient();
+  const [f, setF] = useState({
+    holding_area_id: bay?.holding_area_id || areas[0]?.id || '',
+    bay_code:        bay?.bay_code        || '',
+    capacity:        bay?.capacity        || 1,
+  });
+  const [err, setErr] = useState('');
+
+  const mut = useMutation(
+    (d) => bay ? bayAdminApi.updateBay(bay.id, d) : bayAdminApi.createBay(d),
+    {
+      onSuccess: () => {
+        qc.invalidateQueries('bay-admin-bays');
+        toast.success(bay ? 'Bay updated' : 'Bay created');
+        onClose();
+      },
+      onError: (e) => setErr(e.response?.data?.error || 'Save failed'),
+    }
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <h2 className="font-semibold text-gray-900">{bay ? 'Edit Bay' : 'Add Bay'}</h2>
+          <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
+        </div>
+        <form onSubmit={(e) => { e.preventDefault(); setErr(''); mut.mutate(f); }} className="p-5 space-y-4">
+          {err && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
+          {!bay && (
+            <div>
+              <label className="label">Holding Area</label>
+              <select className="input" value={f.holding_area_id} required
+                onChange={e => setF(p => ({ ...p, holding_area_id: parseInt(e.target.value) }))}>
+                {areas.map(a => (
+                  <option key={a.id} value={a.id}>{a.name} ({a.code})</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="label">Bay Code <span className="text-gray-400 font-normal">(e.g. BAY-31)</span></label>
+            <input className="input uppercase tracking-wider" value={f.bay_code} maxLength={30} required
+              placeholder="BAY-31"
+              onChange={e => setF(p => ({ ...p, bay_code: e.target.value.toUpperCase() }))} />
+          </div>
+          <div>
+            <label className="label">Capacity</label>
+            <input className="input" type="number" min={1} max={10} value={f.capacity} required
+              onChange={e => setF(p => ({ ...p, capacity: parseInt(e.target.value) }))} />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" disabled={mut.isLoading} className="btn-primary flex-1 justify-center">
+              {mut.isLoading
+                ? <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : 'Save'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Manage View ──────────────────────────────────────────────────────────────
+function ManageView() {
+  const qc = useQueryClient();
+  const [section, setSection]     = useState('bays');
+  const [filterArea, setFilterArea] = useState('');
+  const [showAreaForm, setShowAreaForm] = useState(false);
+  const [editArea, setEditArea]   = useState(null);
+  const [showBayForm, setShowBayForm] = useState(false);
+  const [editBay, setEditBay]     = useState(null);
+
+  const { data: areas = [] } = useQuery('bay-admin-areas', bayAdminApi.listAreas);
+  const { data: bays  = [] } = useQuery(
+    ['bay-admin-bays', filterArea],
+    () => bayAdminApi.listBays(filterArea ? { area_id: filterArea } : {})
+  );
+
+  const toggleAreaMut = useMutation(bayAdminApi.toggleArea, {
+    onSuccess: () => qc.invalidateQueries('bay-admin-areas'),
+    onError:   (e) => toast.error(e.response?.data?.error || 'Failed'),
+  });
+  const toggleBayMut = useMutation(bayAdminApi.toggleBay, {
+    onSuccess: () => qc.invalidateQueries('bay-admin-bays'),
+    onError:   (e) => toast.error(e.response?.data?.error || 'Failed'),
+  });
+  const deleteBayMut = useMutation(bayAdminApi.deleteBay, {
+    onSuccess: () => { qc.invalidateQueries('bay-admin-bays'); toast.success('Bay deleted'); },
+    onError:   (e) => toast.error(e.response?.data?.error || 'Cannot delete bay'),
+  });
+
+  return (
+    <div className="space-y-5 max-w-5xl">
+      {/* Section toggle */}
+      <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+        {[['bays', 'Bays'], ['areas', 'Holding Areas']].map(([k, label]) => (
+          <button key={k} onClick={() => setSection(k)}
+            className={clsx(
+              'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              section === k ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+            )}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {section === 'areas' ? (
+        <div className="card overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b bg-gray-50">
+            <h3 className="text-sm font-semibold text-gray-700">Holding Areas</h3>
+            <button onClick={() => { setEditArea(null); setShowAreaForm(true); }}
+              className="btn-primary text-xs py-1.5 px-3">
+              <Plus size={13} /> Add Area
+            </button>
+          </div>
+          <table className="w-full text-sm">
+            <thead><tr className="bg-gray-50 border-b">
+              {['Name', 'Code', 'Description', 'Bays', 'Status', 'Actions'].map(h => (
+                <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
+              ))}
+            </tr></thead>
+            <tbody className="divide-y divide-gray-50">
+              {!areas.length
+                ? <tr><td colSpan={6} className="text-center py-12 text-gray-400">No areas configured</td></tr>
+                : areas.map(a => (
+                  <tr key={a.id} className={clsx('hover:bg-gray-50/50', !a.is_active && 'opacity-60')}>
+                    <td className="px-4 py-3 font-semibold text-gray-900">{a.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">{a.code}</span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{a.description || '—'}</td>
+                    <td className="px-4 py-3 text-gray-600 text-xs">{a.active_bays} active / {a.total_bays} total</td>
+                    <td className="px-4 py-3">
+                      <span className={clsx('text-xs font-semibold px-2 py-0.5 rounded-full',
+                        a.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                        {a.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => { setEditArea(a); setShowAreaForm(true); }}
+                          className="flex items-center gap-1 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200">
+                          <Pencil size={11} /> Edit
+                        </button>
+                        <button onClick={() => toggleAreaMut.mutate(a.id)}
+                          className={clsx('flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded border',
+                            a.is_active
+                              ? 'text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200'
+                              : 'text-green-700 bg-green-50 hover:bg-green-100 border-green-200')}>
+                          <Power size={11} /> {a.is_active ? 'Disable' : 'Enable'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              }
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="card overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b bg-gray-50 flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <h3 className="text-sm font-semibold text-gray-700">Bays</h3>
+              <select className="input text-xs py-1 px-2 h-auto w-auto"
+                value={filterArea} onChange={e => setFilterArea(e.target.value)}>
+                <option value="">All Areas</option>
+                {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            <button onClick={() => { setEditBay(null); setShowBayForm(true); }}
+              className="btn-primary text-xs py-1.5 px-3">
+              <Plus size={13} /> Add Bay
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="bg-gray-50 border-b">
+                {['Bay Code', 'Area', 'Capacity', 'Status', 'Occupancy', 'Total Usage', 'Actions'].map(h => (
+                  <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                ))}
+              </tr></thead>
+              <tbody className="divide-y divide-gray-50">
+                {!bays.length
+                  ? <tr><td colSpan={7} className="text-center py-12 text-gray-400">No bays found</td></tr>
+                  : bays.map(b => (
+                    <tr key={b.id} className={clsx('hover:bg-gray-50/50', !b.is_active && 'opacity-60')}>
+                      <td className="px-4 py-3 font-mono font-bold text-gray-900">{b.bay_code}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{b.area_name}</td>
+                      <td className="px-4 py-3 text-gray-600 text-center">{b.capacity}</td>
+                      <td className="px-4 py-3">
+                        <span className={clsx('text-xs font-semibold px-2 py-0.5 rounded-full',
+                          b.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                          {b.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {b.is_occupied
+                          ? <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Occupied</span>
+                          : <span className="text-xs text-gray-400">Free</span>
+                        }
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{b.total_usage} trips</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => { setEditBay(b); setShowBayForm(true); }}
+                            className="flex items-center gap-1 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200">
+                            <Pencil size={11} /> Edit
+                          </button>
+                          <button onClick={() => toggleBayMut.mutate(b.id)}
+                            className={clsx('flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded border',
+                              b.is_active
+                                ? 'text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200'
+                                : 'text-green-700 bg-green-50 hover:bg-green-100 border-green-200')}>
+                            <Power size={11} /> {b.is_active ? 'Disable' : 'Enable'}
+                          </button>
+                          {!b.is_occupied && (
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Delete ${b.bay_code}? This cannot be undone.`))
+                                  deleteBayMut.mutate(b.id);
+                              }}
+                              className="flex items-center gap-1 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded border border-red-200">
+                              <Trash2 size={11} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {showAreaForm && (
+        <AreaFormModal
+          area={editArea}
+          onClose={() => { setShowAreaForm(false); setEditArea(null); }}
+        />
+      )}
+      {showBayForm && (
+        <BayFormModal
+          bay={editBay}
+          areas={areas}
+          onClose={() => { setShowBayForm(false); setEditBay(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function BaysPage() {
+  const { hasPermission }         = useAuth();
   const [tab, setTab]             = useState('allocation');
   const [search, setSearch]       = useState('');
   const [releaseTarget, setReleaseTarget] = useState(null);
   const [printChit, setPrintChit] = useState(null);
   const qc = useQueryClient();
+  const visibleTabs = TABS.filter(t => !t.permission || hasPermission(t.permission));
 
   const { data, isLoading, refetch } = useQuery(
     ['bays-view', tab],
@@ -531,7 +855,7 @@ export default function BaysPage() {
     <div className="flex flex-col h-full">
       {/* Tabs */}
       <div className="bg-white border-b border-gray-200 px-4 md:px-6 flex items-center gap-0.5 overflow-x-auto shrink-0">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={clsx(
               'flex items-center gap-1.5 px-4 py-3.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors',
@@ -546,35 +870,37 @@ export default function BaysPage() {
         ))}
       </div>
 
-      {/* Toolbar */}
-      <div className="bg-white border-b border-gray-100 px-4 md:px-6 py-3 flex flex-wrap items-center gap-3 shrink-0">
-        <div className="relative flex-1 min-w-48 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input pl-9 text-sm" placeholder="Search truck, container, agent..."
-            value={search} onChange={e => setSearch(e.target.value)} />
+      {/* Toolbar + stats bar — hidden on manage tab */}
+      {tab !== 'manage' && <>
+        <div className="bg-white border-b border-gray-100 px-4 md:px-6 py-3 flex flex-wrap items-center gap-3 shrink-0">
+          <div className="relative flex-1 min-w-48 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input className="input pl-9 text-sm" placeholder="Search truck, container, agent..."
+              value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <div className="flex items-center gap-3 text-xs text-gray-500 ml-auto flex-wrap">
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-indigo-500 rounded-full" />Bay Assigned</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-green-500 rounded-full" />Checked In</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-amber-500 rounded-full" />Warning</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-red-500 rounded-full" />Overstayed</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 border-2 border-dashed border-gray-300 rounded-full" />Free</span>
+          </div>
+          <button onClick={() => refetch()} className="btn-secondary text-sm py-1.5"><RefreshCw size={14} /> Refresh</button>
         </div>
-        <div className="flex items-center gap-3 text-xs text-gray-500 ml-auto flex-wrap">
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-indigo-500 rounded-full" />Bay Assigned</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-green-500 rounded-full" />Checked In</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-amber-500 rounded-full" />Warning</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-red-500 rounded-full" />Overstayed</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 border-2 border-dashed border-gray-300 rounded-full" />Free</span>
+        <div className="bg-white border-b border-gray-100 px-4 md:px-6 py-2 flex items-center gap-6 text-sm shrink-0 overflow-x-auto">
+          <span className="text-gray-500 whitespace-nowrap">Bays: <strong className="text-gray-900">{stats.occupied_bays || 0}/{stats.total_bays || 0}</strong></span>
+          <span className="text-green-600 whitespace-nowrap">Free: <strong>{stats.free_bays || 0}</strong></span>
+          <span className="text-blue-600 whitespace-nowrap">Trucks: <strong>{stats.total_trucks || 0}</strong></span>
+          <span className="text-purple-600 whitespace-nowrap">Containers: <strong>{stats.total_containers || 0}</strong></span>
+          {stats.overstayed > 0 && <span className="text-orange-600 font-semibold whitespace-nowrap">⚠ Overstayed: <strong>{stats.overstayed}</strong></span>}
         </div>
-        <button onClick={() => refetch()} className="btn-secondary text-sm py-1.5"><RefreshCw size={14} /> Refresh</button>
-      </div>
-
-      {/* Stats bar */}
-      <div className="bg-white border-b border-gray-100 px-4 md:px-6 py-2 flex items-center gap-6 text-sm shrink-0 overflow-x-auto">
-        <span className="text-gray-500 whitespace-nowrap">Bays: <strong className="text-gray-900">{stats.occupied_bays || 0}/{stats.total_bays || 0}</strong></span>
-        <span className="text-green-600 whitespace-nowrap">Free: <strong>{stats.free_bays || 0}</strong></span>
-        <span className="text-blue-600 whitespace-nowrap">Trucks: <strong>{stats.total_trucks || 0}</strong></span>
-        <span className="text-purple-600 whitespace-nowrap">Containers: <strong>{stats.total_containers || 0}</strong></span>
-        {stats.overstayed > 0 && <span className="text-orange-600 font-semibold whitespace-nowrap">⚠ Overstayed: <strong>{stats.overstayed}</strong></span>}
-      </div>
+      </>}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
-        {isLoading ? (
+        {tab === 'manage' ? (
+          <ManageView />
+        ) : isLoading ? (
           <div className="flex items-center justify-center h-48">
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
           </div>

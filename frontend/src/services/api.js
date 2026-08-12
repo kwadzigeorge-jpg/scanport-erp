@@ -88,6 +88,19 @@ export const trucksApi = {
   availableBays:  (params) => api.get('/trucks/bays', { params }),
 };
 
+// ─── Bay Admin ────────────────────────────────────────────────────────────────
+export const bayAdminApi = {
+  listAreas:    ()       => api.get('/bay-admin/areas').then(r => r.data),
+  createArea:   (d)      => api.post('/bay-admin/areas', d).then(r => r.data),
+  updateArea:   (id, d)  => api.put(`/bay-admin/areas/${id}`, d).then(r => r.data),
+  toggleArea:   (id)     => api.patch(`/bay-admin/areas/${id}/toggle`).then(r => r.data),
+  listBays:     (p)      => api.get('/bay-admin', { params: p }).then(r => r.data),
+  createBay:    (d)      => api.post('/bay-admin', d).then(r => r.data),
+  updateBay:    (id, d)  => api.put(`/bay-admin/${id}`, d).then(r => r.data),
+  toggleBay:    (id)     => api.patch(`/bay-admin/${id}/toggle`).then(r => r.data),
+  deleteBay:    (id)     => api.delete(`/bay-admin/${id}`).then(r => r.data),
+};
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 export const dashboardApi = {
   summary:    () => api.get('/dashboard/summary'),
