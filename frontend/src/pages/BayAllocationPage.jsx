@@ -263,7 +263,7 @@ export default function BayAllocationPage() {
     });
     if (invalid)               { setFieldErrors(errors); return; }
     if (loadError)             { toast.error(loadError); return; }
-    if (!form.truckNumber.trim()) { toast.error('Truck number is required.'); return; }
+    if (!form.is_reefer && !form.truckNumber.trim()) { toast.error('Truck number is required.'); return; }
     if (!form.agentName.trim())   { toast.error('Agent name is required.'); return; }
     if (!form.agentPhone.trim())  { toast.error('Agent phone is required.'); return; }
 
@@ -376,10 +376,13 @@ export default function BayAllocationPage() {
             <Truck size={15} /> Truck Details
           </h2>
           <div>
-            <label className="label">Truck Number *</label>
+            <label className="label">
+              Truck Number {form.is_reefer ? <span className="text-gray-400 font-normal">(optional for reefer)</span> : '*'}
+            </label>
             <input className="input uppercase font-mono" placeholder="e.g. GR-1234-20"
               value={form.truckNumber}
-              onChange={e => setForm(f => ({ ...f, truckNumber: e.target.value.toUpperCase() }))} required />
+              onChange={e => setForm(f => ({ ...f, truckNumber: e.target.value.toUpperCase() }))}
+              required={!form.is_reefer} />
           </div>
         </div>
 
@@ -451,15 +454,15 @@ export default function BayAllocationPage() {
               </div>
               {/* Reefer toggle */}
               <label className={clsx(
-                'flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer select-none transition-colors',
+                'flex items-center gap-2 px-4 py-2 rounded-xl border-2 cursor-pointer select-none transition-all text-sm font-semibold',
                 form.is_reefer
-                  ? 'bg-cyan-50 border-cyan-300 text-cyan-700'
-                  : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                  ? 'bg-cyan-500 border-cyan-500 text-white shadow-md'
+                  : 'bg-white border-gray-200 text-gray-500 hover:border-cyan-300 hover:text-cyan-600'
               )}>
                 <input type="checkbox" className="sr-only" checked={form.is_reefer}
                   onChange={e => setForm(f => ({ ...f, is_reefer: e.target.checked }))} />
-                <Snowflake size={13} className={form.is_reefer ? 'text-cyan-500' : 'text-gray-400'} />
-                <span className="text-xs font-semibold">Reefer Container</span>
+                <Snowflake size={15} />
+                Reefer Container
               </label>
             </div>
           </div>
