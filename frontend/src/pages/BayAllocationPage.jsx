@@ -231,7 +231,7 @@ export default function BayAllocationPage() {
   const mutation = useMutation(trucksApi.create, {
     onSuccess: (res) => {
       const alloc = res.data;
-      toast.success(`Truck ${alloc.truck_number} allocated to ${alloc.bay_code} — chit ready.`);
+      toast.success(`${alloc.truck_number ? `Truck ${alloc.truck_number}` : 'Reefer container'} allocated to ${alloc.bay_code} — chit ready.`);
       const agent = { agentName: form.agentName, agentPhone: form.agentPhone };
       setLastAgent(agent);
       setChit({

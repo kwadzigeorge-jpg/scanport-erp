@@ -40,12 +40,12 @@ async function createTruckAllocation(req, res, next) {
     } = req.body;
 
     // ── Validate required fields ──
-    if (!truckNumber?.trim())   return res.status(400).json({ error: 'Truck number is required.' });
     if (!agentName?.trim())     return res.status(400).json({ error: 'Agent name is required.' });
     if (!agentPhone?.trim() || !validatePhoneNumber(agentPhone))   return res.status(400).json({ error: 'Valid agent phone is required.' });
     if (!Array.isArray(containers) || containers.length === 0)     return res.status(400).json({ error: 'At least one container is required.' });
 
-    const driverNameVal  = driverName?.trim()  || null;
+    const truckNumberVal = truckNumber?.trim()  || null;
+    const driverNameVal  = driverName?.trim()   || null;
     const driverPhoneVal = driverPhone?.trim()  || null;
 
     // ── Validate container numbers + sizes ──
@@ -97,6 +97,11 @@ async function createTruckAllocation(req, res, next) {
     const occupiedStatuses = "('BAY_ASSIGNED','ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED','IN_HOLDING_AREA')";
 
     const reeferFlag = is_reefer === true || is_reefer === 'true';
+
+    // Truck number is required for regular allocations; optional for reefer
+    if (!reeferFlag && !truckNumber?.trim()) {
+      return res.status(400).json({ error: 'Truck number is required.' });
+    }
 
     if (resolvedBayId) {
       // Specific bay requested — verify it is free and matches reefer expectation
@@ -168,7 +173,7 @@ async function createTruckAllocation(req, res, next) {
           agent_name, agent_phone, holding_area_id, bay_id, status, time_in, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'IN_BAY',NOW(),$9)
        RETURNING *`,
-      [allocationRef, truckNumber.trim(), driverNameVal, driverPhoneVal,
+      [allocationRef, truckNumberVal, driverNameVal, driverPhoneVal,
        agentName.trim(), agentPhone.trim(), areaId, resolvedBayId, req.user.id]
     );
 
@@ -187,7 +192,7 @@ async function createTruckAllocation(req, res, next) {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'BAY_ASSIGNED',NOW(),$12,$13,$14)
          RETURNING id, transaction_id, container_number, container_size, status, qr_code_token`,
         [txnId, c.number, c.size, agentName.trim(), agentPhone.trim(),
-         truckNumber.trim(), driverNameVal, driverPhoneVal,
+         truckNumberVal, driverNameVal, driverPhoneVal,
          areaId, resolvedBayId, truck.id,
          qrDataUrl, qrToken, req.user.id]
       );
@@ -204,7 +209,7 @@ async function createTruckAllocation(req, res, next) {
     );
 
     await logAudit(req, 'truck:allocated', 'truck_allocations', truck.id, {
-      allocationRef, truckNumber, containers: validatedContainers.map(c => c.number),
+      allocationRef, truckNumber: truckNumberVal, containers: validatedContainers.map(c => c.number),
     });
 
     const io = req.app.get('io');
