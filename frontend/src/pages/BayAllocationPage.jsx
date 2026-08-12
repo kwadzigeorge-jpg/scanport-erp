@@ -438,28 +438,29 @@ export default function BayAllocationPage() {
             <h2 className="font-semibold text-sm uppercase tracking-wide text-blue-700 flex items-center gap-2">
               <Container size={15} /> Containers
             </h2>
-            {/* Reefer toggle */}
-            <label className={clsx(
-              'flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer select-none transition-colors',
-              form.is_reefer
-                ? 'bg-cyan-50 border-cyan-300 text-cyan-700'
-                : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
-            )}>
-              <input type="checkbox" className="sr-only" checked={form.is_reefer}
-                onChange={e => setForm(f => ({ ...f, is_reefer: e.target.checked }))} />
-              <Snowflake size={13} className={form.is_reefer ? 'text-cyan-500' : 'text-gray-400'} />
-              <span className="text-xs font-semibold">Reefer Container</span>
-            </label>
-          </div>
-            <div className="flex items-center gap-3 text-xs text-gray-500">
-              <span>Max: 2×20ft &nbsp;|&nbsp; 1×40ft alone</span>
-              {form.containers.length < 2 && (
-                <button type="button"
-                  onClick={() => setForm(f => ({ ...f, containers: [...f.containers, { ...EMPTY_CONTAINER }] }))}
-                  className="flex items-center gap-1 text-blue-600 hover:text-blue-700 font-semibold">
-                  <Plus size={14} /> Add Container
-                </button>
-              )}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-3 text-xs text-gray-500">
+                <span>Max: 2×20ft &nbsp;|&nbsp; 1×40ft alone</span>
+                {form.containers.length < 2 && (
+                  <button type="button"
+                    onClick={() => setForm(f => ({ ...f, containers: [...f.containers, { ...EMPTY_CONTAINER }] }))}
+                    className="flex items-center gap-1 text-blue-600 hover:text-blue-700 font-semibold">
+                    <Plus size={14} /> Add Container
+                  </button>
+                )}
+              </div>
+              {/* Reefer toggle */}
+              <label className={clsx(
+                'flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer select-none transition-colors',
+                form.is_reefer
+                  ? 'bg-cyan-50 border-cyan-300 text-cyan-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+              )}>
+                <input type="checkbox" className="sr-only" checked={form.is_reefer}
+                  onChange={e => setForm(f => ({ ...f, is_reefer: e.target.checked }))} />
+                <Snowflake size={13} className={form.is_reefer ? 'text-cyan-500' : 'text-gray-400'} />
+                <span className="text-xs font-semibold">Reefer Container</span>
+              </label>
             </div>
           </div>
           {loadError && (
