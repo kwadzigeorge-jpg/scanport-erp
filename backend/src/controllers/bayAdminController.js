@@ -75,7 +75,7 @@ async function listBays(req, res, next) {
   try {
     const { area_id } = req.query;
     const { rows } = await db.query(`
-      SELECT b.id, b.bay_code, b.capacity, b.is_active, b.holding_area_id,
+      SELECT b.id, b.bay_code, b.capacity, b.is_active, b.is_reefer, b.holding_area_id,
              ha.name AS area_name, ha.code AS area_code,
              EXISTS (
                SELECT 1 FROM container_transactions ct
@@ -116,16 +116,18 @@ async function createBay(req, res, next) {
 async function updateBay(req, res, next) {
   try {
     const { id } = req.params;
-    const { bay_code, capacity } = req.body;
+    const { bay_code, capacity, is_reefer } = req.body;
     const { rows: before } = await db.query('SELECT * FROM bays WHERE id=$1', [id]);
     if (!before.length) return res.status(404).json({ error: 'Bay not found' });
     const { rows } = await db.query(
       `UPDATE bays
-       SET bay_code = COALESCE($1, bay_code),
-           capacity = COALESCE($2, capacity)
-       WHERE id = $3
+       SET bay_code  = COALESCE($1, bay_code),
+           capacity  = COALESCE($2, capacity),
+           is_reefer = CASE WHEN $3::boolean IS NOT NULL THEN $3::boolean ELSE is_reefer END
+       WHERE id = $4
        RETURNING *`,
-      [bay_code?.trim().toUpperCase() || null, capacity || null, id]
+      [bay_code?.trim().toUpperCase() || null, capacity || null,
+       is_reefer !== undefined ? is_reefer : null, id]
     );
     await logAudit(req, 'bay.update', 'bay', id, { before: before[0], after: rows[0] });
     res.json(rows[0]);

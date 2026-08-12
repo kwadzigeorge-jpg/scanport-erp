@@ -6,7 +6,7 @@ import {
   LayoutGrid, Database, AlertTriangle, BarChart3,
   CheckSquare, List, RefreshCw, Search, Settings,
   Truck, User, Phone, Clock, LogOut, Container, X, Printer,
-  Pencil, Trash2, Plus, Power,
+  Pencil, Trash2, Plus, Power, Snowflake,
 } from 'lucide-react';
 import io from 'socket.io-client';
 import toast from 'react-hot-toast';
@@ -113,12 +113,21 @@ function BayCard({ bay, areaName, onRelease, onPrint }) {
 
   if (!truck) {
     return (
-      <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-4 flex flex-col items-center justify-center min-h-[140px] gap-2">
-        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
-          <Truck size={14} className="text-gray-400" />
+      <div className={clsx(
+        'rounded-xl border-2 border-dashed p-4 flex flex-col items-center justify-center min-h-[140px] gap-2',
+        bay.is_reefer ? 'border-cyan-300 bg-cyan-50' : 'border-gray-200 bg-gray-50'
+      )}>
+        <div className={clsx('w-8 h-8 rounded-full flex items-center justify-center',
+          bay.is_reefer ? 'bg-cyan-100' : 'bg-gray-200')}>
+          {bay.is_reefer
+            ? <Snowflake size={14} className="text-cyan-500" />
+            : <Truck size={14} className="text-gray-400" />}
         </div>
         <p className="text-xs font-semibold text-gray-400">{bay.bay_code}</p>
-        <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full">Free</span>
+        {bay.is_reefer
+          ? <span className="text-xs text-cyan-600 font-medium bg-cyan-100 px-2 py-0.5 rounded-full flex items-center gap-1"><Snowflake size={10} />Reefer · Free</span>
+          : <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full">Free</span>
+        }
       </div>
     );
   }
@@ -132,9 +141,16 @@ function BayCard({ bay, areaName, onRelease, onPrint }) {
         {/* Header: bay code + status label + dwell */}
         <div className="flex items-start justify-between gap-1">
           <div className="space-y-1">
-            <span className={clsx('text-xs font-bold px-2 py-0.5 rounded-full', colors.badge)}>
-              {bay.bay_code}
-            </span>
+            <div className="flex items-center gap-1">
+              <span className={clsx('text-xs font-bold px-2 py-0.5 rounded-full', colors.badge)}>
+                {bay.bay_code}
+              </span>
+              {bay.is_reefer && (
+                <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-cyan-100 text-cyan-700 flex items-center gap-0.5">
+                  <Snowflake size={10} /> Reefer
+                </span>
+              )}
+            </div>
             <div>
               <span className={clsx('text-xs font-semibold px-1.5 py-0.5 rounded', colors.labelCls)}>
                 {colors.label}
@@ -537,6 +553,7 @@ function BayFormModal({ bay, areas, onClose }) {
     holding_area_id: bay?.holding_area_id || areas[0]?.id || '',
     bay_code:        bay?.bay_code        || '',
     capacity:        bay?.capacity        || 1,
+    is_reefer:       bay?.is_reefer       || false,
   });
   const [err, setErr] = useState('');
 
@@ -583,6 +600,15 @@ function BayFormModal({ bay, areas, onClose }) {
             <input className="input" type="number" min={1} max={10} value={f.capacity} required
               onChange={e => setF(p => ({ ...p, capacity: parseInt(e.target.value) }))} />
           </div>
+          <label className="flex items-center gap-3 cursor-pointer select-none py-1">
+            <input type="checkbox" checked={f.is_reefer}
+              onChange={e => setF(p => ({ ...p, is_reefer: e.target.checked }))}
+              className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500" />
+            <span className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+              <Snowflake size={14} className="text-cyan-500" /> Reefer bay
+            </span>
+            <span className="text-xs text-gray-400">(reserved for refrigerated containers)</span>
+          </label>
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
             <button type="submit" disabled={mut.isLoading} className="btn-primary flex-1 justify-center">
@@ -713,17 +739,23 @@ function ManageView() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="bg-gray-50 border-b">
-                {['Bay Code', 'Area', 'Capacity', 'Status', 'Occupancy', 'Total Usage', 'Actions'].map(h => (
+                {['Bay Code', 'Area', 'Type', 'Capacity', 'Status', 'Occupancy', 'Total Usage', 'Actions'].map(h => (
                   <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
                 ))}
               </tr></thead>
               <tbody className="divide-y divide-gray-50">
                 {!bays.length
-                  ? <tr><td colSpan={7} className="text-center py-12 text-gray-400">No bays found</td></tr>
+                  ? <tr><td colSpan={8} className="text-center py-12 text-gray-400">No bays found</td></tr>
                   : bays.map(b => (
                     <tr key={b.id} className={clsx('hover:bg-gray-50/50', !b.is_active && 'opacity-60')}>
                       <td className="px-4 py-3 font-mono font-bold text-gray-900">{b.bay_code}</td>
                       <td className="px-4 py-3 text-xs text-gray-500">{b.area_name}</td>
+                      <td className="px-4 py-3">
+                        {b.is_reefer
+                          ? <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 flex items-center gap-1 w-fit"><Snowflake size={10} />Reefer</span>
+                          : <span className="text-xs text-gray-400">Regular</span>
+                        }
+                      </td>
                       <td className="px-4 py-3 text-gray-600 text-center">{b.capacity}</td>
                       <td className="px-4 py-3">
                         <span className={clsx('text-xs font-semibold px-2 py-0.5 rounded-full',

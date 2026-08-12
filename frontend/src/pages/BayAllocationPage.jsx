@@ -6,7 +6,7 @@ import StatusBadge from '../components/Containers/StatusBadge';
 import ChitPrintView from '../components/Containers/ChitPrintView';
 import {
   Truck, Plus, Trash2, AlertCircle, CheckCircle,
-  User, Phone, Container, MapPin, Clock, RefreshCw, Printer
+  User, Phone, Container, MapPin, Clock, RefreshCw, Printer, Snowflake,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
@@ -211,6 +211,7 @@ const EMPTY_FORM = {
   truckNumber: '', driverName: '', driverPhone: '',
   agentName: '', agentPhone: '',
   containers: [{ ...EMPTY_CONTAINER }],
+  is_reefer: false,
 };
 
 export default function BayAllocationPage() {
@@ -273,6 +274,7 @@ export default function BayAllocationPage() {
       agentName:     form.agentName.trim(),
       agentPhone:    form.agentPhone.trim(),
       containers:    form.containers.map(c => ({ number: c.number, size: c.size })),
+      is_reefer:     form.is_reefer,
     });
   };
 
@@ -316,19 +318,30 @@ export default function BayAllocationPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             <MapPin size={20} className="text-blue-600" /> Bay Allocation
           </h1>
           <p className="text-sm text-gray-500 mt-1">Assign bays to checked-in trucks and issue digital chits.</p>
         </div>
-        <div className={clsx(
-          'flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border',
-          baysData?.free === 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'
-        )}>
-          <span className={clsx('w-2 h-2 rounded-full', baysData?.free === 0 ? 'bg-red-500' : 'bg-green-500')} />
-          {baysData ? `${baysData.free} / ${baysData.total} bays free` : 'Loading…'}
+        <div className="flex gap-2 flex-wrap">
+          <div className={clsx(
+            'flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border',
+            baysData?.regular_free === 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'
+          )}>
+            <span className={clsx('w-2 h-2 rounded-full', baysData?.regular_free === 0 ? 'bg-red-500' : 'bg-green-500')} />
+            {baysData ? `${baysData.regular_free ?? baysData.free} reg. bays free` : 'Loading…'}
+          </div>
+          {baysData?.reefer_total > 0 && (
+            <div className={clsx(
+              'flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border',
+              baysData.reefer_free === 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-cyan-50 border-cyan-200 text-cyan-700'
+            )}>
+              <Snowflake size={13} className={baysData.reefer_free === 0 ? 'text-red-500' : 'text-cyan-500'} />
+              {`${baysData.reefer_free} reefer bays free`}
+            </div>
+          )}
         </div>
       </div>
 
@@ -343,11 +356,13 @@ export default function BayAllocationPage() {
       </div>
 
       {/* Full bay warning */}
-      {baysData?.free === 0 && (
+      {baysData && (form.is_reefer ? baysData.reefer_free === 0 : (baysData.regular_free ?? baysData.free) === 0) && (
         <div className="card p-4 bg-red-50 border-red-300 border-2 flex items-start gap-3">
           <AlertCircle className="text-red-600 shrink-0 mt-0.5" size={20} />
           <div>
-            <p className="font-semibold text-red-800">All bays are currently full</p>
+            <p className="font-semibold text-red-800">
+              {form.is_reefer ? 'All reefer bays are currently full' : 'All regular bays are currently full'}
+            </p>
             <p className="text-sm text-red-600 mt-0.5">No new trucks can be allocated until a bay is released.</p>
           </div>
         </div>
@@ -419,10 +434,23 @@ export default function BayAllocationPage() {
 
         {/* Containers */}
         <div className="card p-5 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-blue-700 flex items-center gap-2">
               <Container size={15} /> Containers
             </h2>
+            {/* Reefer toggle */}
+            <label className={clsx(
+              'flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer select-none transition-colors',
+              form.is_reefer
+                ? 'bg-cyan-50 border-cyan-300 text-cyan-700'
+                : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+            )}>
+              <input type="checkbox" className="sr-only" checked={form.is_reefer}
+                onChange={e => setForm(f => ({ ...f, is_reefer: e.target.checked }))} />
+              <Snowflake size={13} className={form.is_reefer ? 'text-cyan-500' : 'text-gray-400'} />
+              <span className="text-xs font-semibold">Reefer Container</span>
+            </label>
+          </div>
             <div className="flex items-center gap-3 text-xs text-gray-500">
               <span>Max: 2×20ft &nbsp;|&nbsp; 1×40ft alone</span>
               {form.containers.length < 2 && (
@@ -457,7 +485,8 @@ export default function BayAllocationPage() {
         {/* Submit → allocate + print chit */}
         <button
           type="submit"
-          disabled={mutation.isLoading || !!loadError || baysData?.free === 0}
+          disabled={mutation.isLoading || !!loadError ||
+            (baysData && (form.is_reefer ? baysData.reefer_free === 0 : (baysData.regular_free ?? baysData.free) === 0))}
           className="btn-primary w-full justify-center py-3 text-base"
         >
           {mutation.isLoading

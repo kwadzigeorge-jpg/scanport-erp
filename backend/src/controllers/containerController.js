@@ -114,7 +114,7 @@ async function assignBay(req, res, next) {
     if (!resolvedBayId) {
       const { rows: bays } = await db.query(
         `SELECT b.id FROM bays b
-         WHERE b.holding_area_id=$1 AND b.is_active=TRUE
+         WHERE b.holding_area_id=$1 AND b.is_active=TRUE AND b.is_reefer=FALSE
            AND b.id NOT IN (
              SELECT bay_id FROM container_transactions
              WHERE bay_id IS NOT NULL AND status=ANY($2)
@@ -710,7 +710,7 @@ async function baysView(req, res, next) {
       `SELECT ha.id, ha.name, ha.code FROM holding_areas ha WHERE ha.is_active=TRUE ORDER BY ha.name`
     );
     const { rows: bays } = await db.query(
-      `SELECT b.id, b.bay_code, b.holding_area_id, b.capacity FROM bays b WHERE b.is_active=TRUE ORDER BY b.holding_area_id, b.bay_code`
+      `SELECT b.id, b.bay_code, b.holding_area_id, b.capacity, b.is_reefer FROM bays b WHERE b.is_active=TRUE ORDER BY b.holding_area_id, b.bay_code`
     );
 
     const { rows: cfg } = await db.query("SELECT value FROM system_config WHERE key='overstay_threshold_hours'");

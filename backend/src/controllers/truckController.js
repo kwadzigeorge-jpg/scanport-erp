@@ -36,6 +36,7 @@ async function createTruckAllocation(req, res, next) {
       agentName,  agentPhone,
       containers,           // array: [{ number, size }]
       holdingAreaId, bayId,
+      is_reefer = false,    // route to reefer bays when true
     } = req.body;
 
     // ── Validate required fields ──
@@ -95,47 +96,64 @@ async function createTruckAllocation(req, res, next) {
     let areaId = holdingAreaId || null;
     const occupiedStatuses = "('BAY_ASSIGNED','ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED','IN_HOLDING_AREA')";
 
+    const reeferFlag = is_reefer === true || is_reefer === 'true';
+
     if (resolvedBayId) {
-      // Specific bay requested — verify it is free
+      // Specific bay requested — verify it is free and matches reefer expectation
       const { rows: occ } = await client.query(
         `SELECT id FROM container_transactions WHERE bay_id=$1 AND status IN ${occupiedStatuses}`,
         [resolvedBayId]
       );
       if (occ.length) return res.status(409).json({ error: 'Selected bay is currently occupied. Choose another bay.' });
-      // Derive area from bay if not supplied
-      if (!areaId) {
-        const { rows: bi } = await client.query('SELECT holding_area_id FROM bays WHERE id=$1', [resolvedBayId]);
-        areaId = bi[0]?.holding_area_id;
+      // Verify reefer alignment
+      const { rows: bi } = await client.query('SELECT holding_area_id, is_reefer FROM bays WHERE id=$1', [resolvedBayId]);
+      if (!bi.length) return res.status(404).json({ error: 'Bay not found.' });
+      if (bi[0].is_reefer !== reeferFlag) {
+        return res.status(409).json({
+          error: reeferFlag
+            ? 'The selected bay is not a reefer bay. Choose a reefer-designated bay.'
+            : 'The selected bay is a reefer bay and cannot be used for regular containers.',
+        });
       }
+      if (!areaId) areaId = bi[0].holding_area_id;
     } else if (areaId) {
-      // Specific area requested — find first free bay within it
+      // Specific area requested — find first free bay matching reefer flag
       const { rows: freeBays } = await client.query(
         `SELECT b.id FROM bays b
-         WHERE b.holding_area_id=$1 AND b.is_active=TRUE
+         WHERE b.holding_area_id=$1 AND b.is_active=TRUE AND b.is_reefer=$2
            AND b.id NOT IN (
              SELECT bay_id FROM container_transactions
              WHERE status IN ${occupiedStatuses} AND bay_id IS NOT NULL
            )
          ORDER BY b.bay_code LIMIT 1`,
-        [areaId]
+        [areaId, reeferFlag]
       );
-      if (!freeBays.length) return res.status(409).json({ error: 'Selected holding area is full.' });
+      if (!freeBays.length) {
+        return res.status(409).json({
+          error: reeferFlag
+            ? 'No reefer bays available in the selected area.'
+            : 'Selected holding area is full.',
+        });
+      }
       resolvedBayId = freeBays[0].id;
     } else {
-      // Auto-assign: search ALL active holding areas in order, fill Alpha before Beta
+      // Auto-assign: search ALL active holding areas in order
       const { rows: freeBays } = await client.query(
         `SELECT b.id, b.holding_area_id FROM bays b
          JOIN holding_areas ha ON ha.id = b.holding_area_id
-         WHERE ha.is_active = TRUE AND b.is_active = TRUE
+         WHERE ha.is_active = TRUE AND b.is_active = TRUE AND b.is_reefer = $1
            AND b.id NOT IN (
              SELECT bay_id FROM container_transactions
              WHERE status IN ${occupiedStatuses} AND bay_id IS NOT NULL
            )
-         ORDER BY ha.id, b.bay_code LIMIT 1`
+         ORDER BY ha.id, b.bay_code LIMIT 1`,
+        [reeferFlag]
       );
       if (!freeBays.length) {
         return res.status(409).json({
-          error: 'All bays across all holding areas are currently full. Please wait for a truck to be released.',
+          error: reeferFlag
+            ? 'All reefer bays are currently full. Please wait for a reefer bay to be released.'
+            : 'All bays across all holding areas are currently full. Please wait for a truck to be released.',
         });
       }
       resolvedBayId = freeBays[0].id;
@@ -314,7 +332,7 @@ async function getAvailableBays(req, res, next) {
     if (holdingAreaId) { params.push(holdingAreaId); conditions.push(`b.holding_area_id=$${params.length}`); }
 
     const { rows } = await db.query(
-      `SELECT b.id, b.bay_code, b.holding_area_id, b.capacity,
+      `SELECT b.id, b.bay_code, b.holding_area_id, b.capacity, b.is_reefer,
               ha.name AS area_name, ha.code AS area_code,
               CASE WHEN ct.id IS NOT NULL THEN TRUE ELSE FALSE END AS is_occupied,
               ct.transaction_id AS allocation_ref, ct.truck_number
@@ -327,11 +345,20 @@ async function getAvailableBays(req, res, next) {
       params
     );
 
-    const total    = rows.length;
-    const free     = rows.filter(r => !r.is_occupied).length;
-    const occupied = rows.filter(r => r.is_occupied).length;
+    const regular = rows.filter(r => !r.is_reefer);
+    const reefer  = rows.filter(r => r.is_reefer);
 
-    return res.json({ bays: rows, total, free, occupied });
+    return res.json({
+      bays:          rows,
+      total:         rows.length,
+      free:          rows.filter(r => !r.is_occupied && !r.is_reefer).length,
+      occupied:      rows.filter(r => r.is_occupied  && !r.is_reefer).length,
+      reefer_total:  reefer.length,
+      reefer_free:   reefer.filter(r => !r.is_occupied).length,
+      reefer_occupied: reefer.filter(r => r.is_occupied).length,
+      regular_total: regular.length,
+      regular_free:  regular.filter(r => !r.is_occupied).length,
+    });
   } catch (err) { next(err); }
 }
 
