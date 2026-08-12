@@ -14,7 +14,11 @@ import { format } from 'date-fns';
 const CONTAINER_REGEX = /^[A-Z]{4}\d{7}$/;
 const EMPTY_CONTAINER = { number: '', size: '20ft' };
 
-function validateLoad(containers) {
+function validateLoad(containers, isReefer) {
+  if (isReefer) {
+    if (containers.length > 20) return 'A reefer batch cannot exceed 20 containers.';
+    return null;
+  }
   if (containers.length > 2) return 'Maximum 2 containers per truck.';
   if (containers.length === 2) {
     const has40 = containers.some(c => c.size === '40ft');
@@ -252,7 +256,7 @@ export default function BayAllocationPage() {
     onError: (err) => toast.error(err.response?.data?.error || 'Allocation failed.'),
   });
 
-  const loadError = validateLoad(form.containers);
+  const loadError = validateLoad(form.containers, form.is_reefer);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -444,7 +448,7 @@ export default function BayAllocationPage() {
             <div className="flex items-center gap-3 flex-wrap">
               <div className="flex items-center gap-3 text-xs text-gray-500">
                 <span>Max: 2×20ft &nbsp;|&nbsp; 1×40ft alone</span>
-                {form.containers.length < 2 && (
+                {form.containers.length < (form.is_reefer ? 20 : 2) && (
                   <button type="button"
                     onClick={() => setForm(f => ({ ...f, containers: [...f.containers, { ...EMPTY_CONTAINER }] }))}
                     className="flex items-center gap-1 text-blue-600 hover:text-blue-700 font-semibold">

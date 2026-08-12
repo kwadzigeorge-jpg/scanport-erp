@@ -770,6 +770,7 @@ async function baysView(req, res, next) {
           dwell_minutes: dwell,
           dwell_status:  dwell > thresholdMins ? 'overstayed' : dwell > thresholdMins * 0.66 ? 'warning' : 'ok',
           containers: [{
+            id:               ct.id,
             container_number: ct.container_number,
             container_size:   ct.container_size,
             waybill_number:   ct.waybill_number,
@@ -778,8 +779,9 @@ async function baysView(req, res, next) {
           }],
         };
       } else {
-        // Second container on the same truck/bay — append to containers list
+        // Additional container on the same bay — append to containers list
         txByBay[ct.bay_id].containers.push({
+          id:               ct.id,
           container_number: ct.container_number,
           container_size:   ct.container_size,
           waybill_number:   ct.waybill_number,

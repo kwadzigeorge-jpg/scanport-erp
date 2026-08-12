@@ -82,10 +82,12 @@ export const containersApi = {
 
 // ─── Trucks ───────────────────────────────────────────────────────────────────
 export const trucksApi = {
-  create:         (data)   => api.post('/trucks', data),
-  list:           (params) => api.get('/trucks', { params }),
-  release:        (id, d)  => api.post(`/trucks/${id}/release`, d),
-  availableBays:  (params) => api.get('/trucks/bays', { params }),
+  create:          (data)   => api.post('/trucks', data),
+  list:            (params) => api.get('/trucks', { params }),
+  release:         (id, d)  => api.post(`/trucks/${id}/release`, d),
+  availableBays:   (params) => api.get('/trucks/bays', { params }),
+  checkinContainer:  (ctId) => api.patch(`/trucks/containers/${ctId}/checkin`),
+  releaseContainer:  (ctId) => api.patch(`/trucks/containers/${ctId}/release`),
 };
 
 // ─── Bay Admin ────────────────────────────────────────────────────────────────

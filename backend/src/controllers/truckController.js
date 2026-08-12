@@ -40,6 +40,8 @@ async function createTruckAllocation(req, res, next) {
     } = req.body;
 
     // ── Validate required fields ──
+    const reeferFlag = is_reefer === true || is_reefer === 'true';
+
     if (!agentName?.trim())     return res.status(400).json({ error: 'Agent name is required.' });
     if (!agentPhone?.trim() || !validatePhoneNumber(agentPhone))   return res.status(400).json({ error: 'Valid agent phone is required.' });
     if (!Array.isArray(containers) || containers.length === 0)     return res.status(400).json({ error: 'At least one container is required.' });
@@ -57,28 +59,34 @@ async function createTruckAllocation(req, res, next) {
       validatedContainers.push({ number: v.value, size });
     }
 
-    // ── Validate truck load rules ──
-    const loadErr = validateTruckLoad(validatedContainers);
-    if (loadErr) return res.status(400).json({ error: loadErr });
+    // ── Validate truck load rules (skip for reefer batches — multiple containers share one bay sequentially) ──
+    if (!reeferFlag) {
+      const loadErr = validateTruckLoad(validatedContainers);
+      if (loadErr) return res.status(400).json({ error: loadErr });
+    } else if (validatedContainers.length > 20) {
+      return res.status(400).json({ error: 'A reefer batch cannot exceed 20 containers.' });
+    }
 
-    // ── Agent container limit (max 10 active) ──
+    // ── Agent container limit (max 10 active for regular; reefer batch counts differently) ──
     const ACTIVE_STATUSES = [
       'ARRIVED_AT_BOOTH','PENDING_BAY_ASSIGNMENT','BAY_ASSIGNED',
       'ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED',
     ];
-    const { rows: agentCount } = await client.query(
-      `SELECT COUNT(*)::int AS cnt FROM container_transactions
-       WHERE agent_phone = $1 AND status = ANY($2)`,
-      [agentPhone.trim(), ACTIVE_STATUSES]
-    );
-    const existing = agentCount[0].cnt;
-    if (existing + validatedContainers.length > 10) {
-      const remaining = 10 - existing;
-      return res.status(409).json({
-        error: remaining <= 0
-          ? `Agent ${agentName.trim()} already has ${existing} active containers — the maximum is 10. They must release containers before new ones can be added.`
-          : `Agent ${agentName.trim()} has ${existing} active containers. Adding ${validatedContainers.length} would exceed the limit of 10. Only ${remaining} more container${remaining === 1 ? '' : 's'} can be assigned to this agent.`,
-      });
+    if (!reeferFlag) {
+      const { rows: agentCount } = await client.query(
+        `SELECT COUNT(*)::int AS cnt FROM container_transactions
+         WHERE agent_phone = $1 AND status = ANY($2)`,
+        [agentPhone.trim(), ACTIVE_STATUSES]
+      );
+      const existing = agentCount[0].cnt;
+      if (existing + validatedContainers.length > 10) {
+        const remaining = 10 - existing;
+        return res.status(409).json({
+          error: remaining <= 0
+            ? `Agent ${agentName.trim()} already has ${existing} active containers — the maximum is 10. They must release containers before new ones can be added.`
+            : `Agent ${agentName.trim()} has ${existing} active containers. Adding ${validatedContainers.length} would exceed the limit of 10. Only ${remaining} more container${remaining === 1 ? '' : 's'} can be assigned to this agent.`,
+        });
+      }
     }
 
     // ── Check for duplicate active containers ──
@@ -95,8 +103,6 @@ async function createTruckAllocation(req, res, next) {
     let resolvedBayId = bayId || null;
     let areaId = holdingAreaId || null;
     const occupiedStatuses = "('BAY_ASSIGNED','ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED','IN_HOLDING_AREA')";
-
-    const reeferFlag = is_reefer === true || is_reefer === 'true';
 
     // Truck number is required for regular allocations; optional for reefer
     if (!reeferFlag && !truckNumber?.trim()) {
@@ -170,11 +176,11 @@ async function createTruckAllocation(req, res, next) {
     const { rows: [truck] } = await client.query(
       `INSERT INTO truck_allocations
          (allocation_ref, truck_number, driver_name, driver_phone,
-          agent_name, agent_phone, holding_area_id, bay_id, status, time_in, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'IN_BAY',NOW(),$9)
+          agent_name, agent_phone, holding_area_id, bay_id, status, is_reefer, time_in, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'IN_BAY',$9,NOW(),$10)
        RETURNING *`,
       [allocationRef, truckNumberVal, driverNameVal, driverPhoneVal,
-       agentName.trim(), agentPhone.trim(), areaId, resolvedBayId, req.user.id]
+       agentName.trim(), agentPhone.trim(), areaId, resolvedBayId, reeferFlag, req.user.id]
     );
 
     // ── Create container transactions ──
@@ -378,4 +384,119 @@ async function generateTxnId(client) {
   return `TXN-${dateStr}-${seq}`;
 }
 
-module.exports = { createTruckAllocation, releaseTruck, listTruckAllocations, getAvailableBays };
+// ─── Check In a Single Reefer Container ──────────────────────────────────────
+// Marks one container in a reefer batch as arrived at the bay (physically present).
+async function checkinReeferContainer(req, res, next) {
+  try {
+    const { id } = req.params; // container_transaction id
+
+    const { rows } = await db.query(
+      `SELECT ct.*, b.is_reefer FROM container_transactions ct
+       JOIN bays b ON b.id = ct.bay_id
+       WHERE ct.id = $1`,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Container transaction not found.' });
+    const ct = rows[0];
+
+    if (!ct.is_reefer) return res.status(409).json({ error: 'This container is not in a reefer bay.' });
+    if (ct.status !== 'BAY_ASSIGNED') {
+      return res.status(409).json({ error: `Container is already ${ct.status.replace(/_/g, ' ').toLowerCase()}.` });
+    }
+
+    await db.query(
+      `UPDATE container_transactions
+       SET status = 'ARRIVED_AT_BAY', bay_entry_time = NOW(), time_in = NOW()
+       WHERE id = $1`,
+      [id]
+    );
+
+    await logAudit(req, 'reefer:container_checkin', 'container_transactions', id, {
+      containerNumber: ct.container_number, bayId: ct.bay_id,
+    });
+
+    const io = req.app.get('io');
+    if (io) io.to('operations').emit('transaction:updated', { type: 'reefer_checkin', containerId: id });
+
+    return res.json({ message: `Container ${ct.container_number} checked in to bay.`, status: 'ARRIVED_AT_BAY' });
+  } catch (err) { next(err); }
+}
+
+// ─── Release a Single Reefer Container ───────────────────────────────────────
+// Marks one container in a reefer batch as exited. Auto-closes the batch when
+// all containers have exited.
+async function releaseReeferContainer(req, res, next) {
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params; // container_transaction id
+
+    const { rows } = await client.query(
+      `SELECT ct.*, b.is_reefer FROM container_transactions ct
+       JOIN bays b ON b.id = ct.bay_id
+       WHERE ct.id = $1`,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Container transaction not found.' });
+    const ct = rows[0];
+
+    if (!ct.is_reefer) return res.status(409).json({ error: 'This container is not in a reefer bay.' });
+    const releasable = ['ARRIVED_AT_BAY', 'UNDER_EXAMINATION', 'EXAMINATION_COMPLETED', 'BAY_ASSIGNED'];
+    if (!releasable.includes(ct.status)) {
+      return res.status(409).json({ error: `Container cannot be released from status ${ct.status}.` });
+    }
+
+    const timeOut = new Date();
+    const dwellMins = ct.time_in
+      ? Math.round((timeOut - new Date(ct.time_in)) / 60000)
+      : null;
+
+    await client.query(
+      `UPDATE container_transactions
+       SET status = 'EXITED', time_out = $1, dwell_minutes = $2, confirmed_exit_by = $3
+       WHERE id = $4`,
+      [timeOut, dwellMins, req.user.id, id]
+    );
+
+    // Auto-close the reefer batch (truck_allocation) if all containers are now done
+    if (ct.truck_allocation_id) {
+      const { rows: remaining } = await client.query(
+        `SELECT id FROM container_transactions
+         WHERE truck_allocation_id = $1
+           AND status NOT IN ('EXITED', 'CANCELLED')
+           AND id != $2`,
+        [ct.truck_allocation_id, id]
+      );
+      if (!remaining.length) {
+        await client.query(
+          `UPDATE truck_allocations
+           SET status = 'RELEASED', time_out = $1, released_by = $2
+           WHERE id = $3`,
+          [timeOut, req.user.id, ct.truck_allocation_id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    await logAudit(req, 'reefer:container_released', 'container_transactions', id, {
+      containerNumber: ct.container_number, bayId: ct.bay_id, dwellMins,
+    });
+
+    const io = req.app.get('io');
+    if (io) io.to('operations').emit('transaction:updated', { type: 'reefer_release', containerId: id });
+
+    return res.json({ message: `Container ${ct.container_number} released. Bay slot freed.`, status: 'EXITED' });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = {
+  createTruckAllocation, releaseTruck, listTruckAllocations, getAvailableBays,
+  checkinReeferContainer, releaseReeferContainer,
+};

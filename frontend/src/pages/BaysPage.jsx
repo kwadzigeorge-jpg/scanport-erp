@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { containersApi, bayAdminApi } from '../services/api';
+import { containersApi, bayAdminApi, trucksApi } from '../services/api';
 import { format, formatDistanceToNow } from 'date-fns';
 import {
   LayoutGrid, Database, AlertTriangle, BarChart3,
   CheckSquare, List, RefreshCw, Search, Settings,
-  Truck, User, Phone, Clock, LogOut, Container, X, Printer,
+  Truck, User, Phone, Clock, LogOut, LogIn, Container, X, Printer,
   Pencil, Trash2, Plus, Power, Snowflake,
 } from 'lucide-react';
 import io from 'socket.io-client';
@@ -106,8 +106,16 @@ function ReleaseModal({ truck, onClose, onConfirm, loading }) {
   );
 }
 
+// ─── Container status badge ───────────────────────────────────────────────────
+const CT_STATUS = {
+  BAY_ASSIGNED:          { label: 'Assigned',    cls: 'bg-indigo-100 text-indigo-700' },
+  ARRIVED_AT_BAY:        { label: 'In Bay',       cls: 'bg-green-100 text-green-700'  },
+  UNDER_EXAMINATION:     { label: 'Examination',  cls: 'bg-amber-100 text-amber-700'  },
+  EXAMINATION_COMPLETED: { label: 'Done',         cls: 'bg-blue-100 text-blue-700'    },
+};
+
 // ─── Bay Card ─────────────────────────────────────────────────────────────────
-function BayCard({ bay, areaName, onRelease, onPrint }) {
+function BayCard({ bay, areaName, onRelease, onPrint, onCheckinContainer, onReleaseContainer }) {
   const { truck } = bay;
   const colors = bayColor(truck);
 
@@ -132,6 +140,85 @@ function BayCard({ bay, areaName, onRelease, onPrint }) {
     );
   }
 
+  // ── Reefer bay: per-container check-in/release ────────────────────────────
+  if (bay.is_reefer) {
+    const containers = truck.containers || [];
+    const inBayCount = containers.filter(c =>
+      ['ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED'].includes(c.status)
+    ).length;
+
+    return (
+      <div className="rounded-xl border-2 border-cyan-300 overflow-hidden bg-white">
+        <div className="h-1.5 bg-cyan-500" />
+        <div className="p-3 space-y-2">
+          {/* Header */}
+          <div className="flex items-center justify-between gap-1">
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-800">{bay.bay_code}</span>
+              <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-cyan-100 text-cyan-700 flex items-center gap-0.5">
+                <Snowflake size={10} /> Reefer Batch
+              </span>
+            </div>
+            <span className="text-xs text-gray-500 shrink-0">{inBayCount}/{containers.length} in bay</span>
+          </div>
+
+          {/* Agent */}
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-1.5 text-xs text-gray-700">
+              <User size={11} className="text-gray-400 shrink-0" />
+              <span className="font-semibold truncate">{truck.agent_name}</span>
+            </div>
+            {truck.agent_phone && (
+              <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                <Phone size={11} className="shrink-0" />
+                <span>{truck.agent_phone}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Per-container rows */}
+          <div className="space-y-1.5 border-t border-cyan-100 pt-2">
+            {containers.map((c, i) => {
+              const st = CT_STATUS[c.status] || { label: c.status, cls: 'bg-gray-100 text-gray-600' };
+              const canCheckin  = c.status === 'BAY_ASSIGNED';
+              const canRelease  = ['ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED'].includes(c.status);
+              return (
+                <div key={i} className="bg-cyan-50 rounded-lg px-2 py-1.5 space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <Container size={11} className="text-cyan-600 shrink-0" />
+                    <span className="text-xs font-mono font-bold text-gray-800 truncate flex-1">{c.container_number}</span>
+                    <span className={clsx('text-xs px-1.5 py-0.5 rounded font-semibold shrink-0', st.cls)}>{st.label}</span>
+                  </div>
+                  {(canCheckin || canRelease) && (
+                    <div className="flex gap-1">
+                      {canCheckin && (
+                        <button
+                          onClick={() => onCheckinContainer(c.id, c.container_number)}
+                          className="flex-1 flex items-center justify-center gap-1 py-1 rounded text-xs font-semibold bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+                        >
+                          <LogIn size={10} /> Check In
+                        </button>
+                      )}
+                      {canRelease && (
+                        <button
+                          onClick={() => onReleaseContainer(c.id, c.container_number)}
+                          className="flex-1 flex items-center justify-center gap-1 py-1 rounded text-xs font-semibold bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+                        >
+                          <LogOut size={10} /> Release
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Regular bay ───────────────────────────────────────────────────────────
   return (
     <div className={clsx('rounded-xl border-2 overflow-hidden bg-white', colors.border)}>
       {/* Status bar */}
@@ -145,11 +232,6 @@ function BayCard({ bay, areaName, onRelease, onPrint }) {
               <span className={clsx('text-xs font-bold px-2 py-0.5 rounded-full', colors.badge)}>
                 {bay.bay_code}
               </span>
-              {bay.is_reefer && (
-                <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-cyan-100 text-cyan-700 flex items-center gap-0.5">
-                  <Snowflake size={10} /> Reefer
-                </span>
-              )}
             </div>
             <div>
               <span className={clsx('text-xs font-semibold px-1.5 py-0.5 rounded', colors.labelCls)}>
@@ -221,7 +303,7 @@ function BayCard({ bay, areaName, onRelease, onPrint }) {
 }
 
 // ─── Allocation Grid ──────────────────────────────────────────────────────────
-function AllocationView({ areas, search, onRelease, onPrint }) {
+function AllocationView({ areas, search, onRelease, onPrint, onCheckinContainer, onReleaseContainer }) {
   return (
     <div className="space-y-8">
       {areas.map(area => {
@@ -251,7 +333,9 @@ function AllocationView({ areas, search, onRelease, onPrint }) {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
               {baysToShow.map(bay => (
-                <BayCard key={bay.id} bay={bay} areaName={area.name} onRelease={onRelease} onPrint={onPrint} />
+                <BayCard key={bay.id} bay={bay} areaName={area.name}
+                  onRelease={onRelease} onPrint={onPrint}
+                  onCheckinContainer={onCheckinContainer} onReleaseContainer={onReleaseContainer} />
               ))}
             </div>
           </div>
@@ -850,6 +934,29 @@ export default function BaysPage() {
     }
   );
 
+  const checkinContainerMutation = useMutation(
+    (ctId) => trucksApi.checkinContainer(ctId),
+    {
+      onSuccess: (res, ctId) => {
+        toast.success(res.data.message || 'Container checked in.');
+        refetch();
+      },
+      onError: (err) => toast.error(err.response?.data?.error || 'Check-in failed.'),
+    }
+  );
+
+  const releaseContainerMutation = useMutation(
+    (ctId) => trucksApi.releaseContainer(ctId),
+    {
+      onSuccess: (res) => {
+        toast.success(res.data.message || 'Container released.');
+        refetch();
+        qc.invalidateQueries('dashboard');
+      },
+      onError: (err) => toast.error(err.response?.data?.error || 'Release failed.'),
+    }
+  );
+
   useEffect(() => {
     const socket = io('/', { path: '/socket.io' });
     socket.on('transaction:new',     () => refetch());
@@ -937,7 +1044,14 @@ export default function BaysPage() {
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
           </div>
         ) : tab === 'allocation' || tab === 'queued' ? (
-          <AllocationView areas={tabAreas} search={search} onRelease={handleRelease} onPrint={handlePrint} />
+          <AllocationView areas={tabAreas} search={search} onRelease={handleRelease} onPrint={handlePrint}
+            onCheckinContainer={(id, cn) => {
+              if (window.confirm(`Check in container ${cn}?`)) checkinContainerMutation.mutate(id);
+            }}
+            onReleaseContainer={(id, cn) => {
+              if (window.confirm(`Release container ${cn}? This cannot be undone.`)) releaseContainerMutation.mutate(id);
+            }}
+          />
         ) : tab === 'data' ? (
           <DataView areas={areas} onRelease={handleRelease} onPrint={handlePrint} />
         ) : tab === 'overstayed' ? (
