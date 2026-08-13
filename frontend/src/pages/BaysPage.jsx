@@ -283,15 +283,23 @@ function BayCard({ bay, areaName, onRelease, onPrint, onCheckinContainer, onRele
             })}
           </div>
 
-          {/* Add containers button (booth officers only, max 20) */}
-          {canManageReefer && containers.length < 20 && (
+          {/* Footer actions */}
+          <div className="flex gap-1.5 mt-1">
             <button
-              onClick={() => onAddContainers(truck, bay.bay_code)}
-              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border border-cyan-200 transition-colors mt-1"
+              onClick={() => onPrint(truck, bay.bay_code, areaName, true)}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
             >
-              <Plus size={11} /> Add Containers
+              <Printer size={11} /> Chit
             </button>
-          )}
+            {canManageReefer && containers.length < 20 && (
+              <button
+                onClick={() => onAddContainers(truck, bay.bay_code)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border border-cyan-200 transition-colors"
+              >
+                <Plus size={11} /> Add
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -1075,7 +1083,7 @@ export default function BaysPage() {
     setAddContainersTarget({ truck, bayCode });
   };
 
-  const handlePrint = (truck, bayCode, areaName) => {
+  const handlePrint = (truck, bayCode, areaName, isReefer = false) => {
     setPrintChit({
       transaction_id:   truck.allocation_ref || '—',
       containers:       truck.containers || [],
@@ -1087,6 +1095,7 @@ export default function BaysPage() {
       bay_code:         bayCode,
       qr_code_token:    truck.containers?.[0]?.qr_code_token || truck.qr_token || null,
       created_at:       new Date().toISOString(),
+      is_reefer:        isReefer,
     });
   };
 

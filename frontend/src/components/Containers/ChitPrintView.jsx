@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
-import { Printer } from 'lucide-react';
+import { Printer, Snowflake } from 'lucide-react';
 
 export default function ChitPrintView({ transaction, onClose }) {
   const printRef = useRef();
@@ -10,19 +10,24 @@ export default function ChitPrintView({ transaction, onClose }) {
 
   if (!transaction) return null;
 
+  const isReefer = !!transaction.is_reefer;
+
   // Support both multi-container (containers[]) and single-container (qr_code_token) flows
   const containers = transaction.containers?.length
     ? transaction.containers
-    : [{ container_number: transaction.container_number, qr_code_token: transaction.qr_code_token }];
+    : [{ container_number: transaction.container_number, container_size: transaction.container_size, qr_code_token: transaction.qr_code_token }];
 
   const isMulti = containers.length > 1;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         {/* Actions */}
-        <div className="flex items-center justify-between px-5 py-4 border-b no-print">
-          <h2 className="font-semibold text-gray-900">Digital Chit</h2>
+        <div className="flex items-center justify-between px-5 py-4 border-b no-print sticky top-0 bg-white z-10">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            {isReefer && <Snowflake size={15} className="text-cyan-500" />}
+            Digital Chit
+          </h2>
           <div className="flex gap-2">
             <button onClick={handlePrint} className="btn-primary text-sm">
               <Printer size={15} /> Print
@@ -38,43 +43,48 @@ export default function ChitPrintView({ transaction, onClose }) {
             <img src="/logo.png" alt="ScanPort" className="h-12 w-12 object-contain" />
             <div>
               <p className="font-bold text-gray-900 text-base tracking-wide">SCANPORT</p>
-              <p className="text-xs text-gray-500 font-medium">Holding Area Admission Chit</p>
+              <p className="text-xs text-gray-500 font-medium">
+                {isReefer ? 'Reefer Batch Admission Chit' : 'Holding Area Admission Chit'}
+              </p>
             </div>
           </div>
 
-          {/* QR Code(s) */}
-          {isMulti ? (
-            <div className="flex justify-center gap-4 mb-4">
-              {containers.map((c, i) => (
-                <div key={i} className="flex flex-col items-center gap-1">
-                  <div className="p-2 border-2 border-gray-200 rounded-xl">
-                    <QRCodeSVG
-                      value={`/api/containers/verify/${c.qr_code_token || 'unknown'}`}
-                      size={110}
-                      level="H"
-                    />
+          {/* QR Code(s) — skipped for reefer */}
+          {!isReefer && (
+            isMulti ? (
+              <div className="flex justify-center gap-4 mb-4 flex-wrap">
+                {containers.map((c, i) => (
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <div className="p-2 border-2 border-gray-200 rounded-xl">
+                      <QRCodeSVG
+                        value={`/api/containers/verify/${c.qr_code_token || 'unknown'}`}
+                        size={110}
+                        level="H"
+                      />
+                    </div>
+                    <p className="text-xs font-mono font-bold text-gray-700">{c.container_number}</p>
+                    <p className="text-xs text-gray-400">Container {i + 1}</p>
                   </div>
-                  <p className="text-xs font-mono font-bold text-gray-700">{c.container_number}</p>
-                  <p className="text-xs text-gray-400">Container {i + 1}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex justify-center mb-4">
-              <div className="p-3 border-2 border-gray-200 rounded-xl">
-                <QRCodeSVG
-                  value={`/api/containers/verify/${containers[0].qr_code_token || 'unknown'}`}
-                  size={160}
-                  level="H"
-                />
+                ))}
               </div>
-            </div>
+            ) : (
+              <div className="flex justify-center mb-4">
+                <div className="p-3 border-2 border-gray-200 rounded-xl">
+                  <QRCodeSVG
+                    value={`/api/containers/verify/${containers[0].qr_code_token || 'unknown'}`}
+                    size={160}
+                    level="H"
+                  />
+                </div>
+              </div>
+            )
           )}
 
           {/* Fields */}
           <div className="space-y-2 text-sm">
-            <ChitField label="Transaction ID" value={transaction.transaction_id} mono />
+            <ChitField label="Transaction ID" value={transaction.transaction_id || transaction.allocation_ref} mono />
 
+            {/* Container list */}
             {isMulti ? (
               containers.map((c, i) => (
                 <ChitField
@@ -86,19 +96,23 @@ export default function ChitPrintView({ transaction, onClose }) {
                 />
               ))
             ) : (
-              <ChitField label="Container No." value={containers[0].container_number} mono bold />
+              <ChitField label="Container No." value={`${containers[0].container_number}${containers[0].container_size ? ` (${containers[0].container_size})` : ''}`} mono bold />
             )}
 
             <ChitField label="Holding Area" value={`${transaction.area_name || '—'} · Bay ${transaction.bay_code || '—'}`} />
             <ChitField label="Agent Name"   value={transaction.agent_name} />
             <ChitField label="Agent Phone"  value={transaction.agent_phone} />
-            {transaction.truck_number && <ChitField label="Truck Number" value={transaction.truck_number} />}
-            <ChitField label="Issued At"    value={format(new Date(transaction.created_at), 'dd MMM yyyy, HH:mm')} />
+            {transaction.truck_number && transaction.truck_number !== '—' && (
+              <ChitField label="Truck Number" value={transaction.truck_number} />
+            )}
+            <ChitField label="Issued At" value={format(new Date(transaction.created_at), 'dd MMM yyyy, HH:mm')} />
           </div>
 
           <div className="mt-4 pt-4 border-t border-dashed border-gray-300">
             <p className="text-xs text-gray-400 text-center">
-              Scan QR code to verify at gate · {transaction.transaction_id}
+              {isReefer
+                ? `Present this chit at the gate · ${transaction.transaction_id || transaction.allocation_ref}`
+                : `Scan QR code to verify at gate · ${transaction.transaction_id}`}
             </p>
           </div>
         </div>
