@@ -99,6 +99,81 @@ async function createTruckAllocation(req, res, next) {
       if (dup.length) return res.status(409).json({ error: `Container ${c.number} already has an active allocation.` });
     }
 
+    // ── Auto-merge: if agent already has an active reefer bay, append to it ──
+    if (reeferFlag) {
+      const { rows: existingAllocs } = await client.query(
+        `SELECT ta.*, b.bay_code, ha.name AS area_name, ha.code AS area_code
+         FROM truck_allocations ta
+         JOIN bays b ON b.id = ta.bay_id
+         JOIN holding_areas ha ON ha.id = ta.holding_area_id
+         WHERE ta.agent_phone = $1 AND ta.is_reefer = TRUE AND ta.status = 'IN_BAY'
+         ORDER BY ta.time_in DESC LIMIT 1`,
+        [agentPhone.trim()]
+      );
+
+      if (existingAllocs.length) {
+        const existing = existingAllocs[0];
+
+        // Check batch size limit
+        const { rows: existingCts } = await client.query(
+          `SELECT container_number FROM container_transactions WHERE truck_allocation_id = $1`,
+          [existing.id]
+        );
+        if (existingCts.length + validatedContainers.length > 20) {
+          return res.status(400).json({
+            error: `Bay ${existing.bay_code} already has ${existingCts.length} container(s) — only ${20 - existingCts.length} more allowed (max 20 per batch).`,
+          });
+        }
+
+        // Check duplicates within the existing allocation
+        const existingNums = new Set(existingCts.map(r => r.container_number));
+        for (const c of validatedContainers) {
+          if (existingNums.has(c.number)) {
+            return res.status(409).json({ error: `Container ${c.number} is already assigned to bay ${existing.bay_code}.` });
+          }
+        }
+
+        // Insert new container transactions under the existing allocation
+        const newTxns = [];
+        for (const c of validatedContainers) {
+          const txnId = await generateTxnId(client);
+          const { dataUrl: qrDataUrl, token: qrToken } = await generateQRDataURL(txnId, c.number);
+
+          const { rows: [txn] } = await client.query(
+            `INSERT INTO container_transactions
+               (transaction_id, container_number, container_size, agent_name, agent_phone,
+                truck_number, driver_name, driver_phone,
+                holding_area_id, bay_id, truck_allocation_id,
+                status, bay_assigned_time, qr_code_data, qr_code_token, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'BAY_ASSIGNED',NOW(),$12,$13,$14)
+             RETURNING id, transaction_id, container_number, container_size, status, qr_code_token`,
+            [txnId, c.number, c.size, existing.agent_name, existing.agent_phone,
+             existing.truck_number, existing.driver_name, existing.driver_phone,
+             existing.holding_area_id, existing.bay_id, existing.id,
+             qrDataUrl, qrToken, req.user.id]
+          );
+          newTxns.push(txn);
+        }
+
+        await client.query('COMMIT');
+
+        await logAudit(req, 'reefer:containers_auto_merged', 'truck_allocations', existing.id, {
+          allocationRef: existing.allocation_ref,
+          bayCode: existing.bay_code,
+          added: validatedContainers.map(c => c.number),
+        });
+
+        const io = req.app.get('io');
+        if (io) io.to('operations').emit('transaction:updated', { type: 'reefer_containers_added', allocationId: existing.id });
+
+        return res.status(201).json({
+          ...existing,
+          containers:  newTxns,
+          auto_merged: true,
+        });
+      }
+    }
+
     // ── Resolve bay and holding area ──
     let resolvedBayId = bayId || null;
     let areaId = holdingAreaId || null;

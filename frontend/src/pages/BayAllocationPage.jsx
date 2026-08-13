@@ -235,7 +235,12 @@ export default function BayAllocationPage() {
   const mutation = useMutation(trucksApi.create, {
     onSuccess: (res) => {
       const alloc = res.data;
-      toast.success(`${alloc.truck_number ? `Truck ${alloc.truck_number}` : 'Reefer container'} allocated to ${alloc.bay_code} — chit ready.`);
+      const isReefer = !!alloc.is_reefer;
+      if (alloc.auto_merged) {
+        toast.success(`${alloc.containers.length} container(s) added to existing bay ${alloc.bay_code} — chit ready.`);
+      } else {
+        toast.success(`${alloc.truck_number ? `Truck ${alloc.truck_number}` : 'Reefer container'} allocated to ${alloc.bay_code} — chit ready.`);
+      }
       const agent = { agentName: form.agentName, agentPhone: form.agentPhone };
       setLastAgent(agent);
       setChit({
@@ -249,6 +254,7 @@ export default function BayAllocationPage() {
         bay_code:         alloc.bay_code,
         qr_code_token:    alloc.containers?.[0]?.qr_code_token || null,
         created_at:       alloc.created_at || new Date().toISOString(),
+        is_reefer:        isReefer,
       });
       setForm({ ...EMPTY_FORM });
       setFieldErrors({});
