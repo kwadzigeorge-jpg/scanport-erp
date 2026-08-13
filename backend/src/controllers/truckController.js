@@ -496,7 +496,106 @@ async function releaseReeferContainer(req, res, next) {
   }
 }
 
+// ─── Add Containers to Existing Reefer Allocation ─────────────────────────────
+// Allows a booth officer to append more containers to an active reefer batch
+// when the agent's remaining containers arrive after the initial allocation.
+async function addContainersToAllocation(req, res, next) {
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params; // truck_allocation id
+    const { containers } = req.body;
+
+    if (!Array.isArray(containers) || containers.length === 0) {
+      return res.status(400).json({ error: 'At least one container is required.' });
+    }
+
+    // Fetch and validate the allocation
+    const { rows: allocRows } = await client.query(
+      `SELECT * FROM truck_allocations WHERE id=$1`, [id]
+    );
+    if (!allocRows.length) return res.status(404).json({ error: 'Allocation not found.' });
+    const alloc = allocRows[0];
+
+    if (!alloc.is_reefer) return res.status(400).json({ error: 'Can only add containers to a reefer allocation.' });
+    if (alloc.status !== 'IN_BAY') return res.status(400).json({ error: 'This allocation is no longer active.' });
+
+    // Check total container count
+    const { rows: existingCts } = await client.query(
+      `SELECT container_number FROM container_transactions WHERE truck_allocation_id=$1`, [id]
+    );
+    if (existingCts.length + containers.length > 20) {
+      return res.status(400).json({
+        error: `Cannot exceed 20 containers per batch. This allocation already has ${existingCts.length} — only ${20 - existingCts.length} more allowed.`,
+      });
+    }
+
+    // Validate container numbers and check for duplicates
+    const existingNums = new Set(existingCts.map(r => r.container_number));
+    const validatedContainers = [];
+    for (const c of containers) {
+      const v = validateContainerNumber(c.number);
+      if (!v.valid) return res.status(400).json({ error: v.message });
+      if (existingNums.has(v.value)) {
+        return res.status(409).json({ error: `Container ${v.value} is already in this allocation.` });
+      }
+      // Check globally active
+      const { rows: dup } = await client.query(
+        `SELECT id FROM container_transactions
+         WHERE container_number=$1 AND status IN ('PENDING','IN_HOLDING_AREA','ARRIVED_AT_BOOTH','PENDING_BAY_ASSIGNMENT','BAY_ASSIGNED','ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED')`,
+        [v.value]
+      );
+      if (dup.length) return res.status(409).json({ error: `Container ${v.value} already has an active allocation.` });
+      existingNums.add(v.value); // prevent duplicates within this request
+      validatedContainers.push({ number: v.value, size: c.size === '40ft' ? '40ft' : '20ft' });
+    }
+
+    // Insert new container transactions
+    const newTxns = [];
+    for (const c of validatedContainers) {
+      const txnId = await generateTxnId(client);
+      const { dataUrl: qrDataUrl, token: qrToken } = await generateQRDataURL(txnId, c.number);
+
+      const { rows: [txn] } = await client.query(
+        `INSERT INTO container_transactions
+           (transaction_id, container_number, container_size, agent_name, agent_phone,
+            truck_number, driver_name, driver_phone,
+            holding_area_id, bay_id, truck_allocation_id,
+            status, bay_assigned_time, qr_code_data, qr_code_token, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'BAY_ASSIGNED',NOW(),$12,$13,$14)
+         RETURNING id, transaction_id, container_number, container_size, status`,
+        [txnId, c.number, c.size, alloc.agent_name, alloc.agent_phone,
+         alloc.truck_number, alloc.driver_name, alloc.driver_phone,
+         alloc.holding_area_id, alloc.bay_id, alloc.id,
+         qrDataUrl, qrToken, req.user.id]
+      );
+      newTxns.push(txn);
+    }
+
+    await client.query('COMMIT');
+
+    await logAudit(req, 'reefer:containers_added', 'truck_allocations', alloc.id, {
+      allocationRef: alloc.allocation_ref,
+      added: validatedContainers.map(c => c.number),
+    });
+
+    const io = req.app.get('io');
+    if (io) io.to('operations').emit('transaction:updated', { type: 'reefer_containers_added', allocationId: alloc.id });
+
+    return res.status(201).json({
+      message: `${validatedContainers.length} container${validatedContainers.length !== 1 ? 's' : ''} added to ${alloc.allocation_ref}.`,
+      containers: newTxns,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   createTruckAllocation, releaseTruck, listTruckAllocations, getAvailableBays,
-  checkinReeferContainer, releaseReeferContainer,
+  checkinReeferContainer, releaseReeferContainer, addContainersToAllocation,
 };

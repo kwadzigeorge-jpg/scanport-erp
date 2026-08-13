@@ -114,8 +114,77 @@ const CT_STATUS = {
   EXAMINATION_COMPLETED: { label: 'Done',         cls: 'bg-blue-100 text-blue-700'    },
 };
 
+// ─── Add Containers Modal ─────────────────────────────────────────────────────
+function AddContainersModal({ truck, bayCode, onClose, onSubmit, loading, error }) {
+  const currentCount = truck.containers?.length || 0;
+  const maxNew = 20 - currentCount;
+  const [containers, setContainers] = useState([{ number: '', size: '20ft' }]);
+
+  const updateRow = (i, field, val) =>
+    setContainers(p => p.map((c, idx) => idx === i ? { ...c, [field]: val } : c));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            <Snowflake size={16} className="text-cyan-500" /> Add Containers — {bayCode}
+          </h2>
+          <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
+        </div>
+        <form onSubmit={(e) => { e.preventDefault(); onSubmit(containers); }} className="p-5 space-y-4">
+          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+          <p className="text-xs text-gray-500">
+            Agent: <strong>{truck.agent_name}</strong> &middot; {currentCount} assigned &middot; up to {maxNew} more allowed
+          </p>
+          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            {containers.map((c, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <input
+                  className="input flex-1 font-mono uppercase text-sm"
+                  placeholder="Container number"
+                  value={c.number}
+                  onChange={e => updateRow(i, 'number', e.target.value.toUpperCase())}
+                  required
+                />
+                <select className="input w-24 text-sm" value={c.size}
+                  onChange={e => updateRow(i, 'size', e.target.value)}>
+                  <option>20ft</option>
+                  <option>40ft</option>
+                </select>
+                {containers.length > 1 && (
+                  <button type="button" onClick={() => setContainers(p => p.filter((_, idx) => idx !== i))}
+                    className="text-gray-400 hover:text-red-500 shrink-0">
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {containers.length < maxNew && (
+            <button type="button"
+              onClick={() => setContainers(p => [...p, { number: '', size: '20ft' }])}
+              className="flex items-center gap-1.5 text-sm text-cyan-600 hover:text-cyan-700 font-medium">
+              <Plus size={14} /> Add another container
+            </button>
+          )}
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" disabled={loading}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold bg-cyan-600 hover:bg-cyan-700 text-white transition-colors disabled:opacity-60">
+              {loading
+                ? <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : <><Plus size={14} /> Add Containers</>}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Bay Card ─────────────────────────────────────────────────────────────────
-function BayCard({ bay, areaName, onRelease, onPrint, onCheckinContainer, onReleaseContainer }) {
+function BayCard({ bay, areaName, onRelease, onPrint, onCheckinContainer, onReleaseContainer, onAddContainers, canManageReefer }) {
   const { truck } = bay;
   const colors = bayColor(truck);
 
@@ -213,6 +282,16 @@ function BayCard({ bay, areaName, onRelease, onPrint, onCheckinContainer, onRele
               );
             })}
           </div>
+
+          {/* Add containers button (booth officers only, max 20) */}
+          {canManageReefer && containers.length < 20 && (
+            <button
+              onClick={() => onAddContainers(truck, bay.bay_code)}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border border-cyan-200 transition-colors mt-1"
+            >
+              <Plus size={11} /> Add Containers
+            </button>
+          )}
         </div>
       </div>
     );
@@ -303,7 +382,7 @@ function BayCard({ bay, areaName, onRelease, onPrint, onCheckinContainer, onRele
 }
 
 // ─── Allocation Grid ──────────────────────────────────────────────────────────
-function AllocationView({ areas, search, onRelease, onPrint, onCheckinContainer, onReleaseContainer, canManageReefer }) {
+function AllocationView({ areas, search, onRelease, onPrint, onCheckinContainer, onReleaseContainer, onAddContainers, canManageReefer }) {
   return (
     <div className="space-y-8">
       {areas.map(area => {
@@ -339,7 +418,8 @@ function AllocationView({ areas, search, onRelease, onPrint, onCheckinContainer,
               {baysToShow.map(bay => (
                 <BayCard key={bay.id} bay={bay} areaName={area.name}
                   onRelease={onRelease} onPrint={onPrint}
-                  onCheckinContainer={onCheckinContainer} onReleaseContainer={onReleaseContainer} />
+                  onCheckinContainer={onCheckinContainer} onReleaseContainer={onReleaseContainer}
+                  onAddContainers={onAddContainers} canManageReefer={canManageReefer} />
               ))}
             </div>
           </div>
@@ -916,6 +996,8 @@ export default function BaysPage() {
   const [search, setSearch]       = useState('');
   const [releaseTarget, setReleaseTarget] = useState(null);
   const [printChit, setPrintChit] = useState(null);
+  const [addContainersTarget, setAddContainersTarget] = useState(null); // { truck, bayCode }
+  const [addContainersError, setAddContainersError] = useState('');
   const qc = useQueryClient();
   const visibleTabs = TABS.filter(t => !t.permission || hasPermission(t.permission));
 
@@ -961,6 +1043,19 @@ export default function BaysPage() {
     }
   );
 
+  const addContainersMutation = useMutation(
+    ({ allocId, containers }) => trucksApi.addContainers(allocId, { containers }),
+    {
+      onSuccess: (res) => {
+        toast.success(res.data.message || 'Containers added.');
+        setAddContainersTarget(null);
+        setAddContainersError('');
+        refetch();
+      },
+      onError: (err) => setAddContainersError(err.response?.data?.error || 'Failed to add containers.'),
+    }
+  );
+
   useEffect(() => {
     const socket = io('/', { path: '/socket.io' });
     socket.on('transaction:new',     () => refetch());
@@ -973,6 +1068,11 @@ export default function BaysPage() {
 
   const handleRelease = (truck, bayCode) => {
     setReleaseTarget({ ...truck, bay_code: bayCode });
+  };
+
+  const handleAddContainers = (truck, bayCode) => {
+    setAddContainersError('');
+    setAddContainersTarget({ truck, bayCode });
   };
 
   const handlePrint = (truck, bayCode, areaName) => {
@@ -1050,6 +1150,7 @@ export default function BaysPage() {
         ) : tab === 'allocation' || tab === 'queued' ? (
           <AllocationView areas={tabAreas} search={search} onRelease={handleRelease} onPrint={handlePrint}
             canManageReefer={hasPermission('truck.bay_assign')}
+            onAddContainers={handleAddContainers}
             onCheckinContainer={(id, cn) => {
               if (window.confirm(`Check in container ${cn}?`)) checkinContainerMutation.mutate(id);
             }}
@@ -1075,6 +1176,21 @@ export default function BaysPage() {
           onClose={() => setReleaseTarget(null)}
           onConfirm={(id) => releaseMutation.mutate(id)}
           loading={releaseMutation.isLoading}
+        />
+      )}
+
+      {/* Add containers modal */}
+      {addContainersTarget && (
+        <AddContainersModal
+          truck={addContainersTarget.truck}
+          bayCode={addContainersTarget.bayCode}
+          error={addContainersError}
+          loading={addContainersMutation.isLoading}
+          onClose={() => { setAddContainersTarget(null); setAddContainersError(''); }}
+          onSubmit={(containers) => addContainersMutation.mutate({
+            allocId: addContainersTarget.truck.truck_allocation_id,
+            containers,
+          })}
         />
       )}
 

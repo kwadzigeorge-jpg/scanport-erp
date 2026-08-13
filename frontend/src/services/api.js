@@ -86,8 +86,9 @@ export const trucksApi = {
   list:            (params) => api.get('/trucks', { params }),
   release:         (id, d)  => api.post(`/trucks/${id}/release`, d),
   availableBays:   (params) => api.get('/trucks/bays', { params }),
-  checkinContainer:  (ctId) => api.patch(`/trucks/containers/${ctId}/checkin`),
-  releaseContainer:  (ctId) => api.patch(`/trucks/containers/${ctId}/release`),
+  checkinContainer:    (ctId)         => api.patch(`/trucks/containers/${ctId}/checkin`),
+  releaseContainer:    (ctId)         => api.patch(`/trucks/containers/${ctId}/release`),
+  addContainers:       (allocId, data) => api.post(`/trucks/${allocId}/containers`, data),
 };
 
 // ─── Bay Admin ────────────────────────────────────────────────────────────────

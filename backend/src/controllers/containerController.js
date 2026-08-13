@@ -733,7 +733,7 @@ async function baysView(req, res, next) {
               ct.agent_name, ct.agent_phone,
               ct.bay_id, ct.holding_area_id, ct.status,
               ct.bay_assigned_time, ct.bay_entry_time, ct.created_at,
-              ct.qr_code_token,
+              ct.qr_code_token, ct.truck_allocation_id,
               ROUND(EXTRACT(EPOCH FROM (NOW() - COALESCE(ct.bay_entry_time, ct.bay_assigned_time, ct.created_at)))/60) AS dwell_minutes
        FROM container_transactions ct
        WHERE ct.status IN ('BAY_ASSIGNED','ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED')
@@ -764,7 +764,8 @@ async function baysView(req, res, next) {
       if (!txByBay[ct.bay_id]) {
         const dwell = parseInt(ct.dwell_minutes) || 0;
         txByBay[ct.bay_id] = {
-          truck_id:      ct.id,
+          truck_id:           ct.id,
+          truck_allocation_id: ct.truck_allocation_id,
           allocation_ref: ct.transaction_id,
           truck_number:  ct.truck_number || '—',
           driver_name:   ct.driver_name,
