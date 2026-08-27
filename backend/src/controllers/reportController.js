@@ -439,7 +439,9 @@ async function exportReport(req, res, next) {
 
     // Sheet 2 — Active Containers
     const { rows: activeRows } = await db.query(`
-      SELECT ct.transaction_id, ct.container_number, ct.waybill_number,
+      SELECT ct.transaction_id, ct.container_number,
+             COALESCE(ct.container_size, '20ft') AS container_size,
+             ct.waybill_number,
              ct.agent_name, ct.truck_number, ct.status,
              ha.name AS holding_area, b.bay_code,
              COALESCE(ct.time_in, ct.arrival_time, ct.created_at) AS check_in_time,
@@ -455,7 +457,9 @@ async function exportReport(req, res, next) {
 
     // Sheet 3 — Released History
     const { rows: releasedRows } = await db.query(`
-      SELECT ct.transaction_id, ct.container_number, ct.waybill_number,
+      SELECT ct.transaction_id, ct.container_number,
+             COALESCE(ct.container_size, '20ft') AS container_size,
+             ct.waybill_number,
              ct.agent_name, ct.truck_number,
              ha.name AS holding_area, b.bay_code,
              ct.time_in AS check_in, ct.time_out AS released_at,
@@ -475,6 +479,7 @@ async function exportReport(req, res, next) {
       SELECT
         ct.transaction_id                                           AS "Transaction ID",
         ct.container_number                                         AS "Container No.",
+        COALESCE(ct.container_size, '20ft')                         AS "Size",
         ct.truck_number                                             AS "Truck No.",
         ct.agent_name                                               AS "Agent",
         ha.name                                                     AS "Holding Area",
@@ -513,7 +518,9 @@ async function dailyReport(req, res, next) {
   try {
     const { date = new Date().toISOString().slice(0, 10), format = 'json' } = req.query;
     const { rows } = await db.query(`
-      SELECT ct.transaction_id, ct.container_number, ct.agent_name, ct.agent_phone,
+      SELECT ct.transaction_id, ct.container_number,
+             COALESCE(ct.container_size, '20ft') AS container_size,
+             ct.agent_name, ct.agent_phone,
              ct.truck_number, ct.status, ct.created_at, ct.time_in, ct.time_out,
              ct.dwell_minutes, ha.name AS area, b.bay_code,
              ub.username AS booth_officer, um.username AS entry_marshal,
@@ -542,7 +549,9 @@ async function dwellTimeReport(req, res, next) {
     const toDate = to || new Date().toISOString().slice(0, 10);
 
     const { rows } = await db.query(`
-      SELECT ct.transaction_id, ct.container_number, ct.agent_name,
+      SELECT ct.transaction_id, ct.container_number,
+             COALESCE(ct.container_size, '20ft') AS container_size,
+             ct.agent_name,
              ha.name AS area, b.bay_code,
              ct.time_in, ct.time_out, ct.dwell_minutes,
              CASE
@@ -605,7 +614,9 @@ async function exceptionReport(req, res, next) {
     const { format = 'json' } = req.query;
 
     const { rows } = await db.query(`
-      SELECT ct.transaction_id, ct.container_number, ct.agent_name, ct.agent_phone,
+      SELECT ct.transaction_id, ct.container_number,
+             COALESCE(ct.container_size, '20ft') AS container_size,
+             ct.agent_name, ct.agent_phone,
              ha.name AS area, b.bay_code, ct.time_in,
              ROUND(EXTRACT(EPOCH FROM (NOW()-COALESCE(ct.time_in,ct.arrival_time,ct.created_at)))/3600, 2) AS hours_in_holding,
              'OVERSTAYED' AS exception_type
