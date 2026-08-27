@@ -7,19 +7,137 @@ const ACTIVE_STATUSES = [
   'ARRIVED_AT_BAY','UNDER_EXAMINATION','EXAMINATION_COMPLETED',
 ];
 
+// ─── Excel / CSV helpers ─────────────────────────────────────────────────────
+
+const HEADER_MAP = {
+  transaction_id:       'Transaction ID',
+  container_number:     'Container No.',
+  container_size:       'Size',
+  waybill_number:       'Waybill No.',
+  agent_name:           'Agent Name',
+  agent_phone:          'Agent Phone',
+  truck_number:         'Truck No.',
+  driver_name:          'Driver',
+  driver_phone:         'Driver Phone',
+  status:               'Status',
+  bay_code:             'Bay',
+  area:                 'Holding Area',
+  holding_area:         'Holding Area',
+  area_name:            'Holding Area',
+  area_code:            'Area Code',
+  time_in:              'Check-In Time',
+  time_out:             'Released At',
+  created_at:           'Created At',
+  bay_assigned_time:    'Bay Assigned At',
+  bay_entry_time:       'Check-In At',
+  dwell_minutes:        'Dwell (min)',
+  dwell_category:       'Dwell Category',
+  dwell_status:         'Dwell Status',
+  sla_result:           'SLA Result',
+  minutes_over_sla:     'Over SLA (min)',
+  check_in:             'Check-In Time',
+  released_at:          'Released At',
+  booth_officer:        'Booth Officer',
+  entry_marshal:        'Entry Marshal',
+  exit_marshal:         'Exit Marshal',
+  username:             'User',
+  role:                 'Role',
+  action:               'Action',
+  entity:               'Entity',
+  entity_id:            'Entity ID',
+  details:              'Details',
+  ip_address:           'IP Address',
+  exception_type:       'Exception Type',
+  hours_in_holding:     'Hours in Holding',
+  total_containers:     'Total Containers',
+  total_trucks:         'Total Trucks',
+  breach_count:         'SLA Breaches',
+  on_time_count:        'On Time',
+  date:                 'Date',
+  id:                   'ID',
+};
+
+const STATUS_LABELS = {
+  ARRIVED_AT_BOOTH:       'Arrived at Booth',
+  PENDING_BAY_ASSIGNMENT: 'Pending Bay Assignment',
+  BAY_ASSIGNED:           'Bay Assigned',
+  ARRIVED_AT_BAY:         'Arrived at Bay',
+  UNDER_EXAMINATION:      'Under Examination',
+  EXAMINATION_COMPLETED:  'Examination Completed',
+  IN_HOLDING_AREA:        'In Holding Area',
+  EXITED:                 'Released',
+  CANCELLED:              'Cancelled',
+  IN_BAY:                 'In Bay',
+  RELEASED:               'Released',
+};
+
+function fmtDateTime(d) {
+  if (!d || isNaN(new Date(d))) return '';
+  return new Date(d).toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).replace(',', '');
+}
+
+function fmtDate(d) {
+  if (!d || isNaN(new Date(d))) return '';
+  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatValue(key, val) {
+  if (val === null || val === undefined) return '';
+  // Status enum → human label
+  if (key === 'status' && STATUS_LABELS[val]) return STATUS_LABELS[val];
+  // JS Date objects (pg returns timestamps as Date)
+  if (val instanceof Date) return fmtDateTime(val);
+  // ISO timestamp strings
+  if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(val)) return fmtDateTime(val);
+  // Date-only strings
+  if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) return fmtDate(val);
+  return val;
+}
+
+function sanitizeRows(rows) {
+  if (!rows.length) return rows;
+  return rows.map(row => {
+    const out = {};
+    for (const [k, v] of Object.entries(row)) {
+      // Skip internal IDs that start with underscore or are raw db ids not useful to the reader
+      if (k === 'id' && !HEADER_MAP[k]) continue;
+      const header = HEADER_MAP[k] || k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      out[header] = formatValue(k, v);
+    }
+    return out;
+  });
+}
+
 function toCSV(res, filename, rows) {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   const stream = csvFormat({ headers: true });
   stream.pipe(res);
-  rows.forEach(r => stream.write(r));
+  sanitizeRows(rows).forEach(r => stream.write(r));
   stream.end();
 }
 
 function toXLSX(res, filename, sheets) {
   const wb = XLSX.utils.book_new();
   sheets.forEach(({ name, rows }) => {
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), name);
+    const clean = sanitizeRows(rows);
+    const ws = XLSX.utils.json_to_sheet(clean);
+
+    // Auto column widths capped at 50
+    if (clean.length > 0) {
+      const headers = Object.keys(clean[0]);
+      ws['!cols'] = headers.map(h => ({
+        wch: Math.min(
+          Math.max(h.length, ...clean.map(r => String(r[h] ?? '').length)) + 2,
+          50
+        ),
+      }));
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, name);
   });
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
