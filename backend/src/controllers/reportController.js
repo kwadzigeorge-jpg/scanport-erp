@@ -253,7 +253,7 @@ async function dwellAnalysis(req, res, next) {
       FROM container_transactions ct
       LEFT JOIN holding_areas ha ON ha.id=ct.holding_area_id
       LEFT JOIN bays b ON b.id=ct.bay_id
-      WHERE DATE(ct.created_at) BETWEEN $1 AND $2
+      WHERE ct.created_at >= $1::date AND ct.created_at < ($2::date + INTERVAL '1 day')
       ORDER BY effective_dwell DESC
     `, [fromDate, toDate]);
 
@@ -285,9 +285,9 @@ async function areaPerformance(req, res, next) {
              )::int AS active_breaches,
              COUNT(ct.id) FILTER (
                WHERE ct.status='EXITED' AND ct.dwell_minutes > $4
-               AND DATE(ct.time_out) BETWEEN $1 AND $2
+               AND ct.time_out >= $1::date AND ct.time_out < ($2::date + INTERVAL '1 day')
              )::int AS historical_breaches,
-             COUNT(ct.id) FILTER (WHERE DATE(ct.created_at) BETWEEN $1 AND $2)::int AS total_period
+             COUNT(ct.id) FILTER (WHERE ct.created_at >= $1::date AND ct.created_at < ($2::date + INTERVAL '1 day'))::int AS total_period
       FROM holding_areas ha
       LEFT JOIN bays b ON b.holding_area_id=ha.id AND b.is_active=TRUE
       LEFT JOIN container_transactions ct ON ct.holding_area_id=ha.id
@@ -325,7 +325,7 @@ async function agentPerformanceReport(req, res, next) {
              )::int AS active_breaches,
              MODE() WITHIN GROUP (ORDER BY EXTRACT(HOUR FROM ct.created_at)::int) AS peak_hour
       FROM container_transactions ct
-      WHERE DATE(ct.created_at) BETWEEN $1 AND $2
+      WHERE ct.created_at >= $1::date AND ct.created_at < ($2::date + INTERVAL '1 day')
       GROUP BY ct.agent_name, ct.agent_phone
       ORDER BY (
         COUNT(*) FILTER (WHERE ct.status='EXITED' AND ct.dwell_minutes > $4) +
@@ -376,7 +376,7 @@ async function slaExceptions(req, res, next) {
       LEFT JOIN bays b ON b.id=ct.bay_id
       WHERE ct.status='EXITED'
         AND ct.dwell_minutes > $3
-        AND DATE(ct.time_out) BETWEEN $1 AND $2
+        AND ct.time_out >= $1::date AND ct.time_out < ($2::date + INTERVAL '1 day')
       ORDER BY minutes_over_sla DESC
     `, [fromDate, toDate, slaMinutes]);
 
@@ -402,12 +402,12 @@ async function exportReport(req, res, next) {
     const { rows: kpiRows } = await db.query(`
       SELECT
         COUNT(*) FILTER (WHERE status=ANY($1))::int AS containers_in_holding,
-        COUNT(*) FILTER (WHERE status='EXITED' AND DATE(time_out)=$2)::int AS throughput_today,
-        ROUND(AVG(dwell_minutes) FILTER (WHERE status='EXITED' AND DATE(time_out)=$2))::int AS avg_dwell_today,
-        COUNT(*) FILTER (WHERE status='EXITED' AND dwell_minutes > $3 AND DATE(time_out)=$2)::int AS breaches_today,
+        COUNT(*) FILTER (WHERE status='EXITED' AND time_out >= $2::date AND time_out < ($2::date + INTERVAL '1 day'))::int AS throughput_today,
+        ROUND(AVG(dwell_minutes) FILTER (WHERE status='EXITED' AND time_out >= $2::date AND time_out < ($2::date + INTERVAL '1 day')))::int AS avg_dwell_today,
+        COUNT(*) FILTER (WHERE status='EXITED' AND dwell_minutes > $3 AND time_out >= $2::date AND time_out < ($2::date + INTERVAL '1 day'))::int AS breaches_today,
         COUNT(*)::int AS total_period
       FROM container_transactions
-      WHERE DATE(created_at) BETWEEN $4 AND $5
+      WHERE created_at >= $4::date AND created_at < ($5::date + INTERVAL '1 day')
     `, [ACTIVE_STATUSES, today, slaMinutes, fromDate, toDate]);
 
     const { rows: top5 } = await db.query(`
@@ -470,7 +470,7 @@ async function exportReport(req, res, next) {
       LEFT JOIN holding_areas ha ON ha.id=ct.holding_area_id
       LEFT JOIN bays b ON b.id=ct.bay_id
       WHERE ct.status='EXITED'
-        AND DATE(ct.time_out) BETWEEN $1 AND $2
+        AND ct.time_out >= $1::date AND ct.time_out < ($2::date + INTERVAL '1 day')
       ORDER BY ct.time_out DESC
     `, [fromDate, toDate, slaMinutes]);
 
@@ -500,7 +500,8 @@ async function exportReport(req, res, next) {
       FROM container_transactions ct
       LEFT JOIN holding_areas ha ON ha.id = ct.holding_area_id
       LEFT JOIN bays b ON b.id = ct.bay_id
-      WHERE DATE(COALESCE(ct.bay_assigned_time, ct.created_at)) BETWEEN $1 AND $2
+      WHERE COALESCE(ct.bay_assigned_time, ct.created_at) >= $1::date
+        AND COALESCE(ct.bay_assigned_time, ct.created_at) < ($2::date + INTERVAL '1 day')
       ORDER BY COALESCE(ct.bay_assigned_time, ct.created_at) DESC
     `, [fromDate, toDate]);
 
@@ -531,7 +532,7 @@ async function dailyReport(req, res, next) {
       LEFT JOIN users ub ON ub.id=ct.created_by
       LEFT JOIN users um ON um.id=ct.confirmed_entry_by
       LEFT JOIN users ux ON ux.id=ct.confirmed_exit_by
-      WHERE DATE(ct.created_at) = $1
+      WHERE ct.created_at >= $1::date AND ct.created_at < ($1::date + INTERVAL '1 day')
       ORDER BY ct.created_at
     `, [date]);
 
@@ -563,7 +564,7 @@ async function dwellTimeReport(req, res, next) {
       LEFT JOIN holding_areas ha ON ha.id=ct.holding_area_id
       LEFT JOIN bays b ON b.id=ct.bay_id
       WHERE ct.status='EXITED'
-        AND DATE(ct.time_in) BETWEEN $1 AND $2
+        AND ct.time_in >= $1::date AND ct.time_in < ($2::date + INTERVAL '1 day')
       ORDER BY ct.dwell_minutes DESC
     `, [fromDate, toDate]);
 
@@ -582,8 +583,8 @@ async function auditTrail(req, res, next) {
 
     if (user)   { params.push(`%${user}%`);   conditions.push(`al.username ILIKE $${params.length}`); }
     if (action) { params.push(`%${action}%`); conditions.push(`al.action ILIKE $${params.length}`); }
-    if (from)   { params.push(from); conditions.push(`DATE(al.created_at) >= $${params.length}`); }
-    if (to)     { params.push(to);   conditions.push(`DATE(al.created_at) <= $${params.length}`); }
+    if (from)   { params.push(from); conditions.push(`al.created_at >= $${params.length}::date`); }
+    if (to)     { params.push(to);   conditions.push(`al.created_at < ($${params.length}::date + INTERVAL '1 day')`); }
 
     const where  = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -798,7 +799,8 @@ async function timestampReport(req, res, next) {
       FROM container_transactions ct
       LEFT JOIN holding_areas ha ON ha.id = ct.holding_area_id
       LEFT JOIN bays b ON b.id = ct.bay_id
-      WHERE DATE(COALESCE(ct.bay_assigned_time, ct.created_at)) BETWEEN $1 AND $2
+      WHERE COALESCE(ct.bay_assigned_time, ct.created_at) >= $1::date
+        AND COALESCE(ct.bay_assigned_time, ct.created_at) < ($2::date + INTERVAL '1 day')
       ORDER BY COALESCE(ct.bay_assigned_time, ct.created_at) DESC
     `, [fromDate, toDate]);
 
