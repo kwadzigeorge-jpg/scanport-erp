@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useReactToPrint } from 'react-to-print';
 import { fleetApi } from '../services/api';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
@@ -7,7 +8,7 @@ import toast from 'react-hot-toast';
 import {
   Truck, Users, Fuel, Wrench, BarChart3, AlertTriangle,
   Plus, X, Pencil, Trash2, CheckCircle, XCircle, Clock, RefreshCw,
-  Shield, Calendar, Activity, TrendingUp, MapPin, Bell, Download,
+  Shield, Calendar, Activity, TrendingUp, MapPin, Bell, Download, Printer,
 } from 'lucide-react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1196,6 +1197,212 @@ function MaintenanceTab() {
   );
 }
 
+// ── Mileage Report Print View ─────────────────────────────────────────────────
+function MileageReportPrintView({ data, filters, onClose }) {
+  const printRef = useRef();
+  const handlePrint = useReactToPrint({ content: () => printRef.current });
+
+  const summary   = data?.summary    || {};
+  const byVehicle = data?.by_vehicle || [];
+  const byDriver  = data?.by_driver  || [];
+  const detail    = data?.detail     || [];
+
+  function fmtKM(v)  { return v != null ? `${parseFloat(v).toFixed(1)} km` : '—'; }
+  function fmtL(v)   { return v != null && parseFloat(v) > 0 ? `${parseFloat(v).toFixed(1)} L` : '—'; }
+  function fmtGHS(v) { return v != null && parseFloat(v) > 0 ? `GHS ${parseFloat(v).toFixed(2)}` : '—'; }
+  function fmtPeriod() {
+    try {
+      const f = format(parseISO(filters.from), 'dd MMM yyyy');
+      const t = format(parseISO(filters.to),   'dd MMM yyyy');
+      return f === t ? f : `${f} – ${t}`;
+    } catch { return `${filters.from} – ${filters.to}`; }
+  }
+
+  const rptStyle = `
+    @media print {
+      .no-print { display: none !important; }
+      body { font-size: 11px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #d1d5db; padding: 4px 8px; }
+      th { background: #f3f4f6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .flag-row { background: #fef2f2 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .section { margin-top: 16px; }
+    }
+  `;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <style>{rptStyle}</style>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col">
+        {/* Toolbar */}
+        <div className="no-print flex items-center justify-between px-5 py-4 border-b shrink-0">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            <Printer size={15} className="text-blue-500" /> Mileage Report Preview
+          </h2>
+          <div className="flex gap-2">
+            <button onClick={handlePrint} className="btn-primary text-sm flex items-center gap-1.5">
+              <Printer size={14} /> Print
+            </button>
+            <button onClick={onClose} className="btn-secondary text-sm">Close</button>
+          </div>
+        </div>
+
+        {/* Printable content */}
+        <div ref={printRef} className="flex-1 overflow-y-auto p-8 text-gray-900 text-sm">
+          {/* Header */}
+          <div className="flex items-center gap-4 mb-6 pb-4 border-b-2 border-gray-800">
+            <img src="/logo.png" alt="ScanPort" className="h-14 w-14 object-contain" />
+            <div>
+              <p className="font-bold text-xl tracking-widest text-gray-900">SCANPORT</p>
+              <p className="text-sm text-gray-500 font-medium">Port Terminal Management System</p>
+            </div>
+            <div className="ml-auto text-right">
+              <p className="text-lg font-bold text-gray-800">MILEAGE REPORT</p>
+              <p className="text-sm text-gray-500">Period: {fmtPeriod()}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Generated: {format(new Date(), 'dd MMM yyyy, HH:mm')}</p>
+            </div>
+          </div>
+
+          {/* Summary */}
+          <div className="section">
+            <p className="font-bold text-gray-700 uppercase tracking-wide text-xs mb-2 border-b border-gray-200 pb-1">Summary</p>
+            <div className="grid grid-cols-3 gap-0 border border-gray-300 rounded overflow-hidden">
+              {[
+                ['Total Trips',       summary.total_trips ?? 0],
+                ['Completed Trips',   summary.completed_trips ?? 0],
+                ['Open / In-Progress',summary.open_trips ?? 0],
+                ['Total Distance',    fmtKM(summary.total_km)],
+                ['Avg Distance / Trip', fmtKM(summary.avg_km)],
+                ['Flagged Trips',     summary.flagged_trips ?? 0],
+                ['Pending Approval',  summary.pending_approval ?? 0],
+                ['Total Fuel Added',  fmtL(summary.total_fuel_litres)],
+                ['Total Fuel Cost',   fmtGHS(summary.total_fuel_cost)],
+              ].map(([label, value]) => (
+                <div key={label} className="border-b border-r border-gray-200 last:border-r-0 px-3 py-2">
+                  <p className="text-xs text-gray-500">{label}</p>
+                  <p className="font-semibold text-gray-900 text-sm">{value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* By Vehicle */}
+          {byVehicle.length > 0 && (
+            <div className="section mt-5">
+              <p className="font-bold text-gray-700 uppercase tracking-wide text-xs mb-2 border-b border-gray-200 pb-1">Performance by Vehicle</p>
+              <table className="min-w-full border border-gray-300 text-xs">
+                <thead>
+                  <tr className="bg-gray-100">
+                    {['Vehicle Reg.','Make / Model','Trips','Total KM','Avg KM / Trip','Flagged','Fuel Added (L)'].map(h => (
+                      <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 border border-gray-300">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {byVehicle.map((r, i) => (
+                    <tr key={i} className={i % 2 === 0 ? '' : 'bg-gray-50'}>
+                      <td className="px-3 py-1.5 font-semibold border border-gray-200">{r.registration_number}</td>
+                      <td className="px-3 py-1.5 text-gray-600 border border-gray-200">{r.vehicle}</td>
+                      <td className="px-3 py-1.5 border border-gray-200">{r.trips}</td>
+                      <td className="px-3 py-1.5 font-medium border border-gray-200">{fmtKM(r.total_km)}</td>
+                      <td className="px-3 py-1.5 border border-gray-200">{fmtKM(r.avg_km)}</td>
+                      <td className="px-3 py-1.5 border border-gray-200">
+                        {r.flagged_count > 0 ? <span className="font-semibold text-red-600">{r.flagged_count}</span> : '—'}
+                      </td>
+                      <td className="px-3 py-1.5 border border-gray-200">{fmtL(r.total_fuel_litres)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* By Driver */}
+          {byDriver.length > 0 && (
+            <div className="section mt-5">
+              <p className="font-bold text-gray-700 uppercase tracking-wide text-xs mb-2 border-b border-gray-200 pb-1">Performance by Driver</p>
+              <table className="min-w-full border border-gray-300 text-xs">
+                <thead>
+                  <tr className="bg-gray-100">
+                    {['Driver','Trips','Total KM','Avg KM / Trip','Flagged','Fuel Added (L)'].map(h => (
+                      <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 border border-gray-300">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {byDriver.map((r, i) => (
+                    <tr key={i} className={i % 2 === 0 ? '' : 'bg-gray-50'}>
+                      <td className="px-3 py-1.5 font-medium border border-gray-200">{r.driver_name}</td>
+                      <td className="px-3 py-1.5 border border-gray-200">{r.trips}</td>
+                      <td className="px-3 py-1.5 font-medium border border-gray-200">{fmtKM(r.total_km)}</td>
+                      <td className="px-3 py-1.5 border border-gray-200">{fmtKM(r.avg_km)}</td>
+                      <td className="px-3 py-1.5 border border-gray-200">
+                        {r.flagged_count > 0 ? <span className="font-semibold text-red-600">{r.flagged_count}</span> : '—'}
+                      </td>
+                      <td className="px-3 py-1.5 border border-gray-200">{fmtL(r.total_fuel_litres)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Trip Detail */}
+          {detail.length > 0 && (
+            <div className="section mt-5">
+              <p className="font-bold text-gray-700 uppercase tracking-wide text-xs mb-2 border-b border-gray-200 pb-1">
+                Trip Log ({detail.length} trips)
+              </p>
+              <table className="min-w-full border border-gray-300 text-xs">
+                <thead>
+                  <tr className="bg-gray-100">
+                    {['Date','Vehicle','Driver','Purpose','Origin → Destination','Distance','Fuel (L)','Fuel Cost','Status'].map(h => (
+                      <th key={h} className="px-2 py-2 text-left font-semibold text-gray-600 border border-gray-300">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.map((l, i) => (
+                    <tr key={i} className={clsx(i % 2 === 0 ? '' : 'bg-gray-50', l.is_flagged && 'flag-row')}>
+                      <td className="px-2 py-1.5 whitespace-nowrap border border-gray-200">{fmtDate(l.trip_date)}</td>
+                      <td className="px-2 py-1.5 font-semibold border border-gray-200">{l.registration_number}</td>
+                      <td className="px-2 py-1.5 border border-gray-200">{l.driver_name}</td>
+                      <td className="px-2 py-1.5 border border-gray-200 max-w-[120px]" style={{maxWidth:'120px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.trip_purpose}</td>
+                      <td className="px-2 py-1.5 border border-gray-200">
+                        {l.origin && l.destination ? `${l.origin} → ${l.destination}`
+                          : l.origin ? l.origin
+                          : l.destination ? l.destination : '—'}
+                      </td>
+                      <td className="px-2 py-1.5 font-medium border border-gray-200 whitespace-nowrap">
+                        {l.trip_status === 'open' ? <em>In progress</em> : fmtKM(l.distance_km)}
+                      </td>
+                      <td className="px-2 py-1.5 border border-gray-200">{fmtL(l.fuel_added_litres)}</td>
+                      <td className="px-2 py-1.5 border border-gray-200">{fmtGHS(l.fuel_cost)}</td>
+                      <td className="px-2 py-1.5 border border-gray-200">
+                        {l.trip_status === 'open' ? 'In Progress'
+                          : l.is_flagged ? <span className="text-red-600 font-semibold">⚠ Flagged</span>
+                          : l.status === 'approved' ? 'Approved'
+                          : l.status === 'rejected' ? 'Rejected'
+                          : 'Pending'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="mt-8 pt-4 border-t border-gray-300 flex justify-between text-xs text-gray-400">
+            <span>ScanPort Port Terminal Management System</span>
+            <span>Mileage Report · {fmtPeriod()}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Mileage Report Tab ────────────────────────────────────────────────────────
 function MileageReportTab() {
   const today   = new Date().toISOString().slice(0, 10);
@@ -1203,6 +1410,7 @@ function MileageReportTab() {
 
   const [filters, setFilters] = useState({ from: monthAgo, to: today });
   const [downloading, setDownloading] = useState(false);
+  const [showReport, setShowReport] = useState(false);
 
   const { data, isLoading, refetch } = useQuery(
     ['fleet-mileage-report', filters],
@@ -1253,9 +1461,14 @@ function MileageReportTab() {
         <button onClick={() => refetch()} className="btn-secondary flex items-center gap-1.5 text-sm py-2 px-3">
           <RefreshCw size={13}/> Refresh
         </button>
-        <button onClick={handleDownload} disabled={downloading} className="btn-primary flex items-center gap-1.5 text-sm py-2 px-3 ml-auto">
-          <Download size={13}/> {downloading ? 'Downloading…' : 'Export Excel'}
-        </button>
+        <div className="flex gap-2 ml-auto">
+          <button onClick={() => setShowReport(true)} disabled={isLoading || !data} className="btn-secondary flex items-center gap-1.5 text-sm py-2 px-3">
+            <Printer size={13}/> Generate Report
+          </button>
+          <button onClick={handleDownload} disabled={downloading} className="btn-primary flex items-center gap-1.5 text-sm py-2 px-3">
+            <Download size={13}/> {downloading ? 'Downloading…' : 'Export Excel'}
+          </button>
+        </div>
       </div>
 
       {isLoading ? <Spinner /> : (
@@ -1395,6 +1608,10 @@ function MileageReportTab() {
             )}
           </div>
         </>
+      )}
+
+      {showReport && data && (
+        <MileageReportPrintView data={data} filters={filters} onClose={() => setShowReport(false)} />
       )}
     </div>
   );
