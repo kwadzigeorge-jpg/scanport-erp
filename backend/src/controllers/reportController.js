@@ -78,6 +78,8 @@ const HEADER_MAP = {
   avg_km:               'Avg KM / Trip',
   total_fuel_litres:    'Total Fuel (L)',
   total_fuel_cost:      'Total Fuel Cost (GHS)',
+  month:                'Month',
+  completed_trips:      'Completed Trips',
 };
 
 const STATUS_LABELS = {
@@ -853,7 +855,7 @@ async function mileageReport(req, res, next) {
 
     const where = cond.join(' AND ');
 
-    const [detailRes, summaryRes, byVehicleRes, byDriverRes] = await Promise.all([
+    const [detailRes, summaryRes, byVehicleRes, byDriverRes, byMonthRes] = await Promise.all([
       db.query(`
         SELECT
           ml.trip_date,
@@ -931,25 +933,46 @@ async function mileageReport(req, res, next) {
         GROUP BY d.id, d.full_name
         ORDER BY total_km DESC
       `, p),
+
+      db.query(`
+        SELECT
+          TO_CHAR(DATE_TRUNC('month', ml.trip_date), 'Mon YYYY')          AS month,
+          DATE_TRUNC('month', ml.trip_date)                               AS month_start,
+          COUNT(*)::int                                                    AS trips,
+          COUNT(*) FILTER (WHERE ml.trip_status = 'completed')::int       AS completed_trips,
+          COALESCE(SUM(ml.distance_km) FILTER (WHERE ml.trip_status = 'completed'), 0)::float AS total_km,
+          COALESCE(AVG(ml.distance_km) FILTER (WHERE ml.trip_status = 'completed'), 0)::float AS avg_km,
+          COUNT(*) FILTER (WHERE ml.is_flagged = TRUE)::int               AS flagged_count,
+          COALESCE(SUM(ml.fuel_added_litres), 0)::float                   AS total_fuel_litres,
+          COALESCE(SUM(ml.fuel_cost), 0)::float                           AS total_fuel_cost
+        FROM fleet_mileage_logs ml
+        JOIN fleet_vehicles v ON v.id = ml.vehicle_id
+        JOIN fleet_drivers  d ON d.id = ml.driver_id
+        WHERE ${where}
+        GROUP BY DATE_TRUNC('month', ml.trip_date)
+        ORDER BY DATE_TRUNC('month', ml.trip_date)
+      `, p),
     ]);
 
     const summary   = summaryRes.rows[0];
     const detail    = detailRes.rows;
     const byVehicle = byVehicleRes.rows;
     const byDriver  = byDriverRes.rows;
+    const byMonth   = byMonthRes.rows.map(r => ({ ...r, month_start: undefined })); // drop raw timestamp
 
     if (format === 'xlsx') {
       return toXLSX(res, `mileage-report-${fromDate}-${toDate}.xlsx`, [
-        { name: 'Detail',     rows: detail },
-        { name: 'By Vehicle', rows: byVehicle },
-        { name: 'By Driver',  rows: byDriver },
+        { name: 'Monthly Summary', rows: byMonth },
+        { name: 'By Vehicle',      rows: byVehicle },
+        { name: 'By Driver',       rows: byDriver },
+        { name: 'Detail',          rows: detail },
       ]);
     }
     if (format === 'csv') {
       return toCSV(res, `mileage-report-${fromDate}-${toDate}.csv`, detail);
     }
 
-    return res.json({ from: fromDate, to: toDate, summary, detail, by_vehicle: byVehicle, by_driver: byDriver });
+    return res.json({ from: fromDate, to: toDate, summary, detail, by_vehicle: byVehicle, by_driver: byDriver, by_month: byMonth });
   } catch (err) { next(err); }
 }
 

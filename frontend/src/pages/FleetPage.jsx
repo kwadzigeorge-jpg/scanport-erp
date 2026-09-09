@@ -1205,6 +1205,7 @@ function MileageReportPrintView({ data, filters, onClose }) {
   const summary   = data?.summary    || {};
   const byVehicle = data?.by_vehicle || [];
   const byDriver  = data?.by_driver  || [];
+  const byMonth   = data?.by_month   || [];
   const detail    = data?.detail     || [];
 
   function fmtKM(v)  { return v != null ? `${parseFloat(v).toFixed(1)} km` : '—'; }
@@ -1285,6 +1286,52 @@ function MileageReportPrintView({ data, filters, onClose }) {
               ))}
             </div>
           </div>
+
+          {/* Month-on-Month */}
+          {byMonth.length > 0 && (
+            <div className="section mt-5">
+              <p className="font-bold text-gray-700 uppercase tracking-wide text-xs mb-2 border-b border-gray-200 pb-1">Month-on-Month Summary</p>
+              <table className="min-w-full border border-gray-300 text-xs">
+                <thead>
+                  <tr className="bg-gray-100">
+                    {['Month','Trips','Total KM','Avg KM / Trip','Flagged','Fuel Added (L)','Fuel Cost (GHS)'].map(h => (
+                      <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 border border-gray-300">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {byMonth.map((r, i) => (
+                    <tr key={i} className={i % 2 === 0 ? '' : 'bg-gray-50'}>
+                      <td className="px-3 py-1.5 font-semibold border border-gray-200 whitespace-nowrap">{r.month}</td>
+                      <td className="px-3 py-1.5 border border-gray-200">{r.trips}</td>
+                      <td className="px-3 py-1.5 font-medium border border-gray-200">{fmtKM(r.total_km)}</td>
+                      <td className="px-3 py-1.5 border border-gray-200">{fmtKM(r.avg_km)}</td>
+                      <td className="px-3 py-1.5 border border-gray-200">
+                        {r.flagged_count > 0 ? <span className="font-semibold text-red-600">{r.flagged_count}</span> : '—'}
+                      </td>
+                      <td className="px-3 py-1.5 border border-gray-200">{fmtL(r.total_fuel_litres)}</td>
+                      <td className="px-3 py-1.5 border border-gray-200">{fmtGHS(r.total_fuel_cost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                {byMonth.length > 1 && (
+                  <tfoot>
+                    <tr className="bg-gray-200 font-bold">
+                      <td className="px-3 py-2 border border-gray-300">Total</td>
+                      <td className="px-3 py-2 border border-gray-300">{byMonth.reduce((s, r) => s + r.trips, 0)}</td>
+                      <td className="px-3 py-2 border border-gray-300">{fmtKM(byMonth.reduce((s, r) => s + parseFloat(r.total_km || 0), 0))}</td>
+                      <td className="px-3 py-2 border border-gray-300">
+                        {fmtKM(byMonth.reduce((s, r) => s + parseFloat(r.total_km || 0), 0) / Math.max(byMonth.reduce((s, r) => s + r.completed_trips, 0), 1))}
+                      </td>
+                      <td className="px-3 py-2 border border-gray-300 text-red-700">{byMonth.reduce((s, r) => s + r.flagged_count, 0) || '—'}</td>
+                      <td className="px-3 py-2 border border-gray-300">{fmtL(byMonth.reduce((s, r) => s + parseFloat(r.total_fuel_litres || 0), 0))}</td>
+                      <td className="px-3 py-2 border border-gray-300">{fmtGHS(byMonth.reduce((s, r) => s + parseFloat(r.total_fuel_cost || 0), 0))}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          )}
 
           {/* By Vehicle */}
           {byVehicle.length > 0 && (
@@ -1418,10 +1465,11 @@ function MileageReportTab() {
     { keepPreviousData: true }
   );
 
-  const summary   = data?.summary   || {};
-  const detail    = data?.detail    || [];
+  const summary   = data?.summary    || {};
+  const detail    = data?.detail     || [];
   const byVehicle = data?.by_vehicle || [];
   const byDriver  = data?.by_driver  || [];
+  const byMonth   = data?.by_month   || [];
 
   function fmtKM(v) { return v != null ? `${parseFloat(v).toFixed(1)} km` : '—'; }
   function fmtL(v)  { return v != null && parseFloat(v) > 0 ? `${parseFloat(v).toFixed(1)} L` : '—'; }
@@ -1485,6 +1533,56 @@ function MileageReportTab() {
             <KPICard label="Fuel Added"      value={fmtL(summary.total_fuel_litres)}                       icon={Fuel}       accent="blue" />
             <KPICard label="Fuel Cost"       value={fmtGHS(summary.total_fuel_cost)}                       icon={BarChart3}  accent="blue" />
           </div>
+
+          {/* Month-on-Month */}
+          {byMonth.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Month-on-Month</h3>
+              <div className="overflow-x-auto rounded-xl border border-gray-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {['Month','Trips','Total KM','Avg KM / Trip','Flagged','Fuel Added','Fuel Cost'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {byMonth.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5 font-semibold text-gray-800 whitespace-nowrap">{r.month}</td>
+                        <td className="px-4 py-2.5 text-gray-700">{r.trips}</td>
+                        <td className="px-4 py-2.5 font-medium text-gray-900">{fmtKM(r.total_km)}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{fmtKM(r.avg_km)}</td>
+                        <td className="px-4 py-2.5">
+                          {r.flagged_count > 0
+                            ? <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded-full">{r.flagged_count}</span>
+                            : <span className="text-xs text-gray-400">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-600">{fmtL(r.total_fuel_litres)}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{fmtGHS(r.total_fuel_cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {byMonth.length > 1 && (
+                    <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                      <tr>
+                        <td className="px-4 py-2.5 font-bold text-gray-800">Total</td>
+                        <td className="px-4 py-2.5 font-bold text-gray-800">{byMonth.reduce((s, r) => s + r.trips, 0)}</td>
+                        <td className="px-4 py-2.5 font-bold text-gray-900">{fmtKM(byMonth.reduce((s, r) => s + parseFloat(r.total_km || 0), 0))}</td>
+                        <td className="px-4 py-2.5 font-bold text-gray-600">
+                          {fmtKM(byMonth.reduce((s, r) => s + parseFloat(r.total_km || 0), 0) / Math.max(byMonth.reduce((s, r) => s + r.completed_trips, 0), 1))}
+                        </td>
+                        <td className="px-4 py-2.5 font-bold text-red-600">{byMonth.reduce((s, r) => s + r.flagged_count, 0) || '—'}</td>
+                        <td className="px-4 py-2.5 font-bold text-gray-600">{fmtL(byMonth.reduce((s, r) => s + parseFloat(r.total_fuel_litres || 0), 0))}</td>
+                        <td className="px-4 py-2.5 font-bold text-gray-600">{fmtGHS(byMonth.reduce((s, r) => s + parseFloat(r.total_fuel_cost || 0), 0))}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* By Vehicle */}
           {byVehicle.length > 0 && (
