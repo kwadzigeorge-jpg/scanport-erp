@@ -7,17 +7,18 @@ import toast from 'react-hot-toast';
 import {
   Truck, Users, Fuel, Wrench, BarChart3, AlertTriangle,
   Plus, X, Pencil, Trash2, CheckCircle, XCircle, Clock, RefreshCw,
-  Shield, Calendar, Activity, TrendingUp, MapPin, Bell,
+  Shield, Calendar, Activity, TrendingUp, MapPin, Bell, Download,
 } from 'lucide-react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TABS = [
-  { key: 'dashboard',    label: 'Dashboard',    icon: BarChart3 },
-  { key: 'vehicles',     label: 'Vehicles',     icon: Truck },
-  { key: 'drivers',      label: 'Drivers',      icon: Users },
-  { key: 'mileage',      label: 'Mileage Log',  icon: Activity },
-  { key: 'fuel',         label: 'Fuel Log',     icon: Fuel },
-  { key: 'maintenance',  label: 'Maintenance',  icon: Wrench },
+  { key: 'dashboard',       label: 'Dashboard',       icon: BarChart3 },
+  { key: 'vehicles',        label: 'Vehicles',        icon: Truck },
+  { key: 'drivers',         label: 'Drivers',         icon: Users },
+  { key: 'mileage',         label: 'Mileage Log',     icon: Activity },
+  { key: 'mileage_report',  label: 'Mileage Report',  icon: TrendingUp },
+  { key: 'fuel',            label: 'Fuel Log',        icon: Fuel },
+  { key: 'maintenance',     label: 'Maintenance',     icon: Wrench },
 ];
 
 const VEHICLE_STATUS = {
@@ -1195,6 +1196,210 @@ function MaintenanceTab() {
   );
 }
 
+// ── Mileage Report Tab ────────────────────────────────────────────────────────
+function MileageReportTab() {
+  const today   = new Date().toISOString().slice(0, 10);
+  const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+
+  const [filters, setFilters] = useState({ from: monthAgo, to: today });
+  const [downloading, setDownloading] = useState(false);
+
+  const { data, isLoading, refetch } = useQuery(
+    ['fleet-mileage-report', filters],
+    () => fleetApi.mileageReport(filters),
+    { keepPreviousData: true }
+  );
+
+  const summary   = data?.summary   || {};
+  const detail    = data?.detail    || [];
+  const byVehicle = data?.by_vehicle || [];
+  const byDriver  = data?.by_driver  || [];
+
+  function fmtKM(v) { return v != null ? `${parseFloat(v).toFixed(1)} km` : '—'; }
+  function fmtL(v)  { return v != null && parseFloat(v) > 0 ? `${parseFloat(v).toFixed(1)} L` : '—'; }
+  function fmtGHS(v){ return v != null && parseFloat(v) > 0 ? `GHS ${parseFloat(v).toFixed(2)}` : '—'; }
+
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      const resp = await fleetApi.downloadMileageReport(filters);
+      const url = URL.createObjectURL(new Blob([resp.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `mileage-report-${filters.from}-${filters.to}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Download failed.');
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Filters */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
+          <input type="date" className={inp} value={filters.from}
+            onChange={e => setFilters(p => ({ ...p, from: e.target.value }))} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
+          <input type="date" className={inp} value={filters.to}
+            onChange={e => setFilters(p => ({ ...p, to: e.target.value }))} />
+        </div>
+        <button onClick={() => refetch()} className="btn-secondary flex items-center gap-1.5 text-sm py-2 px-3">
+          <RefreshCw size={13}/> Refresh
+        </button>
+        <button onClick={handleDownload} disabled={downloading} className="btn-primary flex items-center gap-1.5 text-sm py-2 px-3 ml-auto">
+          <Download size={13}/> {downloading ? 'Downloading…' : 'Export Excel'}
+        </button>
+      </div>
+
+      {isLoading ? <Spinner /> : (
+        <>
+          {/* KPI Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KPICard label="Total Trips"     value={summary.total_trips ?? 0}                                icon={Activity}   accent="blue" />
+            <KPICard label="Total Distance"  value={fmtKM(summary.total_km)}                                icon={TrendingUp} accent="green" />
+            <KPICard label="Flagged Trips"   value={summary.flagged_trips ?? 0}  sub={summary.flagged_trips > 0 ? 'Review needed' : 'All clear'} icon={AlertTriangle} accent={summary.flagged_trips > 0 ? 'red' : 'green'} />
+            <KPICard label="Pending Approval" value={summary.pending_approval ?? 0} icon={Clock}           accent={summary.pending_approval > 0 ? 'amber' : 'green'} />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <KPICard label="Avg per Trip"    value={fmtKM(summary.avg_km)}                                 icon={MapPin}     accent="blue" />
+            <KPICard label="Fuel Added"      value={fmtL(summary.total_fuel_litres)}                       icon={Fuel}       accent="blue" />
+            <KPICard label="Fuel Cost"       value={fmtGHS(summary.total_fuel_cost)}                       icon={BarChart3}  accent="blue" />
+          </div>
+
+          {/* By Vehicle */}
+          {byVehicle.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">By Vehicle</h3>
+              <div className="overflow-x-auto rounded-xl border border-gray-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {['Vehicle Reg.','Make / Model','Trips','Total KM','Avg KM / Trip','Flagged','Fuel Added'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {byVehicle.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5 font-semibold text-gray-800">{r.registration_number}</td>
+                        <td className="px-4 py-2.5 text-gray-600 text-xs">{r.vehicle}</td>
+                        <td className="px-4 py-2.5 text-gray-700">{r.trips}</td>
+                        <td className="px-4 py-2.5 font-medium text-gray-900">{fmtKM(r.total_km)}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{fmtKM(r.avg_km)}</td>
+                        <td className="px-4 py-2.5">
+                          {r.flagged_count > 0
+                            ? <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded-full">{r.flagged_count}</span>
+                            : <span className="text-xs text-gray-400">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-600">{fmtL(r.total_fuel_litres)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* By Driver */}
+          {byDriver.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">By Driver</h3>
+              <div className="overflow-x-auto rounded-xl border border-gray-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {['Driver','Trips','Total KM','Avg KM / Trip','Flagged','Fuel Added'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {byDriver.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5 font-medium text-gray-900">{r.driver_name}</td>
+                        <td className="px-4 py-2.5 text-gray-700">{r.trips}</td>
+                        <td className="px-4 py-2.5 font-medium text-gray-900">{fmtKM(r.total_km)}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{fmtKM(r.avg_km)}</td>
+                        <td className="px-4 py-2.5">
+                          {r.flagged_count > 0
+                            ? <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded-full">{r.flagged_count}</span>
+                            : <span className="text-xs text-gray-400">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-600">{fmtL(r.total_fuel_litres)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Trip Detail */}
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Trip Detail ({detail.length} trips)</h3>
+            {!detail.length ? <EmptyState msg="No trips found for this period." /> : (
+              <div className="overflow-x-auto rounded-xl border border-gray-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {['Date','Vehicle','Driver','Purpose','Route','Distance','Fuel','Status'].map(h => (
+                        <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {detail.map((l, i) => (
+                      <tr key={i} className={clsx(
+                        'hover:bg-gray-50',
+                        l.trip_status === 'open' && 'bg-blue-50/30',
+                        l.is_flagged && 'bg-red-50/30',
+                      )}>
+                        <td className="px-3 py-2.5 text-gray-600 text-xs whitespace-nowrap">{fmtDate(l.trip_date)}</td>
+                        <td className="px-3 py-2.5 font-semibold text-gray-800 text-xs">{l.registration_number}</td>
+                        <td className="px-3 py-2.5 text-gray-700 text-xs">{l.driver_name}</td>
+                        <td className="px-3 py-2.5 text-gray-600 text-xs max-w-[150px] truncate">{l.trip_purpose}</td>
+                        <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">
+                          {l.origin && l.destination ? `${l.origin} → ${l.destination}`
+                            : l.origin ? `From ${l.origin}`
+                            : l.destination ? `To ${l.destination}` : '—'}
+                        </td>
+                        <td className="px-3 py-2.5 font-medium text-gray-900 text-xs whitespace-nowrap">
+                          {l.trip_status === 'open' ? <span className="text-blue-500 italic">on trip…</span> : fmtKM(l.distance_km)}
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-500 text-xs">{l.fuel_added_litres ? `${l.fuel_added_litres}L` : '—'}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex flex-col gap-0.5">
+                            {l.trip_status === 'open'
+                              ? <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" /> In Progress
+                                </span>
+                              : <Badge map={MILEAGE_STATUS} value={l.status}/>}
+                            {l.is_flagged && (
+                              <span className="text-xs text-red-500" title={l.flag_reason}>⚠ {l.flag_reason}</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function FleetPage() {
   const [tab, setTab] = useState('dashboard');
@@ -1228,12 +1433,13 @@ export default function FleetPage() {
       </div>
 
       <div>
-        {tab === 'dashboard'   && <DashboardTab />}
-        {tab === 'vehicles'    && <VehiclesTab />}
-        {tab === 'drivers'     && <DriversTab />}
-        {tab === 'mileage'     && <MileageTab />}
-        {tab === 'fuel'        && <FuelTab />}
-        {tab === 'maintenance' && <MaintenanceTab />}
+        {tab === 'dashboard'      && <DashboardTab />}
+        {tab === 'vehicles'       && <VehiclesTab />}
+        {tab === 'drivers'        && <DriversTab />}
+        {tab === 'mileage'        && <MileageTab />}
+        {tab === 'mileage_report' && <MileageReportTab />}
+        {tab === 'fuel'           && <FuelTab />}
+        {tab === 'maintenance'    && <MaintenanceTab />}
       </div>
     </div>
   );

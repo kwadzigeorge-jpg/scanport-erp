@@ -387,6 +387,8 @@ export const fleetApi = {
   updateMaintenance:  (id, d)   => api.put(`/fleet/maintenance/${id}`, d).then(r => r.data),
   listAlerts:         ()        => api.get('/fleet/alerts').then(r => r.data),
   dismissAlert:       (id)      => api.patch(`/fleet/alerts/${id}/dismiss`).then(r => r.data),
+  mileageReport:      (p)       => api.get('/reports/fleet/mileage', { params: p }).then(r => r.data),
+  downloadMileageReport: (p)    => api.get('/reports/fleet/mileage', { params: { ...p, format: 'xlsx' }, responseType: 'blob' }),
 };
 
 // ─── Service Feedback ─────────────────────────────────────────────────────────

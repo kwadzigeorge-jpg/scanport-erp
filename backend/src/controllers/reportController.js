@@ -55,6 +55,29 @@ const HEADER_MAP = {
   on_time_count:        'On Time',
   date:                 'Date',
   id:                   'ID',
+  // Fleet / mileage
+  trip_date:            'Trip Date',
+  trip_start_time:      'Start Time',
+  trip_end_time:        'End Time',
+  odometer_start:       'Odo Start (km)',
+  odometer_end:         'Odo End (km)',
+  distance_km:          'Distance (km)',
+  trip_purpose:         'Purpose',
+  origin:               'Origin',
+  destination:          'Destination',
+  fuel_added_litres:    'Fuel Added (L)',
+  fuel_cost:            'Fuel Cost (GHS)',
+  is_flagged:           'Flagged',
+  flag_reason:          'Flag Reason',
+  trip_status:          'Trip Status',
+  registration_number:  'Vehicle Reg.',
+  vehicle:              'Vehicle',
+  total_km:             'Total KM',
+  trips:                'Trips',
+  flagged_count:        'Flagged Trips',
+  avg_km:               'Avg KM / Trip',
+  total_fuel_litres:    'Total Fuel (L)',
+  total_fuel_cost:      'Total Fuel Cost (GHS)',
 };
 
 const STATUS_LABELS = {
@@ -810,10 +833,130 @@ async function timestampReport(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Mileage Report ──────────────────────────────────────────────────────────
+async function mileageReport(req, res, next) {
+  try {
+    const { from, to, vehicle_id, driver_id, status, format = 'json' } = req.query;
+    const today = new Date().toISOString().slice(0, 10);
+    const fromDate = from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const toDate   = to   || today;
+
+    const cond = [
+      'ml.trip_date >= $1::date',
+      'ml.trip_date < ($2::date + INTERVAL \'1 day\')',
+    ];
+    const p = [fromDate, toDate];
+
+    if (vehicle_id) { p.push(vehicle_id); cond.push(`ml.vehicle_id = $${p.length}`); }
+    if (driver_id)  { p.push(driver_id);  cond.push(`ml.driver_id  = $${p.length}`); }
+    if (status)     { p.push(status);     cond.push(`ml.status     = $${p.length}`); }
+
+    const where = cond.join(' AND ');
+
+    const [detailRes, summaryRes, byVehicleRes, byDriverRes] = await Promise.all([
+      db.query(`
+        SELECT
+          ml.trip_date,
+          ml.trip_start_time,
+          ml.trip_end_time,
+          ml.trip_status,
+          ml.status,
+          v.registration_number,
+          v.make || ' ' || v.model        AS vehicle,
+          d.full_name                     AS driver_name,
+          ml.trip_purpose,
+          ml.origin,
+          ml.destination,
+          ml.odometer_start,
+          ml.odometer_end,
+          ml.distance_km,
+          ml.fuel_added_litres,
+          ml.fuel_cost,
+          ml.is_flagged,
+          ml.flag_reason,
+          ml.remarks
+        FROM fleet_mileage_logs ml
+        JOIN fleet_vehicles v ON v.id = ml.vehicle_id
+        JOIN fleet_drivers  d ON d.id = ml.driver_id
+        WHERE ${where}
+        ORDER BY ml.trip_date DESC, ml.created_at DESC
+      `, p),
+
+      db.query(`
+        SELECT
+          COUNT(*)::int                                                  AS total_trips,
+          COUNT(*) FILTER (WHERE ml.trip_status = 'completed')::int     AS completed_trips,
+          COUNT(*) FILTER (WHERE ml.trip_status = 'open')::int          AS open_trips,
+          COALESCE(SUM(ml.distance_km) FILTER (WHERE ml.trip_status = 'completed'), 0)::float  AS total_km,
+          COALESCE(AVG(ml.distance_km) FILTER (WHERE ml.trip_status = 'completed'), 0)::float  AS avg_km,
+          COUNT(*) FILTER (WHERE ml.is_flagged = TRUE)::int             AS flagged_trips,
+          COUNT(*) FILTER (WHERE ml.status = 'pending')::int            AS pending_approval,
+          COALESCE(SUM(ml.fuel_added_litres), 0)::float                 AS total_fuel_litres,
+          COALESCE(SUM(ml.fuel_cost), 0)::float                         AS total_fuel_cost
+        FROM fleet_mileage_logs ml
+        JOIN fleet_vehicles v ON v.id = ml.vehicle_id
+        JOIN fleet_drivers  d ON d.id = ml.driver_id
+        WHERE ${where}
+      `, p),
+
+      db.query(`
+        SELECT
+          v.registration_number,
+          v.make || ' ' || v.model                                       AS vehicle,
+          COUNT(*)::int                                                  AS trips,
+          COALESCE(SUM(ml.distance_km) FILTER (WHERE ml.trip_status = 'completed'), 0)::float AS total_km,
+          COALESCE(AVG(ml.distance_km) FILTER (WHERE ml.trip_status = 'completed'), 0)::float AS avg_km,
+          COUNT(*) FILTER (WHERE ml.is_flagged = TRUE)::int             AS flagged_count,
+          COALESCE(SUM(ml.fuel_added_litres), 0)::float                 AS total_fuel_litres
+        FROM fleet_mileage_logs ml
+        JOIN fleet_vehicles v ON v.id = ml.vehicle_id
+        JOIN fleet_drivers  d ON d.id = ml.driver_id
+        WHERE ${where}
+        GROUP BY v.id, v.registration_number, v.make, v.model
+        ORDER BY total_km DESC
+      `, p),
+
+      db.query(`
+        SELECT
+          d.full_name                                                    AS driver_name,
+          COUNT(*)::int                                                  AS trips,
+          COALESCE(SUM(ml.distance_km) FILTER (WHERE ml.trip_status = 'completed'), 0)::float AS total_km,
+          COALESCE(AVG(ml.distance_km) FILTER (WHERE ml.trip_status = 'completed'), 0)::float AS avg_km,
+          COUNT(*) FILTER (WHERE ml.is_flagged = TRUE)::int             AS flagged_count,
+          COALESCE(SUM(ml.fuel_added_litres), 0)::float                 AS total_fuel_litres
+        FROM fleet_mileage_logs ml
+        JOIN fleet_vehicles v ON v.id = ml.vehicle_id
+        JOIN fleet_drivers  d ON d.id = ml.driver_id
+        WHERE ${where}
+        GROUP BY d.id, d.full_name
+        ORDER BY total_km DESC
+      `, p),
+    ]);
+
+    const summary   = summaryRes.rows[0];
+    const detail    = detailRes.rows;
+    const byVehicle = byVehicleRes.rows;
+    const byDriver  = byDriverRes.rows;
+
+    if (format === 'xlsx') {
+      return toXLSX(res, `mileage-report-${fromDate}-${toDate}.xlsx`, [
+        { name: 'Detail',     rows: detail },
+        { name: 'By Vehicle', rows: byVehicle },
+        { name: 'By Driver',  rows: byDriver },
+      ]);
+    }
+    if (format === 'csv') {
+      return toCSV(res, `mileage-report-${fromDate}-${toDate}.csv`, detail);
+    }
+
+    return res.json({ from: fromDate, to: toDate, summary, detail, by_vehicle: byVehicle, by_driver: byDriver });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   dailyReport, dwellTimeReport, agentPerformanceReport, auditTrail,
   exceptionReport, getSystemConfig, updateSystemConfig,
   operationsDashboard, dwellAnalysis, areaPerformance, slaExceptions, exportReport,
   getEmailConfig, updateEmailConfig, testEmail,
-  dwellTrend, timestampReport,
+  dwellTrend, timestampReport, mileageReport,
 };
