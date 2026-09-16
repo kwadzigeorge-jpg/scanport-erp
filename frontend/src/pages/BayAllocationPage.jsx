@@ -214,6 +214,7 @@ function PendingQueue({ onChitReady }) {
 const EMPTY_FORM = {
   truckNumber: '', driverName: '', driverPhone: '',
   agentName: '', agentPhone: '',
+  waybillNumber: '',
   containers: [{ ...EMPTY_CONTAINER }],
   is_reefer: false,
 };
@@ -283,6 +284,7 @@ export default function BayAllocationPage() {
       driverPhone:   form.driverPhone.trim(),
       agentName:     form.agentName.trim(),
       agentPhone:    form.agentPhone.trim(),
+      waybillNumber: form.waybillNumber.trim().toUpperCase() || undefined,
       containers:    form.containers.map(c => ({ number: c.number, size: c.size })),
       is_reefer:     form.is_reefer,
     });
@@ -385,14 +387,22 @@ export default function BayAllocationPage() {
           <h2 className="font-semibold text-sm uppercase tracking-wide text-blue-700 flex items-center gap-2">
             <Truck size={15} /> Truck Details
           </h2>
-          <div>
-            <label className="label">
-              Truck Number {form.is_reefer ? <span className="text-gray-400 font-normal">(optional for reefer)</span> : '*'}
-            </label>
-            <input className="input uppercase font-mono" placeholder="e.g. GR-1234-20"
-              value={form.truckNumber}
-              onChange={e => setForm(f => ({ ...f, truckNumber: e.target.value.toUpperCase() }))}
-              required={!form.is_reefer} />
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">
+                Truck Number {form.is_reefer ? <span className="text-gray-400 font-normal text-xs">(optional for reefer)</span> : '*'}
+              </label>
+              <input className="input uppercase font-mono" placeholder="e.g. GR-1234-20"
+                value={form.truckNumber}
+                onChange={e => setForm(f => ({ ...f, truckNumber: e.target.value.toUpperCase() }))}
+                required={!form.is_reefer} />
+            </div>
+            <div>
+              <label className="label">Waybill Number <span className="text-gray-400 font-normal text-xs">(optional)</span></label>
+              <input className="input uppercase font-mono" placeholder="e.g. WB-20260916-001"
+                value={form.waybillNumber}
+                onChange={e => setForm(f => ({ ...f, waybillNumber: e.target.value.toUpperCase() }))} />
+            </div>
           </div>
         </div>
 
@@ -420,14 +430,9 @@ export default function BayAllocationPage() {
 
         {/* Agent */}
         <div className="card p-5 space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="font-semibold text-sm uppercase tracking-wide text-blue-700 flex items-center gap-2">
-              <User size={15} /> Agent Details
-            </h2>
-            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
-              Max 10 active containers per agent
-            </span>
-          </div>
+          <h2 className="font-semibold text-sm uppercase tracking-wide text-blue-700 flex items-center gap-2">
+            <User size={15} /> Agent Details
+          </h2>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Agent Name *</label>
@@ -451,36 +456,35 @@ export default function BayAllocationPage() {
             <h2 className="font-semibold text-sm uppercase tracking-wide text-blue-700 flex items-center gap-2">
               <Container size={15} /> Containers
             </h2>
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-3 text-xs text-gray-500">
-                <span>Max: 2×20ft &nbsp;|&nbsp; 1×40ft alone</span>
-                {form.containers.length < (form.is_reefer ? 20 : 2) && (
-                  <button type="button"
-                    onClick={() => setForm(f => ({ ...f, containers: [...f.containers, { ...EMPTY_CONTAINER }] }))}
-                    className="flex items-center gap-1 text-blue-600 hover:text-blue-700 font-semibold">
-                    <Plus size={14} /> Add Container
-                  </button>
-                )}
-              </div>
-              {/* Reefer toggle */}
-              <label className={clsx(
-                'flex items-center gap-2 px-4 py-2 rounded-xl border-2 cursor-pointer select-none transition-all text-sm font-semibold',
-                form.is_reefer
-                  ? 'bg-cyan-500 border-cyan-500 text-white shadow-md'
-                  : 'bg-white border-gray-200 text-gray-500 hover:border-cyan-300 hover:text-cyan-600'
-              )}>
-                <input type="checkbox" className="sr-only" checked={form.is_reefer}
-                  onChange={e => setForm(f => ({ ...f, is_reefer: e.target.checked }))} />
-                <Snowflake size={15} />
-                Reefer Container
-              </label>
-            </div>
+            {/* Reefer toggle */}
+            <label className={clsx(
+              'flex items-center gap-2 px-4 py-2 rounded-xl border-2 cursor-pointer select-none transition-all text-sm font-semibold',
+              form.is_reefer
+                ? 'bg-cyan-500 border-cyan-500 text-white shadow-md'
+                : 'bg-white border-gray-200 text-gray-500 hover:border-cyan-300 hover:text-cyan-600'
+            )}>
+              <input type="checkbox" className="sr-only" checked={form.is_reefer}
+                onChange={e => setForm(f => ({ ...f, is_reefer: e.target.checked }))} />
+              <Snowflake size={15} />
+              Reefer Container
+            </label>
           </div>
+
+          {/* Context hint: limits differ for regular vs reefer */}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-xs text-gray-500">
+              {form.is_reefer
+                ? <><span className="font-medium text-cyan-700">Reefer batch</span> — up to 20 containers, any size. Agent limit does not apply.</>
+                : 'Regular: max 2×20ft, or 1×40ft alone. Max 10 active containers per agent.'}
+            </p>
+          </div>
+
           {loadError && (
             <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-lg p-3 border border-red-200">
               <AlertCircle size={15} /> {loadError}
             </div>
           )}
+
           <div className="space-y-3">
             {form.containers.map((c, i) => (
               <ContainerInput key={i} index={i} value={c}
@@ -494,6 +498,15 @@ export default function BayAllocationPage() {
               />
             ))}
           </div>
+
+          {form.containers.length < (form.is_reefer ? 20 : 2) && (
+            <button type="button"
+              onClick={() => setForm(f => ({ ...f, containers: [...f.containers, { ...EMPTY_CONTAINER }] }))}
+              className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-blue-200
+                         text-blue-600 hover:border-blue-400 hover:bg-blue-50 rounded-xl text-sm font-semibold transition-colors">
+              <Plus size={15} /> Add Another Container
+            </button>
+          )}
         </div>
 
         {/* Submit → allocate + print chit */}

@@ -34,6 +34,7 @@ async function createTruckAllocation(req, res, next) {
     const {
       truckNumber, driverName, driverPhone,
       agentName,  agentPhone,
+      waybillNumber,
       containers,           // array: [{ number, size }]
       holdingAreaId, bayId,
       is_reefer = false,    // route to reefer bays when true
@@ -264,15 +265,17 @@ async function createTruckAllocation(req, res, next) {
       const txnId = await generateTxnId(client);
       const { dataUrl: qrDataUrl, token: qrToken } = await generateQRDataURL(txnId, c.number);
 
+      const waybillVal = waybillNumber?.trim().toUpperCase() || null;
       const { rows: [txn] } = await client.query(
         `INSERT INTO container_transactions
-           (transaction_id, container_number, container_size, agent_name, agent_phone,
+           (transaction_id, container_number, container_size, waybill_number,
+            agent_name, agent_phone,
             truck_number, driver_name, driver_phone,
             holding_area_id, bay_id, truck_allocation_id,
             status, bay_assigned_time, qr_code_data, qr_code_token, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'BAY_ASSIGNED',NOW(),$12,$13,$14)
-         RETURNING id, transaction_id, container_number, container_size, status, qr_code_token`,
-        [txnId, c.number, c.size, agentName.trim(), agentPhone.trim(),
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'BAY_ASSIGNED',NOW(),$13,$14,$15)
+         RETURNING id, transaction_id, container_number, container_size, waybill_number, status, qr_code_token`,
+        [txnId, c.number, c.size, waybillVal, agentName.trim(), agentPhone.trim(),
          truckNumberVal, driverNameVal, driverPhoneVal,
          areaId, resolvedBayId, truck.id,
          qrDataUrl, qrToken, req.user.id]
@@ -338,13 +341,14 @@ async function releaseTruck(req, res, next) {
       [timeOut, dwellMins, req.user.id, notes || null, truck.id]
     );
 
-    // Exit all containers under this truck
+    // Exit all non-closed containers under this truck
     await client.query(
       `UPDATE container_transactions
        SET status='EXITED', time_out=$1,
-           dwell_minutes=ROUND(EXTRACT(EPOCH FROM ($1 - COALESCE(time_in, created_at)))/60),
+           dwell_minutes=ROUND(EXTRACT(EPOCH FROM ($1 - COALESCE(bay_entry_time, bay_assigned_time, created_at)))/60),
            confirmed_exit_by=$2
-       WHERE truck_allocation_id=$3 AND status IN ('PENDING','IN_HOLDING_AREA')`,
+       WHERE truck_allocation_id=$3
+         AND status NOT IN ('EXITED','CANCELLED')`,
       [timeOut, req.user.id, truck.id]
     );
 
