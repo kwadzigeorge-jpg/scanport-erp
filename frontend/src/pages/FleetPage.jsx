@@ -1208,9 +1208,10 @@ function MileageReportPrintView({ data, filters, onClose }) {
   const byMonth   = data?.by_month   || [];
   const detail    = data?.detail     || [];
 
-  function fmtKM(v)  { return v != null ? `${parseFloat(v).toFixed(1)} km` : '—'; }
-  function fmtL(v)   { return v != null && parseFloat(v) > 0 ? `${parseFloat(v).toFixed(1)} L` : '—'; }
-  function fmtGHS(v) { return v != null && parseFloat(v) > 0 ? `GHS ${parseFloat(v).toFixed(2)}` : '—'; }
+  function fmtKM(v)   { return v != null ? `${parseFloat(v).toFixed(1)} km` : '—'; }
+  function fmtL(v)    { return v != null && parseFloat(v) > 0 ? `${parseFloat(v).toFixed(1)} L` : '—'; }
+  function fmtGHS(v)  { return v != null && parseFloat(v) > 0 ? `GHS ${parseFloat(v).toFixed(2)}` : '—'; }
+  function fmtTime(v) { return v ? String(v).slice(0, 5) : '—'; }
   function fmtPeriod() {
     try {
       const f = format(parseISO(filters.from), 'dd MMM yyyy');
@@ -1403,7 +1404,7 @@ function MileageReportPrintView({ data, filters, onClose }) {
               <table className="min-w-full border border-gray-300 text-xs">
                 <thead>
                   <tr className="bg-gray-100">
-                    {['Date','Vehicle','Driver','Purpose','Origin → Destination','Distance','Fuel (L)','Fuel Cost','Status'].map(h => (
+                    {['Date','Start','End','Vehicle','Driver','Purpose','Route','Odo Start','Odo End','Distance','Fuel (L)','Fuel Cost','Status'].map(h => (
                       <th key={h} className="px-2 py-2 text-left font-semibold text-gray-600 border border-gray-300">{h}</th>
                     ))}
                   </tr>
@@ -1412,13 +1413,23 @@ function MileageReportPrintView({ data, filters, onClose }) {
                   {detail.map((l, i) => (
                     <tr key={i} className={clsx(i % 2 === 0 ? '' : 'bg-gray-50', l.is_flagged && 'flag-row')}>
                       <td className="px-2 py-1.5 whitespace-nowrap border border-gray-200">{fmtDate(l.trip_date)}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap border border-gray-200 font-mono">{fmtTime(l.trip_start_time)}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap border border-gray-200 font-mono">
+                        {l.trip_status === 'open' ? <em>on trip</em> : fmtTime(l.trip_end_time)}
+                      </td>
                       <td className="px-2 py-1.5 font-semibold border border-gray-200">{l.registration_number}</td>
                       <td className="px-2 py-1.5 border border-gray-200">{l.driver_name}</td>
-                      <td className="px-2 py-1.5 border border-gray-200 max-w-[120px]" style={{maxWidth:'120px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.trip_purpose}</td>
+                      <td className="px-2 py-1.5 border border-gray-200 max-w-[100px]" style={{maxWidth:'100px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.trip_purpose}</td>
                       <td className="px-2 py-1.5 border border-gray-200">
                         {l.origin && l.destination ? `${l.origin} → ${l.destination}`
                           : l.origin ? l.origin
                           : l.destination ? l.destination : '—'}
+                      </td>
+                      <td className="px-2 py-1.5 border border-gray-200 whitespace-nowrap">
+                        {l.odometer_start != null ? `${parseFloat(l.odometer_start).toFixed(0)} km` : '—'}
+                      </td>
+                      <td className="px-2 py-1.5 border border-gray-200 whitespace-nowrap">
+                        {l.trip_status === 'open' ? '—' : (l.odometer_end != null ? `${parseFloat(l.odometer_end).toFixed(0)} km` : '—')}
                       </td>
                       <td className="px-2 py-1.5 font-medium border border-gray-200 whitespace-nowrap">
                         {l.trip_status === 'open' ? <em>In progress</em> : fmtKM(l.distance_km)}
@@ -1471,9 +1482,10 @@ function MileageReportTab() {
   const byDriver  = data?.by_driver  || [];
   const byMonth   = data?.by_month   || [];
 
-  function fmtKM(v) { return v != null ? `${parseFloat(v).toFixed(1)} km` : '—'; }
-  function fmtL(v)  { return v != null && parseFloat(v) > 0 ? `${parseFloat(v).toFixed(1)} L` : '—'; }
-  function fmtGHS(v){ return v != null && parseFloat(v) > 0 ? `GHS ${parseFloat(v).toFixed(2)}` : '—'; }
+  function fmtKM(v)   { return v != null ? `${parseFloat(v).toFixed(1)} km` : '—'; }
+  function fmtL(v)    { return v != null && parseFloat(v) > 0 ? `${parseFloat(v).toFixed(1)} L` : '—'; }
+  function fmtGHS(v)  { return v != null && parseFloat(v) > 0 ? `GHS ${parseFloat(v).toFixed(2)}` : '—'; }
+  function fmtTime(v) { return v ? String(v).slice(0, 5) : '—'; }
 
   async function handleDownload() {
     setDownloading(true);
@@ -1661,7 +1673,7 @@ function MileageReportTab() {
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      {['Date','Vehicle','Driver','Purpose','Route','Distance','Fuel','Status'].map(h => (
+                      {['Date','Start','End','Vehicle','Driver','Purpose','Route','Odo Start','Odo End','Distance','Fuel','Status'].map(h => (
                         <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1674,13 +1686,21 @@ function MileageReportTab() {
                         l.is_flagged && 'bg-red-50/30',
                       )}>
                         <td className="px-3 py-2.5 text-gray-600 text-xs whitespace-nowrap">{fmtDate(l.trip_date)}</td>
+                        <td className="px-3 py-2.5 text-gray-600 text-xs whitespace-nowrap font-mono">{fmtTime(l.trip_start_time)}</td>
+                        <td className="px-3 py-2.5 text-gray-600 text-xs whitespace-nowrap font-mono">
+                          {l.trip_status === 'open' ? <span className="text-blue-400 italic text-xs">on trip</span> : fmtTime(l.trip_end_time)}
+                        </td>
                         <td className="px-3 py-2.5 font-semibold text-gray-800 text-xs">{l.registration_number}</td>
                         <td className="px-3 py-2.5 text-gray-700 text-xs">{l.driver_name}</td>
-                        <td className="px-3 py-2.5 text-gray-600 text-xs max-w-[150px] truncate">{l.trip_purpose}</td>
+                        <td className="px-3 py-2.5 text-gray-600 text-xs max-w-[130px] truncate">{l.trip_purpose}</td>
                         <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">
                           {l.origin && l.destination ? `${l.origin} → ${l.destination}`
                             : l.origin ? `From ${l.origin}`
                             : l.destination ? `To ${l.destination}` : '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-600 text-xs whitespace-nowrap">{l.odometer_start != null ? `${parseFloat(l.odometer_start).toFixed(0)} km` : '—'}</td>
+                        <td className="px-3 py-2.5 text-gray-600 text-xs whitespace-nowrap">
+                          {l.trip_status === 'open' ? '—' : (l.odometer_end != null ? `${parseFloat(l.odometer_end).toFixed(0)} km` : '—')}
                         </td>
                         <td className="px-3 py-2.5 font-medium text-gray-900 text-xs whitespace-nowrap">
                           {l.trip_status === 'open' ? <span className="text-blue-500 italic">on trip…</span> : fmtKM(l.distance_km)}
