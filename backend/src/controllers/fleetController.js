@@ -493,22 +493,20 @@ async function updateMileageLog(req, res, next) {
         trip_end_time     = COALESCE($3, trip_end_time),
         odometer_start    = $4,
         odometer_end      = $5,
-        distance_km       = $6,
-        trip_purpose      = COALESCE($7, trip_purpose),
-        origin            = COALESCE($8, origin),
-        destination       = COALESCE($9, destination),
-        fuel_added_litres = $10,
-        fuel_cost         = $11,
-        remarks           = $12,
-        is_flagged        = $13,
-        flag_reason       = $14,
+        trip_purpose      = COALESCE($6, trip_purpose),
+        origin            = COALESCE($7, origin),
+        destination       = COALESCE($8, destination),
+        fuel_added_litres = $9,
+        fuel_cost         = $10,
+        remarks           = $11,
+        is_flagged        = $12,
+        flag_reason       = $13,
         updated_at        = NOW()
-      WHERE id = $15
+      WHERE id = $14
       RETURNING *
     `, [
       trip_date || null, trip_start_time || null, trip_end_time || null,
       oStart, oEnd,
-      dist,
       trip_purpose || null, origin || null, destination || null,
       fuel_added_litres != null ? parseFloat(fuel_added_litres) : existing.fuel_added_litres,
       fuel_cost != null ? parseFloat(fuel_cost) : existing.fuel_cost,
